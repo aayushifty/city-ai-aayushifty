@@ -29,6 +29,7 @@ interface CitySceneProps {
   playerState: PlayerState;
   onUpdatePlayer: (update: Partial<PlayerState>) => void;
   onInteractWithAgent: (agentId: string) => void;
+  onDirectWorkCommand: (agentId: string) => void;
   onOpenPublicMissions: () => void;
   onSelectEntity: (type: 'BUILDING' | 'VEHICLE' | 'AGENT', id: string) => void;
 }
@@ -49,6 +50,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
   playerState,
   onUpdatePlayer,
   onInteractWithAgent,
+  onDirectWorkCommand,
   onOpenPublicMissions,
   onSelectEntity
 }) => {
@@ -407,11 +409,18 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
       }
 
-      // 'E' Key: Interact with nearby citizen
+      // 'E' Key: Interact with nearby citizen (open 2-way comms)
       if (k === 'e') {
         if (playerState.nearbyAgentId) {
           if (document.pointerLockElement) document.exitPointerLock();
           onInteractWithAgent(playerState.nearbyAgentId);
+        }
+      }
+
+      // 'F' Key: Direct Work Command (Make citizen work immediately)
+      if (k === 'f') {
+        if (playerState.nearbyAgentId) {
+          onDirectWorkCommand(playerState.nearbyAgentId);
         }
       }
 
@@ -620,6 +629,18 @@ export const CityScene: React.FC<CitySceneProps> = ({
         core.position.set(0, 1.05, 0.32);
         aGroup.add(core);
 
+        // Glowing Base Status Ring
+        const ringGeo = new THREE.RingGeometry(0.55, 0.72, 24);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: ag.status === 'WORKING' ? 0xF59E0B : 0x10B981,
+          side: THREE.DoubleSide
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.04;
+        aGroup.add(ring);
+        (aGroup as any)._statusRing = ring;
+
         // Cyber Helmet & Glowing Visor
         const head = new THREE.Mesh(
           new THREE.SphereGeometry(0.24, 12, 12),
@@ -636,39 +657,44 @@ export const CityScene: React.FC<CitySceneProps> = ({
         visor.position.set(0, 1.7, 0.2);
         aGroup.add(visor);
 
-        // Overhead Holographic Nameplate with Profession
+        // Overhead Holographic Nameplate with Actions [E] Talk & [F] Work
         const tagCanvas = document.createElement('canvas');
-        tagCanvas.width = 384; tagCanvas.height = 80;
+        tagCanvas.width = 440; tagCanvas.height = 100;
         const tCtx = tagCanvas.getContext('2d')!;
         tCtx.fillStyle = '#060B18CC';
-        tCtx.fillRect(4, 4, 376, 72);
+        tCtx.fillRect(4, 4, 432, 92);
         tCtx.lineWidth = 3;
         tCtx.strokeStyle = ag.color;
-        tCtx.strokeRect(4, 4, 376, 72);
+        tCtx.strokeRect(4, 4, 432, 92);
 
         tCtx.fillStyle = '#FFFFFF';
-        tCtx.font = 'bold 22px monospace';
+        tCtx.font = 'bold 24px monospace';
         tCtx.textAlign = 'center';
-        tCtx.fillText(ag.name, 192, 32);
+        tCtx.fillText(ag.name, 220, 32);
 
         tCtx.fillStyle = ag.color;
-        tCtx.font = 'bold 15px monospace';
-        tCtx.fillText(ag.profession.slice(0, 28), 192, 58);
+        tCtx.font = 'bold 16px monospace';
+        tCtx.fillText(ag.profession.slice(0, 30), 220, 58);
+
+        tCtx.fillStyle = '#F59E0B';
+        tCtx.font = 'bold 14px monospace';
+        tCtx.fillText(`[E] Talk  •  [F] Work  •  ${ag.status}`, 220, 84);
 
         const tagTex = new THREE.CanvasTexture(tagCanvas);
         const tagMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(2.0, 0.55),
+          new THREE.PlaneGeometry(2.3, 0.65),
           new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, side: THREE.DoubleSide })
         );
-        tagMesh.position.y = 2.35;
+        tagMesh.position.y = 2.45;
         aGroup.add(tagMesh);
+        (aGroup as any)._tagMesh = tagMesh;
 
         // Thought Bubble
         const bubbleMesh = new THREE.Mesh(
           new THREE.PlaneGeometry(3.6, 0.95),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide })
         );
-        bubbleMesh.position.y = 3.15;
+        bubbleMesh.position.y = 3.25;
         aGroup.add(bubbleMesh);
         agentThoughtMeshMap.current.set(ag.id, bubbleMesh);
 
@@ -678,7 +704,20 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       // Position and heading
       aGroup.position.set(ag.x, 0.05, ag.z);
-      aGroup.rotation.y = -ag.angle;
+      
+      // If player is close, face the player! Otherwise use agent trajectory heading
+      const distToPlayer = Math.hypot(playerState.x - ag.x, playerState.z - ag.z);
+      if (distToPlayer <= 4.2) {
+        aGroup.rotation.y = Math.atan2(playerState.x - ag.x, playerState.z - ag.z);
+      } else {
+        aGroup.rotation.y = -ag.angle;
+      }
+
+      // Update ring color based on status
+      const ring = (aGroup as any)._statusRing;
+      if (ring) {
+        ring.material.color.setHex(ag.status === 'WORKING' ? 0xF59E0B : 0x10B981);
+      }
 
       // Update Thought Bubble
       const bMesh = agentThoughtMeshMap.current.get(ag.id);
@@ -694,7 +733,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
       }
     });
-  }, [agentCharacters]);
+  }, [agentCharacters, playerState.x, playerState.z]);
 
   // --- Dynamic Vehicles ---
   useEffect(() => {

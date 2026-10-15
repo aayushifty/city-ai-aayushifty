@@ -106,6 +106,30 @@ export const CitySimulationView: React.FC = () => {
     setShowPublicMissionsModal(false);
   }, []);
 
+  // Direct Work Command ([F] Key or Interface Button)
+  const [workToast, setWorkToast] = useState<string | null>(null);
+
+  const handleDirectWorkCommand = useCallback((agentId: string) => {
+    const engine = engineRef.current;
+    const res = engine.directWorkCommand(agentId);
+    setAgentCharacters([...engine.agentCharacters]);
+    
+    // Show toast notification
+    setWorkToast(res.message);
+    setTimeout(() => {
+      setWorkToast(prev => prev === res.message ? null : prev);
+    }, 4500);
+
+    return res;
+  }, []);
+
+  // 2-Way Chat Message Dispatch
+  const handleSendChatMessage = useCallback((agentId: string, message: string) => {
+    const engine = engineRef.current;
+    engine.interactWithAgent(agentId, message);
+    setAgentCharacters([...engine.agentCharacters]);
+  }, []);
+
   // Assign direct task to selected agent
   const handleAssignIndividualTask = useCallback((
     agentId: string, 
@@ -137,6 +161,14 @@ export const CitySimulationView: React.FC = () => {
 
   return (
     <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden bg-[#06080E]">
+      {/* Floating Work Order Notification Toast */}
+      {workToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#070D1A]/95 border-2 border-amber-500 text-amber-200 px-6 py-3 rounded-2xl shadow-2xl text-xs font-mono font-bold flex items-center gap-3 animate-bounce">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+          <span>{workToast}</span>
+        </div>
+      )}
+
       {/* 3D WebGL Three.js First-Person Explorable City */}
       <CityScene
         buildings={engineRef.current.buildings}
@@ -154,6 +186,7 @@ export const CitySimulationView: React.FC = () => {
         playerState={playerState}
         onUpdatePlayer={handleUpdatePlayer}
         onInteractWithAgent={handleInteractWithAgent}
+        onDirectWorkCommand={handleDirectWorkCommand}
         onOpenPublicMissions={handleOpenPublicMissions}
         onSelectEntity={(_type, id) => setInteractingAgentId(id)}
       />
@@ -175,6 +208,8 @@ export const CitySimulationView: React.FC = () => {
         onOpenPublicMissions={handleOpenPublicMissions}
         onClosePublicMissions={handleClosePublicMissions}
         onAssignIndividualTask={handleAssignIndividualTask}
+        onDirectWorkCommand={handleDirectWorkCommand}
+        onSendChatMessage={handleSendChatMessage}
         onPublishPublicMission={handlePublishPublicMission}
         onRequestAgentStatus={handleRequestAgentStatus}
       />

@@ -20,7 +20,9 @@ import {
   Moon,
   MessageSquare,
   History,
-  Briefcase
+  Briefcase,
+  Zap,
+  Sparkle
 } from 'lucide-react';
 import { 
   CityMetrics, 
@@ -29,7 +31,8 @@ import {
   AgentCharacter,
   AgentTask,
   PublicMission,
-  PlayerState 
+  PlayerState,
+  AgentChatMessage
 } from '../../simulation/types';
 
 interface CityHUDProps {
@@ -48,6 +51,8 @@ interface CityHUDProps {
   onOpenPublicMissions: () => void;
   onClosePublicMissions: () => void;
   onAssignIndividualTask: (agentId: string, task: { title: string; description: string; expectedDeliverable: string; priority: AgentTask['priority'] }) => void;
+  onDirectWorkCommand: (agentId: string) => void;
+  onSendChatMessage: (agentId: string, message: string) => void;
   onPublishPublicMission: (mission: { title: string; description: string; category: PublicMission['category'] }) => void;
   onRequestAgentStatus: (agentId: string) => string;
 }
@@ -68,6 +73,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   onOpenPublicMissions,
   onClosePublicMissions,
   onAssignIndividualTask,
+  onDirectWorkCommand,
+  onSendChatMessage,
   onPublishPublicMission,
   onRequestAgentStatus
 }) => {
@@ -76,8 +83,11 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   const [taskDesc, setTaskDesc] = useState('');
   const [taskDeliverable, setTaskDeliverable] = useState('');
   const [taskPriority, setTaskPriority] = useState<AgentTask['priority']>('HIGH');
-  const [agentDialogResponse, setAgentDialogResponse] = useState<string | null>(null);
-  const [activeAgentTab, setActiveAgentTab] = useState<'PROFILE' | 'ASSIGN' | 'HISTORY'>('ASSIGN');
+  const [activeAgentTab, setActiveAgentTab] = useState<'PROFILE' | 'ASSIGN' | 'HISTORY'>('PROFILE');
+
+  // 2-Way chat input state
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
 
   // Public mission form state
   const [missionTitle, setMissionTitle] = useState('');
@@ -85,6 +95,28 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   const [missionCategory, setMissionCategory] = useState<PublicMission['category']>('SOFTWARE');
 
   const nearbyAgent = agentCharacters.find(a => a.id === playerState.nearbyAgentId);
+
+  // Auto-scroll chat to bottom
+  React.useEffect(() => {
+    if (activeAgentTab === 'PROFILE') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [interactingAgent?.chatHistory, activeAgentTab]);
+
+  // Keyboard shortcut [F] inside modal to trigger work command
+  React.useEffect(() => {
+    const onModalKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'f' && interactingAgent) {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          onDirectWorkCommand(interactingAgent.id);
+        }
+      }
+    };
+    window.addEventListener('keydown', onModalKey);
+    return () => window.removeEventListener('keydown', onModalKey);
+  }, [interactingAgent, onDirectWorkCommand]);
 
   // Time format
   const hours = Math.floor(simulationTime);
@@ -111,6 +143,20 @@ export const CityHUD: React.FC<CityHUDProps> = ({
     onCloseAgentInteraction();
   };
 
+  // Handle 2-Way chat submit
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!interactingAgent || !chatInput.trim()) return;
+    onSendChatMessage(interactingAgent.id, chatInput.trim());
+    setChatInput('');
+  };
+
+  // Handle quick prompt send
+  const handleSendQuickPrompt = (promptText: string) => {
+    if (!interactingAgent) return;
+    onSendChatMessage(interactingAgent.id, promptText);
+  };
+
   // Handle publish public mission
   const handlePublishMission = (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,18 +170,6 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
     setMissionTitle('');
     setMissionDesc('');
-  };
-
-  const handleTalkInquire = (questionType: string) => {
-    if (!interactingAgent) return;
-    if (questionType === 'STATUS') {
-      const resp = interactingAgent.activeTask 
-        ? `I am currently executing "${interactingAgent.activeTask.title}" (${interactingAgent.workProgress.toFixed(0)}% complete). Expecting deliverable: ${interactingAgent.activeTask.expectedDeliverable}.`
-        : `Standing by in ${interactingAgent.department}. No active blockers. Ready for new mission directives.`;
-      setAgentDialogResponse(resp);
-    } else if (questionType === 'SKILLS') {
-      setAgentDialogResponse(`My core competencies include: ${interactingAgent.skills.join(', ')}. Active toolchain: ${interactingAgent.toolsInUse.join(', ')}.`);
-    }
   };
 
   return (
@@ -215,13 +249,24 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
         {/* Proximity Interaction Prompt when approaching an agent */}
         {nearbyAgent && !interactingAgent && (
-          <div className="mt-8 bg-[#090D18]/95 backdrop-blur border border-emerald-500/50 rounded-xl px-5 py-2.5 shadow-2xl flex items-center gap-3 text-xs text-slate-100 animate-bounce">
-            <span className="w-5 h-5 rounded-md bg-emerald-500 text-black font-bold flex items-center justify-center text-[11px]">
-              E
-            </span>
-            <span>
-              Interact with <strong className="text-emerald-400">{nearbyAgent.name}</strong> ({nearbyAgent.profession})
-            </span>
+          <div className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/60 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 animate-bounce border-2">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-lg bg-emerald-500 text-black font-black flex items-center justify-center text-xs shadow-md">
+                E
+              </span>
+              <span>
+                <strong>2-Way Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong> ({nearbyAgent.profession})
+              </span>
+            </div>
+            <div className="h-5 w-px bg-slate-700" />
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-lg bg-amber-400 text-black font-black flex items-center justify-center text-xs shadow-md">
+                F
+              </span>
+              <span className="text-amber-300 font-bold">
+                Make Them Work ([F] Direct Work Order)
+              </span>
+            </div>
           </div>
         )}
 
@@ -235,13 +280,13 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
       {/* 3. PROXIMITY AGENT INTERACTION PANEL (When pressing E) */}
       {interactingAgent && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center pointer-events-auto p-4">
-          <div className="bg-[#090E1A] border border-blue-500/50 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden text-xs">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-md z-50 flex items-center justify-center pointer-events-auto p-4">
+          <div className="bg-[#090E1A] border border-blue-500/50 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden text-xs flex flex-col max-h-[88vh]">
             {/* Header */}
             <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#060A13]">
               <div className="flex items-center gap-3">
                 <div 
-                  className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white text-base shadow-lg"
+                  className="w-11 h-11 rounded-xl flex items-center justify-center font-bold text-white text-lg shadow-lg border border-white/20"
                   style={{ backgroundColor: interactingAgent.color }}
                 >
                   {interactingAgent.name.charAt(0)}
@@ -249,63 +294,186 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                 <div>
                   <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
                     <span>{interactingAgent.name}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40">
-                      {interactingAgent.availability}
+                    <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold ${
+                      interactingAgent.status === 'WORKING' 
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    }`}>
+                      {interactingAgent.status} ({interactingAgent.workProgress.toFixed(0)}%)
                     </span>
                   </h2>
-                  <div className="text-[11px] text-slate-400">{interactingAgent.profession}</div>
+                  <div className="text-[11px] text-slate-400">{interactingAgent.profession} • {interactingAgent.department}</div>
                 </div>
               </div>
 
-              <button 
-                onClick={onCloseAgentInteraction}
-                className="text-slate-500 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition"
-              >
-                <X size={18} />
-              </button>
+              {/* Action Buttons: [F] Make Them Work & Close */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => onDirectWorkCommand(interactingAgent.id)}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl shadow-lg flex items-center gap-1.5 transition text-xs active:scale-95 cursor-pointer"
+                  title="Command this citizen to work immediately (Shortcut: F)"
+                >
+                  <Zap size={14} className="fill-current" />
+                  <span>[F] MAKE THEM WORK</span>
+                </button>
+
+                <button 
+                  onClick={onCloseAgentInteraction}
+                  className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition"
+                  title="Close (Esc)"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Interaction Tabs */}
             <div className="flex border-b border-slate-800 bg-[#070C16] text-[11px]">
               <button
-                onClick={() => setActiveAgentTab('ASSIGN')}
-                className={`flex-1 py-2.5 font-bold transition flex items-center justify-center gap-1.5 ${activeAgentTab === 'ASSIGN' ? 'text-blue-400 border-b-2 border-blue-500 bg-blue-950/20' : 'text-slate-400 hover:text-white'}`}
-              >
-                <Briefcase size={13} />
-                <span>Assign Direct Task</span>
-              </button>
-              <button
                 onClick={() => setActiveAgentTab('PROFILE')}
                 className={`flex-1 py-2.5 font-bold transition flex items-center justify-center gap-1.5 ${activeAgentTab === 'PROFILE' ? 'text-blue-400 border-b-2 border-blue-500 bg-blue-950/20' : 'text-slate-400 hover:text-white'}`}
               >
-                <MessageSquare size={13} />
-                <span>Talk & Inquire</span>
+                <MessageSquare size={14} />
+                <span>2-Way Live Comms</span>
+              </button>
+              <button
+                onClick={() => setActiveAgentTab('ASSIGN')}
+                className={`flex-1 py-2.5 font-bold transition flex items-center justify-center gap-1.5 ${activeAgentTab === 'ASSIGN' ? 'text-blue-400 border-b-2 border-blue-500 bg-blue-950/20' : 'text-slate-400 hover:text-white'}`}
+              >
+                <Briefcase size={14} />
+                <span>Custom Task Specification</span>
               </button>
               <button
                 onClick={() => setActiveAgentTab('HISTORY')}
                 className={`flex-1 py-2.5 font-bold transition flex items-center justify-center gap-1.5 ${activeAgentTab === 'HISTORY' ? 'text-blue-400 border-b-2 border-blue-500 bg-blue-950/20' : 'text-slate-400 hover:text-white'}`}
               >
-                <History size={13} />
-                <span>Task History ({interactingAgent.taskHistory.length})</span>
+                <History size={14} />
+                <span>Task History & Deliverables ({interactingAgent.taskHistory.length})</span>
               </button>
             </div>
 
-            {/* Tab 1: Assign Direct Task */}
-            {activeAgentTab === 'ASSIGN' && (
-              <form onSubmit={handleAssignTask} className="p-5 space-y-4">
-                {interactingAgent.activeTask && (
-                  <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-400 font-bold">Currently Executing:</span>
-                      <span className="text-emerald-400 font-bold">{interactingAgent.workProgress.toFixed(0)}%</span>
+            {/* Tab 1: 2-Way Live Comms & Dialogue */}
+            {activeAgentTab === 'PROFILE' && (
+              <div className="p-4 space-y-3 flex-1 flex flex-col overflow-hidden">
+                {/* Active Task Indicator */}
+                {interactingAgent.activeTask ? (
+                  <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between shadow-inner">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                      <div>
+                        <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Active Task in Progress:</span>
+                        <div className="text-slate-100 font-bold text-xs">{interactingAgent.activeTask.title}</div>
+                      </div>
                     </div>
-                    <div className="text-slate-200 font-bold">{interactingAgent.activeTask.title}</div>
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-emerald-400 h-full" style={{ width: `${interactingAgent.workProgress}%` }} />
+                    <div className="text-right">
+                      <span className="text-emerald-400 font-extrabold text-xs">{interactingAgent.workProgress.toFixed(0)}%</span>
+                      <div className="text-[10px] text-slate-400">{interactingAgent.activeTask.expectedDeliverable}</div>
                     </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-2.5 flex items-center justify-between text-[11px] text-emerald-300">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span>Citizen is available on standby. Press <strong>[F]</strong> to order them to work immediately!</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onDirectWorkCommand(interactingAgent.id)}
+                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg text-[10px] transition"
+                    >
+                      + Start Work Order
+                    </button>
                   </div>
                 )}
 
+                {/* Live 2-Way Chat Message Stream */}
+                <div className="flex-1 min-h-[200px] max-h-[300px] overflow-y-auto space-y-2.5 p-3.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                  {(interactingAgent.chatHistory && interactingAgent.chatHistory.length > 0) ? (
+                    interactingAgent.chatHistory.map(msg => (
+                      <div 
+                        key={msg.id} 
+                        className={`flex flex-col ${msg.sender === 'PLAYER' ? 'items-end' : 'items-start'}`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1 text-[10px] text-slate-500">
+                          <span className="font-bold text-slate-400">{msg.senderName}</span>
+                          <span>•</span>
+                          <span>{msg.timestamp}</span>
+                        </div>
+                        <div className={`p-3 rounded-2xl max-w-[85%] leading-relaxed ${
+                          msg.sender === 'PLAYER' 
+                            ? 'bg-blue-600 text-white rounded-tr-none shadow-md shadow-blue-600/20' 
+                            : 'bg-slate-900 border border-slate-700/70 text-slate-200 rounded-tl-none shadow-md'
+                        }`}>
+                          {msg.text}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-slate-500">
+                      Channel open. Type any instruction or question to converse with {interactingAgent.name}.
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Quick Directive Chips */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('What is your current objective and deliverable?')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] text-slate-300 transition"
+                  >
+                    💬 "Current objective?"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('What are your core technical skills and toolchain?')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] text-slate-300 transition"
+                  >
+                    🛠️ "Skills & tools?"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDirectWorkCommand(interactingAgent.id)}
+                    className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-600/50 rounded-lg text-[10px] text-amber-300 font-bold flex items-center gap-1 transition"
+                  >
+                    <Zap size={11} className="fill-current" />
+                    ⚡ "Make them work now [F]"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Pause current work and enter standby state')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] text-rose-300 transition"
+                  >
+                    🛑 "Pause work"
+                  </button>
+                </div>
+
+                {/* 2-Way Text Input Bar */}
+                <form onSubmit={handleSendChat} className="flex gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder={`Speak to ${interactingAgent.name} (Press Enter)...`}
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim()}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-blue-500/20"
+                  >
+                    <Send size={13} />
+                    <span>Send</span>
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* Tab 2: Custom Task Specification */}
+            {activeAgentTab === 'ASSIGN' && (
+              <form onSubmit={handleAssignTask} className="p-5 space-y-4 overflow-y-auto">
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-400 uppercase font-bold">Task Title:</label>
                   <input
@@ -383,50 +551,6 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                   </button>
                 </div>
               </form>
-            )}
-
-            {/* Tab 2: Talk & Inquire */}
-            {activeAgentTab === 'PROFILE' && (
-              <div className="p-5 space-y-4">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleTalkInquire('STATUS')}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 text-slate-200 text-xs"
-                  >
-                    "What are you working on?"
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleTalkInquire('SKILLS')}
-                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 text-slate-200 text-xs"
-                  >
-                    "What are your core skills?"
-                  </button>
-                </div>
-
-                {agentDialogResponse && (
-                  <div className="bg-blue-950/40 border border-blue-500/40 rounded-xl p-3.5 text-blue-200 text-xs leading-relaxed">
-                    <strong className="text-blue-400 font-bold block mb-1">{interactingAgent.name}:</strong>
-                    &gt; {agentDialogResponse}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-3 text-[11px] pt-2">
-                  <div>
-                    <div className="text-slate-500 uppercase text-[10px] font-bold">Skills:</div>
-                    <div className="text-slate-300 mt-1 space-y-0.5">
-                      {interactingAgent.skills.map(s => <div key={s}>• {s}</div>)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-slate-500 uppercase text-[10px] font-bold">Tools In Use:</div>
-                    <div className="text-slate-300 mt-1 space-y-0.5">
-                      {interactingAgent.toolsInUse.map(t => <div key={t}>• {t}</div>)}
-                    </div>
-                  </div>
-                </div>
-              </div>
             )}
 
             {/* Tab 3: Task History */}

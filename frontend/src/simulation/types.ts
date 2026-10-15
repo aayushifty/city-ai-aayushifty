@@ -123,6 +123,15 @@ export interface AgentCharacter {
   toolsInUse: string[];
   collaboratorIds: string[];
   isFPVActive?: boolean;
+  chatHistory?: AgentChatMessage[];
+}
+
+export interface AgentChatMessage {
+  id: string;
+  sender: 'PLAYER' | 'AGENT';
+  senderName: string;
+  text: string;
+  timestamp: string;
 }
 
 export interface PlayerState {

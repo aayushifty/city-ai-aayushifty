@@ -15,7 +15,8 @@ import {
   AgentTask,
   PublicMission,
   PlayerState,
-  AgentRoleType
+  AgentRoleType,
+  AgentChatMessage
 } from './types';
 
 export class CitySimulationEngine {
@@ -557,10 +558,10 @@ export class CitySimulationEngine {
         profession: 'Chief Systems Architect & Orchestrator',
         department: 'Executive Master Orchestration (Citadel Spire)',
         color: '#38BDF8',
-        x: 0,
-        z: -22,
-        targetX: 0,
-        targetZ: -2,
+        x: 2.2,
+        z: 8.5,
+        targetX: 2.2,
+        targetZ: 8.5,
         speed: 3.5,
         angle: 0,
         homeBuildingId: 'bld-citadel',
@@ -580,7 +581,16 @@ export class CitySimulationEngine {
         level: 10,
         skills: ['Task Decomposition', 'DAG Scheduling', 'Resource Allocation', 'Deadlock Resolution'],
         toolsInUse: ['ProcessRunner', 'TaskStateMachine', 'EventDispatcher'],
-        collaboratorIds: ['agent-architect', 'agent-analyst']
+        collaboratorIds: ['agent-architect', 'agent-analyst'],
+        chatHistory: [
+          {
+            id: 'init-coord',
+            sender: 'AGENT',
+            senderName: 'Alex Vance',
+            text: 'Greetings Commander! Alex Vance, Chief Architect, at your service. All autonomous workflows in the metropolis are operational. Press [F] to issue an immediate work order or ask me anything!',
+            timestamp: '09:00 AM'
+          }
+        ]
       },
       {
         id: 'agent-analyst',
@@ -590,12 +600,12 @@ export class CitySimulationEngine {
         profession: 'Requirements Engineer & Product Analyst',
         department: 'Requirements & PRD Lab (Vision Lab)',
         color: '#C084FC',
-        x: 22,
-        z: 0,
-        targetX: 2,
-        targetZ: 0,
+        x: -2.4,
+        z: 7.8,
+        targetX: -2.4,
+        targetZ: 7.8,
         speed: 3.2,
-        angle: Math.PI / 2,
+        angle: Math.PI / 4,
         homeBuildingId: 'bld-vision-lab',
         currentBuildingId: 'bld-vision-lab',
         currentTask: 'Synthesizing verifiable acceptance criteria and user specifications',
@@ -613,7 +623,16 @@ export class CitySimulationEngine {
         level: 9,
         skills: ['PRD Formulation', 'Contract Verification', 'User Stories', 'Acceptance Testing'],
         toolsInUse: ['SpecSynthesizer', 'AcceptanceCriteriaGenerator'],
-        collaboratorIds: ['agent-coordinator', 'agent-architect']
+        collaboratorIds: ['agent-coordinator', 'agent-architect'],
+        chatHistory: [
+          {
+            id: 'init-analyst',
+            sender: 'AGENT',
+            senderName: 'Dr. Maya Lin',
+            text: 'Hello Commander. Dr. Maya Lin here. I translate your high-level vision into verifiable PRDs, edge-case specs, and acceptance contracts.',
+            timestamp: '09:05 AM'
+          }
+        ]
       },
       {
         id: 'agent-architect',
@@ -623,10 +642,10 @@ export class CitySimulationEngine {
         profession: 'Domain Architect & Civil Modeler',
         department: 'System Architecture (Blueprint Complex)',
         color: '#3B82F6',
-        x: 22,
-        z: -22,
-        targetX: 22,
-        targetZ: -22,
+        x: 3.5,
+        z: 13.5,
+        targetX: 3.5,
+        targetZ: 13.5,
         speed: 3.4,
         angle: -Math.PI / 4,
         homeBuildingId: 'bld-blueprint',
@@ -646,7 +665,16 @@ export class CitySimulationEngine {
         level: 10,
         skills: ['Clean Architecture', 'Type Hints', 'Schema Normalization', 'Structural Engineering'],
         toolsInUse: ['SchemaArchitect', 'InterfaceContractValidator'],
-        collaboratorIds: ['agent-engineer', 'agent-analyst']
+        collaboratorIds: ['agent-engineer', 'agent-analyst'],
+        chatHistory: [
+          {
+            id: 'init-arch',
+            sender: 'AGENT',
+            senderName: 'Marcus Vance',
+            text: 'Marcus Vance ready for structural modeling. Whether civil construction or backend system boundaries, I ensure clean separation of concerns.',
+            timestamp: '09:10 AM'
+          }
+        ]
       },
       {
         id: 'agent-engineer',
@@ -656,10 +684,10 @@ export class CitySimulationEngine {
         profession: 'Full-Stack Software Engineer',
         department: 'Source Code Fabrication (Foundry)',
         color: '#F59E0B',
-        x: -22,
-        z: 22,
-        targetX: -22,
-        targetZ: 22,
+        x: -3.2,
+        z: 12.8,
+        targetX: -3.2,
+        targetZ: 12.8,
         speed: 3.6,
         angle: Math.PI * 0.75,
         homeBuildingId: 'bld-foundry',
@@ -679,7 +707,16 @@ export class CitySimulationEngine {
         level: 9,
         skills: ['Python 3.13 / FastAPI', 'TypeScript / React', 'AsyncIO Concurrency', 'SQLAlchemy / SQLite'],
         toolsInUse: ['CodeFabricator', 'ASTRefactoringEngine'],
-        collaboratorIds: ['agent-architect', 'agent-qa']
+        collaboratorIds: ['agent-architect', 'agent-qa'],
+        chatHistory: [
+          {
+            id: 'init-eng',
+            sender: 'AGENT',
+            senderName: 'Devon Cross',
+            text: 'Devon Cross on standby! My compilers and editors are warm. Press [F] to make me start writing production code or controllers right now.',
+            timestamp: '09:15 AM'
+          }
+        ]
       },
       {
         id: 'agent-qa',
@@ -689,10 +726,10 @@ export class CitySimulationEngine {
         profession: 'Automated Test Engineer & Verifier',
         department: 'Quality Assurance & Automated Verification (QA Bastion)',
         color: '#10B981',
-        x: -22,
-        z: -22,
-        targetX: -22,
-        targetZ: -22,
+        x: -1.5,
+        z: 16.5,
+        targetX: -1.5,
+        targetZ: 16.5,
         speed: 3.3,
         angle: -Math.PI * 0.75,
         homeBuildingId: 'bld-qa-bastion',
@@ -712,7 +749,16 @@ export class CitySimulationEngine {
         level: 10,
         skills: ['Pytest Automation', 'Coverage Profiling', 'Mutation Testing', 'Regression Verification'],
         toolsInUse: ['PytestVerifier', 'CoverageProfiler'],
-        collaboratorIds: ['agent-engineer', 'agent-diagnostic']
+        collaboratorIds: ['agent-engineer', 'agent-diagnostic'],
+        chatHistory: [
+          {
+            id: 'init-qa',
+            sender: 'AGENT',
+            senderName: 'Elena Rostova',
+            text: 'Elena Rostova standing by. I run rigorous pytest and integration test suites. Nothing ships in this metropolis without formal test verification.',
+            timestamp: '09:20 AM'
+          }
+        ]
       },
       {
         id: 'agent-diagnostic',
@@ -722,10 +768,10 @@ export class CitySimulationEngine {
         profession: 'Root Cause & Troubleshooting Specialist',
         department: 'Diagnostic Core & Troubleshooting',
         color: '#EC4899',
-        x: -22,
-        z: 0,
-        targetX: -22,
-        targetZ: 0,
+        x: 2.8,
+        z: 5.5,
+        targetX: 2.8,
+        targetZ: 5.5,
         speed: 3.4,
         angle: Math.PI,
         homeBuildingId: 'bld-diagnostic',
@@ -745,7 +791,16 @@ export class CitySimulationEngine {
         level: 9,
         skills: ['Traceback Deconstruction', 'Memory Profiling', 'Heuristic Repair', 'Log Inspection'],
         toolsInUse: ['TracebackAnalyzer', 'AutomatedPatchGenerator'],
-        collaboratorIds: ['agent-qa', 'agent-engineer']
+        collaboratorIds: ['agent-qa', 'agent-engineer'],
+        chatHistory: [
+          {
+            id: 'init-diag',
+            sender: 'AGENT',
+            senderName: 'Dr. Aaron Chen',
+            text: 'Dr. Chen here. I monitor exception logs, tracebacks, and memory heaps across all city services.',
+            timestamp: '09:25 AM'
+          }
+        ]
       },
       {
         id: 'agent-security',
@@ -755,10 +810,10 @@ export class CitySimulationEngine {
         profession: 'Security Engineer & Policy Auditor',
         department: 'Security Citadel & Policy Guardrails',
         color: '#EF4444',
-        x: 0,
-        z: 22,
-        targetX: 0,
-        targetZ: 22,
+        x: -4.5,
+        z: 9.8,
+        targetX: -4.5,
+        targetZ: 9.8,
         speed: 3.5,
         angle: Math.PI / 2,
         homeBuildingId: 'bld-security',
@@ -778,7 +833,16 @@ export class CitySimulationEngine {
         level: 10,
         skills: ['Path Traversal Jail', 'Command Whitelisting', 'Secret Redaction', 'OWASP Vulnerability Audit'],
         toolsInUse: ['PathJailVerifier', 'SecretRedactionEngine'],
-        collaboratorIds: ['agent-coordinator', 'agent-devops']
+        collaboratorIds: ['agent-coordinator', 'agent-devops'],
+        chatHistory: [
+          {
+            id: 'init-sec',
+            sender: 'AGENT',
+            senderName: 'Kaelen Voss',
+            text: 'Security Sentinel Voss active. Workspace jail boundaries, secret filtering, and command whitelist policies are strictly enforced.',
+            timestamp: '09:30 AM'
+          }
+        ]
       },
       {
         id: 'agent-devops',
@@ -788,10 +852,10 @@ export class CitySimulationEngine {
         profession: 'DevOps & Cloud Infrastructure Engineer',
         department: 'Deployment & CI/CD Pipeline (Release Dock)',
         color: '#06B6D4',
-        x: 22,
-        z: 22,
-        targetX: 22,
-        targetZ: 22,
+        x: 4.8,
+        z: 10.5,
+        targetX: 4.8,
+        targetZ: 10.5,
         speed: 3.3,
         angle: Math.PI / 4,
         homeBuildingId: 'bld-release-dock',
@@ -811,7 +875,16 @@ export class CitySimulationEngine {
         level: 9,
         skills: ['Docker OCI Containers', 'CI/CD Pipelines', 'Cloud Run Provisioning', 'Health Monitoring'],
         toolsInUse: ['DockerBuilder', 'ArtifactPackager'],
-        collaboratorIds: ['agent-security', 'agent-engineer']
+        collaboratorIds: ['agent-security', 'agent-engineer'],
+        chatHistory: [
+          {
+            id: 'init-devops',
+            sender: 'AGENT',
+            senderName: 'Sora Takahashi',
+            text: 'Sora Takahashi here! I manage Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
+            timestamp: '09:35 AM'
+          }
+        ]
       },
       {
         id: 'agent-constructor',
@@ -821,10 +894,10 @@ export class CitySimulationEngine {
         profession: 'Civil Infrastructure & Construction Engineer',
         department: 'Civic Development & Construction Operations',
         color: '#EAB308',
-        x: -12,
-        z: 28,
-        targetX: -12,
-        targetZ: 28,
+        x: -4.2,
+        z: 15.0,
+        targetX: -4.2,
+        targetZ: 15.0,
         speed: 3.1,
         angle: 0,
         homeBuildingId: 'bld-hospital',
@@ -844,7 +917,16 @@ export class CitySimulationEngine {
         level: 9,
         skills: ['Structural Construction', 'Material Sourcing', 'Site Safety', 'Heavy Machinery Operation'],
         toolsInUse: ['StructuralEstimator', 'SiteProgressTracker'],
-        collaboratorIds: ['agent-architect', 'agent-devops']
+        collaboratorIds: ['agent-architect', 'agent-devops'],
+        chatHistory: [
+          {
+            id: 'init-con',
+            sender: 'AGENT',
+            senderName: 'Harlan Drake',
+            text: 'Harlan Drake on site! I oversee heavy infrastructure, building construction, and urban repairs. Press [F] to command construction work.',
+            timestamp: '09:40 AM'
+          }
+        ]
       },
       {
         id: 'agent-doctor',
@@ -854,10 +936,10 @@ export class CitySimulationEngine {
         profession: 'Emergency Medicine & Healthcare Operations',
         department: 'Civic Medical Center (Hospital)',
         color: '#F43F5E',
-        x: -24,
-        z: 50,
-        targetX: -24,
-        targetZ: 50,
+        x: 1.5,
+        z: 17.0,
+        targetX: 1.5,
+        targetZ: 17.0,
         speed: 3.2,
         angle: -Math.PI / 2,
         homeBuildingId: 'bld-hospital',
@@ -877,7 +959,16 @@ export class CitySimulationEngine {
         level: 10,
         skills: ['Emergency Medicine', 'Triage Protocol', 'Hospital Operations', 'Biohazard Containment'],
         toolsInUse: ['MedicalTelemetry', 'TriageDispatcher'],
-        collaboratorIds: ['agent-security', 'agent-coordinator']
+        collaboratorIds: ['agent-security', 'agent-coordinator'],
+        chatHistory: [
+          {
+            id: 'init-doc',
+            sender: 'AGENT',
+            senderName: 'Dr. Sarah Miller',
+            text: 'Greetings Commander. Dr. Sarah Miller here from the Medical Directorate. Citizen health indexes and trauma response lines are at 98% readiness.',
+            timestamp: '09:45 AM'
+          }
+        ]
       }
     ];
   }
@@ -1209,6 +1300,212 @@ export class CitySimulationEngine {
     }
   }
 
+  // --- Direct Work Command (Triggered by [F] Key or Interface to Make Them Work) ---
+  public directWorkCommand(agentId: string): { success: boolean; message: string; task: AgentTask } {
+    const ag = this.agentCharacters.find(a => a.id === agentId);
+    if (!ag) {
+      const fallbackTask: AgentTask = {
+        id: `task-err-${Date.now()}`,
+        title: 'Unknown Directive',
+        description: '',
+        expectedDeliverable: '',
+        priority: 'MEDIUM',
+        status: 'ASSIGNED',
+        progress: 0,
+        assignedAgentId: agentId,
+        assignedAgentName: 'Unknown',
+        source: 'INDIVIDUAL',
+        requiredSkills: [],
+        dependencies: [],
+        createdAt: new Date().toLocaleTimeString()
+      };
+      return { success: false, message: 'Agent not found.', task: fallbackTask };
+    }
+
+    // If agent is already working, expedite progress!
+    if (ag.activeTask && (ag.status === 'WORKING' || ag.status === 'ASSIGNED')) {
+      ag.workProgress = Math.min(100, ag.workProgress + 25);
+      ag.thoughtBubble = `⚡ [F] Expedited! Progress: ${ag.workProgress.toFixed(0)}%`;
+      ag.speechTimer = 6.0;
+      this.saveToStorage();
+      return { 
+        success: true, 
+        message: `Expedited work order on ${ag.name}! Task progress boosted to ${ag.workProgress.toFixed(0)}%.`, 
+        task: ag.activeTask 
+      };
+    }
+
+    // Determine domain-specific task template tailored to citizen's profession
+    let taskTitle = `${ag.profession} Priority Operation`;
+    let taskDesc = `High-priority autonomous task executed by ${ag.name} at the direct instruction of the Commander.`;
+    let taskDeliverable = `${ag.name.toLowerCase().replace(/\s+/g, '_')}_deliverable.artifact`;
+
+    if (ag.id === 'agent-coordinator') {
+      taskTitle = 'Optimize Autonomous Multi-Agent DAG Execution Matrix';
+      taskDesc = 'Analyze active agent workloads, resolve resource contention, and maximize pipeline throughput.';
+      taskDeliverable = 'dag_execution_matrix_optimized.json';
+    } else if (ag.id === 'agent-analyst') {
+      taskTitle = 'Synthesize Architectural Acceptance Criteria & System PRD';
+      taskDesc = 'Formulate formal acceptance contracts, user journey invariants, and edge-case test matrices.';
+      taskDeliverable = 'system_acceptance_criteria_prd.md';
+    } else if (ag.id === 'agent-architect') {
+      taskTitle = 'Design Resilient Domain Architecture & SQLite DDL Schema';
+      taskDesc = 'Normalize entity relationships, decouple domain boundaries, and enforce type safety.';
+      taskDeliverable = 'domain_schema_ddl_contracts.py';
+    } else if (ag.id === 'agent-engineer') {
+      taskTitle = 'Fabricate High-Throughput REST API Controller with SQLite WAL';
+      taskDesc = 'Synthesize production-grade FastAPI endpoints with error wrappers and input validation.';
+      taskDeliverable = 'api_controller_fastapi_wal.py';
+    } else if (ag.id === 'agent-qa') {
+      taskTitle = 'Execute 20/20 Pytest Automated Verification Suite & Assertions';
+      taskDesc = 'Run comprehensive test matrix across all endpoints, state machines, and security jails.';
+      taskDeliverable = 'pytest_20_passed_verification_report.log';
+    } else if (ag.id === 'agent-diagnostic') {
+      taskTitle = 'Perform Deep Telemetry Diagnostics & Root Cause Analysis';
+      taskDesc = 'Scan memory allocations, detect potential event loop bottlenecks, and optimize tick budget.';
+      taskDeliverable = 'telemetry_rca_diagnostic_dump.json';
+    } else if (ag.id === 'agent-security') {
+      taskTitle = 'Conduct Zero-Trust Security Sandbox & Path Jail Audit';
+      taskDesc = 'Verify filesystem path containment, sanitize secrets, and enforce command whitelists.';
+      taskDeliverable = 'zero_trust_security_audit.sec';
+    } else if (ag.id === 'agent-devops') {
+      taskTitle = 'Build Multi-Stage Docker OCI Image & GitHub CI Pipeline';
+      taskDesc = 'Package optimized application container with non-root security and healthcheck probes.';
+      taskDeliverable = 'docker_oci_ci_pipeline_spec.yaml';
+    } else if (ag.id === 'agent-constructor') {
+      taskTitle = 'Civic Structural Reinforcement & Foundation Stabilization';
+      taskDesc = 'Operate heavy construction machinery to reinforce foundation pilings and utility conduits.';
+      taskDeliverable = 'civic_foundation_stabilization.spec';
+    } else if (ag.id === 'agent-doctor') {
+      taskTitle = 'Deploy Mobile Emergency Triage & Bio-Monitoring Protocol';
+      taskDesc = 'Calibrate bio-telemetry sensors and prepare trauma bay life support systems.';
+      taskDeliverable = 'mobile_triage_biomonitoring_protocol.med';
+    }
+
+    const task: AgentTask = {
+      id: `task-direct-${Date.now()}`,
+      title: taskTitle,
+      description: taskDesc,
+      expectedDeliverable: taskDeliverable,
+      priority: 'CRITICAL',
+      status: 'WORKING',
+      progress: 25,
+      assignedAgentId: ag.id,
+      assignedAgentName: ag.name,
+      source: 'INDIVIDUAL',
+      requiredSkills: ag.skills,
+      dependencies: [],
+      createdAt: new Date().toLocaleTimeString()
+    };
+
+    ag.activeTask = task;
+    ag.currentTask = task.title;
+    ag.workProgress = 25;
+    ag.status = 'WORKING';
+    ag.availability = 'BUSY';
+    ag.thoughtBubble = `⚡ [F] Direct Work Order: "${task.title.slice(0, 22)}..."`;
+    ag.speechTimer = 7.0;
+
+    // Head towards home or site
+    const home = this.buildings.find(b => b.id === ag.homeBuildingId);
+    if (home) {
+      ag.targetX = home.x + (Math.random() * 4 - 2);
+      ag.targetZ = home.z + (Math.random() * 4 - 2);
+    }
+
+    if (!ag.chatHistory) ag.chatHistory = [];
+    ag.chatHistory.push({
+      id: `msg-${Date.now()}-cmd`,
+      sender: 'AGENT',
+      senderName: ag.name,
+      text: `⚡ Direct Work Order acknowledged! Commencing "${task.title}". Operational state: WORKING. Deliverable: ${task.expectedDeliverable}.`,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    this.saveToStorage();
+    return { 
+      success: true, 
+      message: `Work Order Dispatched: ${ag.name} is now WORKING on "${task.title}"!`, 
+      task 
+    };
+  }
+
+  // --- 2-Way Conversational Dialogue System ---
+  public interactWithAgent(agentId: string, playerMessage: string): AgentChatMessage {
+    const ag = this.agentCharacters.find(a => a.id === agentId);
+    if (!ag) {
+      return {
+        id: `err-${Date.now()}`,
+        sender: 'AGENT',
+        senderName: 'Unknown',
+        text: 'Agent not found in city registry.',
+        timestamp: new Date().toLocaleTimeString()
+      };
+    }
+
+    if (!ag.chatHistory) ag.chatHistory = [];
+
+    // 1. Record player message
+    const playerMsgObj: AgentChatMessage = {
+      id: `pmsg-${Date.now()}`,
+      sender: 'PLAYER',
+      senderName: 'Commander',
+      text: playerMessage,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    ag.chatHistory.push(playerMsgObj);
+
+    // 2. Intelligent NLP / Context Evaluation
+    const lower = playerMessage.toLowerCase();
+    let replyText = '';
+
+    if (lower.includes('work') || lower.includes('start') || lower.includes('make') || lower.includes('build') || lower.includes('code') || lower.includes('fix') || lower.includes('execute')) {
+      const res = this.directWorkCommand(agentId);
+      replyText = `Direct work order received, Commander! I have initiated "${res.task.title}". Operational state switched to WORKING. Target deliverable: ${res.task.expectedDeliverable}.`;
+    } else if (lower.includes('status') || lower.includes('doing') || lower.includes('progress') || lower.includes('objective')) {
+      if (ag.activeTask) {
+        replyText = `I am currently executing "${ag.activeTask.title}" (${ag.workProgress.toFixed(0)}% complete). Status: ${ag.status}. Expected deliverable: ${ag.activeTask.expectedDeliverable}. No active blockers.`;
+      } else {
+        replyText = `I am currently on standby at ${ag.department}. Availability is ${ag.availability}. All toolchains ready. You can press [F] or ask me to start work anytime!`;
+      }
+    } else if (lower.includes('skill') || lower.includes('tool') || lower.includes('can you') || lower.includes('what do you do')) {
+      replyText = `My primary specialization is ${ag.profession}. My core competencies: ${ag.skills.join(', ')}. Active toolchain: ${ag.toolsInUse.join(', ')}.`;
+    } else if (lower.includes('team') || lower.includes('collaborator') || lower.includes('who')) {
+      replyText = `I actively collaborate with: ${ag.collaboratorIds.join(', ')}. We synchronize task dependencies via the central DAG scheduler.`;
+    } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+      replyText = `Greetings, Commander! ${ag.name} at your disposal. The city's systems are healthy and operational. How can I assist with your objectives today?`;
+    } else if (lower.includes('stop') || lower.includes('pause') || lower.includes('cancel')) {
+      if (ag.activeTask) {
+        const title = ag.activeTask.title;
+        ag.activeTask = null;
+        ag.status = 'IDLE';
+        ag.availability = 'AVAILABLE';
+        ag.currentTask = 'Task halted by Commander';
+        replyText = `Understood. Halted work on "${title}". I have returned to standby state.`;
+      } else {
+        replyText = `I am already on standby with no active task. Ready for new orders.`;
+      }
+    } else {
+      replyText = `Acknowledged, Commander. As ${ag.profession}, I am monitoring this sector. My focus is on ${ag.skills[0] || 'quality operations'}. Press [F] anytime to dispatch me to work on a priority task!`;
+    }
+
+    const agentMsgObj: AgentChatMessage = {
+      id: `amsg-${Date.now()}`,
+      sender: 'AGENT',
+      senderName: ag.name,
+      text: replyText,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    ag.chatHistory.push(agentMsgObj);
+
+    // Update 3D Thought/Speech Bubble
+    ag.thoughtBubble = replyText.length > 50 ? replyText.slice(0, 48) + '...' : replyText;
+    ag.speechTimer = 8.0;
+
+    this.saveToStorage();
+    return agentMsgObj;
+  }
+
   // --- Publish Public Mission ---
   public publishPublicMission(data: {
     title: string;
@@ -1521,7 +1818,11 @@ export class CitySimulationEngine {
     try {
       const data = {
         missions: this.publicMissions,
-        agentsHistory: this.agentCharacters.map(a => ({ id: a.id, history: a.taskHistory })),
+        agentsHistory: this.agentCharacters.map(a => ({ 
+          id: a.id, 
+          history: a.taskHistory,
+          chatHistory: a.chatHistory 
+        })),
         timestamp: Date.now()
       };
       localStorage.setItem('forge_metropolis_sim_v1', JSON.stringify(data));
@@ -1539,10 +1840,13 @@ export class CitySimulationEngine {
           this.publicMissions = data.missions;
         }
         if (data.agentsHistory && Array.isArray(data.agentsHistory)) {
-          data.agentsHistory.forEach((item: { id: string; history: any[] }) => {
+          data.agentsHistory.forEach((item: { id: string; history: any[]; chatHistory?: any[] }) => {
             const ag = this.agentCharacters.find(a => a.id === item.id);
-            if (ag && Array.isArray(item.history)) {
-              ag.taskHistory = item.history;
+            if (ag) {
+              if (Array.isArray(item.history)) ag.taskHistory = item.history;
+              if (Array.isArray(item.chatHistory) && item.chatHistory.length > 0) {
+                ag.chatHistory = item.chatHistory;
+              }
             }
           });
         }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { 
   Building, 
@@ -9,7 +9,8 @@ import {
   Incident, 
   CameraMode, 
   OverlayMode,
-  AgentCharacter 
+  AgentCharacter,
+  PlayerState 
 } from '../../simulation/types';
 
 interface CitySceneProps {
@@ -25,9 +26,11 @@ interface CitySceneProps {
   overlayMode: OverlayMode;
   selectedEntityId: string | null;
   selectedAgentId: string | null;
+  playerState: PlayerState;
+  onUpdatePlayer: (update: Partial<PlayerState>) => void;
+  onInteractWithAgent: (agentId: string) => void;
+  onOpenPublicMissions: () => void;
   onSelectEntity: (type: 'BUILDING' | 'VEHICLE' | 'AGENT', id: string) => void;
-  onDoubleClickAgent: (agentId: string) => void;
-  onMoveAgent?: (agentId: string, dx: number, dz: number) => void;
 }
 
 export const CityScene: React.FC<CitySceneProps> = ({
@@ -43,9 +46,11 @@ export const CityScene: React.FC<CitySceneProps> = ({
   overlayMode,
   selectedEntityId,
   selectedAgentId,
-  onSelectEntity,
-  onDoubleClickAgent,
-  onMoveAgent
+  playerState,
+  onUpdatePlayer,
+  onInteractWithAgent,
+  onOpenPublicMissions,
+  onSelectEntity
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -64,7 +69,27 @@ export const CityScene: React.FC<CitySceneProps> = ({
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
 
-  // Camera Orbit & Pan State
+  // First-person physics & movement state (stored in ref for 60fps loop)
+  const fpv = useRef({
+    x: playerState.x,
+    y: playerState.y,
+    z: playerState.z,
+    yaw: playerState.yaw,
+    pitch: playerState.pitch,
+    velocityY: 0,
+    isGrounded: true,
+    isPointerLocked: false,
+    keys: {
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+      shift: false,
+      space: false
+    }
+  });
+
+  // Camera Orbit State (fallback mode)
   const orbitState = useRef({
     angleX: 0.85,
     angleY: 0.55,
@@ -82,31 +107,26 @@ export const CityScene: React.FC<CitySceneProps> = ({
     canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
 
-    // Dark high-tech badge background
     ctx.fillStyle = '#060B18';
     ctx.fillRect(0, 0, 512, 128);
 
-    // Glowing neon border
     ctx.lineWidth = 6;
     ctx.strokeStyle = colorHex;
     ctx.strokeRect(4, 4, 504, 120);
 
-    // High-tech corner accents
     ctx.fillStyle = colorHex;
     ctx.fillRect(0, 0, 24, 8);
     ctx.fillRect(0, 0, 8, 24);
     ctx.fillRect(512 - 24, 0, 24, 8);
     ctx.fillRect(512 - 8, 0, 8, 24);
 
-    // Text Label
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 36px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, 256, 64);
 
-    const tex = new THREE.CanvasTexture(canvas);
-    return tex;
+    return new THREE.CanvasTexture(canvas);
   };
 
   // Helper to create speech/thought bubble canvas texture for agents
@@ -138,8 +158,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     ctx.textBaseline = 'middle';
     ctx.fillText(text.slice(0, 36), 256, 64);
 
-    const tex = new THREE.CanvasTexture(canvas);
-    return tex;
+    return new THREE.CanvasTexture(canvas);
   };
 
   // --- Initial Scene Setup ---
@@ -155,12 +174,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const width = container.clientWidth || window.innerWidth || 800;
     const height = container.clientHeight || Math.max(500, window.innerHeight - 65);
 
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      width / height,
-      0.1,
-      1200
-    );
+    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1200);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -171,7 +185,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
-    // Lights
+    // Ambient and Directional Lights
     const ambient = new THREE.AmbientLight(0xFFFFFF, 0.55);
     scene.add(ambient);
     ambientLightRef.current = ambient;
@@ -230,7 +244,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       line.position.set(midX, 0.03, midZ);
       scene.add(line);
 
-      // Elevated Sidewalks
+      // Concrete Sidewalks
       const swMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9 });
       [-3.1, 3.1].forEach(offY => {
         const swGeo = new THREE.BoxGeometry(length, 0.16, 1.3);
@@ -244,35 +258,37 @@ export const CityScene: React.FC<CitySceneProps> = ({
       });
     });
 
-    // Build Named Buildings with Floating Neon Signboards
+    // Build Named Buildings with Floating Signboards
     buildings.forEach(b => {
       const bGroup = new THREE.Group();
       bGroup.position.set(b.x, 0, b.z);
       bGroup.userData = { type: 'BUILDING', id: b.id };
 
       if (b.type === 'PARK_SPACE') {
-        // Central Innovation Plaza
+        // Innovation Plaza
         const pGeo = new THREE.BoxGeometry(b.width, 0.25, b.depth);
         const pMat = new THREE.MeshStandardMaterial({ color: 0x15803D, roughness: 0.9 });
         const pMesh = new THREE.Mesh(pGeo, pMat);
         pMesh.position.y = 0.12;
         bGroup.add(pMesh);
 
-        // Circular Amphitheater / Forum in Plaza
-        const forumGeo = new THREE.CylinderGeometry(5.5, 6.0, 0.35, 24);
-        const forumMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.5 });
-        const forum = new THREE.Mesh(forumGeo, forumMat);
+        // Circular Forum
+        const forum = new THREE.Mesh(
+          new THREE.CylinderGeometry(5.5, 6.0, 0.35, 24),
+          new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.5 })
+        );
         forum.position.y = 0.3;
         bGroup.add(forum);
 
-        // Holographic Forum Core
-        const coreGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.6, 16);
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0x38BDF8 });
-        const core = new THREE.Mesh(coreGeo, coreMat);
+        // Forum Hologram Core
+        const core = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.5, 1.5, 0.6, 16),
+          new THREE.MeshBasicMaterial({ color: 0x38BDF8 })
+        );
         core.position.y = 0.6;
         bGroup.add(core);
 
-        // Surrounding Trees
+        // Park Trees
         [[-7, -7], [7, -7], [-7, 7], [7, 7]].forEach(([tx, tz]) => {
           const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 2.0), new THREE.MeshStandardMaterial({ color: 0x78350F }));
           trunk.position.set(tx, 1.0, tz);
@@ -296,7 +312,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         mesh.receiveShadow = true;
         bGroup.add(mesh);
 
-        // Roof details (Antenna, Helipad, Chimney)
+        // Roof features
         if (b.roofStyle === 'ANTENNA') {
           const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.35, 8.0, 6), new THREE.MeshStandardMaterial({ color: 0xE2E8F0, metalness: 0.9 }));
           spire.position.y = b.height + 4.0;
@@ -334,138 +350,208 @@ export const CityScene: React.FC<CitySceneProps> = ({
       buildingGroupMap.current.set(b.id, bGroup);
     });
 
-    // Raycaster for Single Click & Double Click Selection
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    let lastClickTime = 0;
+    // Pointer Lock & Mouse Look Listeners
+    const onCanvasClick = () => {
+      if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL') {
+        container.requestPointerLock();
+      }
+    };
+
+    const onPointerLockChange = () => {
+      const isLocked = document.pointerLockElement === container;
+      fpv.current.isPointerLocked = isLocked;
+      onUpdatePlayer({ isPointerLocked: isLocked });
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (fpv.current.isPointerLocked) {
+        // First-Person Mouse Look
+        const sensitivity = 0.0022;
+        fpv.current.yaw -= e.movementX * sensitivity;
+        fpv.current.pitch = Math.max(-1.4, Math.min(1.4, fpv.current.pitch - e.movementY * sensitivity));
+      } else if (orbitState.current.isDragging && cameraMode === 'ORBIT') {
+        // Fallback Orbit Drag
+        const dx = e.clientX - orbitState.current.prevX;
+        const dy = e.clientY - orbitState.current.prevY;
+        orbitState.current.prevX = e.clientX;
+        orbitState.current.prevY = e.clientY;
+        orbitState.current.angleX -= dx * 0.005;
+        orbitState.current.angleY = Math.max(0.08, Math.min(Math.PI / 2 - 0.05, orbitState.current.angleY + dy * 0.005));
+      }
+    };
 
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
+      if (!fpv.current.isPointerLocked && cameraMode === 'ORBIT' && e.button === 0) {
         orbitState.current.isDragging = true;
         orbitState.current.prevX = e.clientX;
         orbitState.current.prevY = e.clientY;
       }
     };
 
-    const onMouseMove = (e: MouseEvent) => {
-      if (orbitState.current.isDragging) {
-        const dx = e.clientX - orbitState.current.prevX;
-        const dy = e.clientY - orbitState.current.prevY;
-        orbitState.current.prevX = e.clientX;
-        orbitState.current.prevY = e.clientY;
-
-        orbitState.current.angleX -= dx * 0.005;
-        orbitState.current.angleY = Math.max(0.08, Math.min(Math.PI / 2 - 0.05, orbitState.current.angleY + dy * 0.005));
-      }
-
-      const rect = container.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / container.clientWidth) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / container.clientHeight) * 2 + 1;
-    };
-
     const onMouseUp = () => {
       orbitState.current.isDragging = false;
     };
 
-    const onWheel = (e: WheelEvent) => {
-      orbitState.current.distance = Math.max(12, Math.min(180, orbitState.current.distance + e.deltaY * 0.08));
-      e.preventDefault();
-    };
-
-    const onClick = (e: MouseEvent) => {
-      if (!cameraRef.current) return;
-      raycaster.setFromCamera(mouse, cameraRef.current);
-
-      const currentTime = performance.now();
-      const isDoubleClick = (currentTime - lastClickTime) < 300;
-      lastClickTime = currentTime;
-
-      // 1. Raycast against AI Agent characters first
-      const agentMeshes: THREE.Object3D[] = [];
-      agentMeshMap.current.forEach(agG => {
-        agG.traverse(child => { if ((child as THREE.Mesh).isMesh) agentMeshes.push(child); });
-      });
-      const agHits = raycaster.intersectObjects(agentMeshes);
-      if (agHits.length > 0) {
-        let curr: THREE.Object3D | null = agHits[0].object;
-        while (curr && !curr.userData?.id) {
-          curr = curr.parent;
-        }
-        if (curr?.userData?.id) {
-          const aId = curr.userData.id;
-          onSelectEntity('AGENT', aId);
-          if (isDoubleClick) {
-            onDoubleClickAgent(aId);
-          }
-          return;
-        }
-      }
-
-      // 2. Raycast against Buildings
-      const bMeshes: THREE.Object3D[] = [];
-      buildingGroupMap.current.forEach(bG => {
-        bG.traverse(child => { if ((child as THREE.Mesh).isMesh) bMeshes.push(child); });
-      });
-      const bHits = raycaster.intersectObjects(bMeshes);
-      if (bHits.length > 0) {
-        let curr: THREE.Object3D | null = bHits[0].object;
-        while (curr && !curr.userData?.id) {
-          curr = curr.parent;
-        }
-        if (curr?.userData?.id) {
-          onSelectEntity('BUILDING', curr.userData.id);
-        }
-      }
-    };
-
-    // Keyboard WASD listener for FPV mode
+    // Keyboard WASD, Shift, Space, E, M, Esc Listeners
     const onKeyDown = (e: KeyboardEvent) => {
-      if (cameraMode === 'FPV' && selectedAgentId && onMoveAgent) {
-        const moveSpeed = 1.2;
-        if (e.key === 'w' || e.key === 'ArrowUp') onMoveAgent(selectedAgentId, 0, -moveSpeed);
-        if (e.key === 's' || e.key === 'ArrowDown') onMoveAgent(selectedAgentId, 0, moveSpeed);
-        if (e.key === 'a' || e.key === 'ArrowLeft') onMoveAgent(selectedAgentId, -moveSpeed, 0);
-        if (e.key === 'd' || e.key === 'ArrowRight') onMoveAgent(selectedAgentId, moveSpeed, 0);
+      const k = e.key.toLowerCase();
+      if (k === 'w') fpv.current.keys.w = true;
+      if (k === 'a') fpv.current.keys.a = true;
+      if (k === 's') fpv.current.keys.s = true;
+      if (k === 'd') fpv.current.keys.d = true;
+      if (e.key === 'Shift') fpv.current.keys.shift = true;
+      if (e.key === ' ' || e.code === 'Space') {
+        if (fpv.current.isGrounded) {
+          fpv.current.velocityY = 6.8;
+          fpv.current.isGrounded = false;
+        }
+      }
+
+      // 'E' Key: Interact with nearby citizen
+      if (k === 'e') {
+        if (playerState.nearbyAgentId) {
+          if (document.pointerLockElement) document.exitPointerLock();
+          onInteractWithAgent(playerState.nearbyAgentId);
+        }
+      }
+
+      // 'M' Key: Open Public Missions
+      if (k === 'm') {
+        if (document.pointerLockElement) document.exitPointerLock();
+        onOpenPublicMissions();
+      }
+
+      // 'Escape' Key: release pointer lock
+      if (e.key === 'Escape') {
+        if (document.pointerLockElement) document.exitPointerLock();
       }
     };
 
-    container.addEventListener('mousedown', onMouseDown);
+    const onKeyUp = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === 'w') fpv.current.keys.w = false;
+      if (k === 'a') fpv.current.keys.a = false;
+      if (k === 's') fpv.current.keys.s = false;
+      if (k === 'd') fpv.current.keys.d = false;
+      if (e.key === 'Shift') fpv.current.keys.shift = false;
+    };
+
+    container.addEventListener('click', onCanvasClick);
+    document.addEventListener('pointerlockchange', onPointerLockChange);
     window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
-    container.addEventListener('wheel', onWheel, { passive: false });
-    container.addEventListener('click', onClick);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
-    // 60 FPS Render Loop
+    // 60 FPS Render & Physics Loop
     let animId: number;
-    const animate = () => {
+    let lastLoopTime = performance.now();
+
+    const animate = (currentTime: number) => {
       animId = requestAnimationFrame(animate);
+      const dt = Math.min((currentTime - lastLoopTime) / 1000.0, 0.1);
+      lastLoopTime = currentTime;
 
-      // Handle Camera Modes (FPV, Shoulder Cam, Orbit, Top-Down)
-      const st = orbitState.current;
-      const targetAgent = agentCharacters.find(a => a.id === selectedAgentId);
+      const p = fpv.current;
 
-      if (cameraMode === 'FPV' && targetAgent) {
-        // True First Person View through Agent's Eyes
-        camera.position.set(targetAgent.x, 1.85, targetAgent.z);
-        const lookX = targetAgent.x + Math.cos(targetAgent.angle) * 10;
-        const lookZ = targetAgent.z + Math.sin(targetAgent.angle) * 10;
-        camera.lookAt(lookX, 1.85, lookZ);
-      } else if (cameraMode === 'SHOULDER_CAM' && targetAgent) {
-        // Cinematic Over-the-Shoulder Tracking Cam
-        const back = 3.6;
-        const cx = targetAgent.x - Math.cos(targetAgent.angle) * back;
-        const cz = targetAgent.z - Math.sin(targetAgent.angle) * back;
-        camera.position.lerp(new THREE.Vector3(cx, 2.5, cz), 0.15);
-        camera.lookAt(targetAgent.x, 1.6, targetAgent.z);
+      // 1. WASD Movement Physics (when in first-person or street level)
+      if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL' || cameraMode === 'SHOULDER_CAM') {
+        const moveSpeed = (p.keys.shift ? 10.5 : 5.8) * dt;
+        let moveX = 0;
+        let moveZ = 0;
+
+        // Forward vector based on yaw
+        const forwardX = -Math.sin(p.yaw);
+        const forwardZ = -Math.cos(p.yaw);
+        const rightX = Math.cos(p.yaw);
+        const rightZ = -Math.sin(p.yaw);
+
+        if (p.keys.w) { moveX += forwardX; moveZ += forwardZ; }
+        if (p.keys.s) { moveX -= forwardX; moveZ -= forwardZ; }
+        if (p.keys.d) { moveX += rightX; moveZ += rightZ; }
+        if (p.keys.a) { moveX -= rightX; moveZ -= rightZ; }
+
+        const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        if (moveLen > 0.001) {
+          const proposedX = p.x + (moveX / moveLen) * moveSpeed;
+          const proposedZ = p.z + (moveZ / moveLen) * moveSpeed;
+
+          // Collision Detection against Solid Buildings (bounding box radius 0.6)
+          let collidesX = false;
+          let collidesZ = false;
+
+          for (let i = 0; i < buildings.length; i++) {
+            const b = buildings[i];
+            if (b.type === 'PARK_SPACE') continue;
+
+            const minX = b.x - b.width / 2 - 0.7;
+            const maxX = b.x + b.width / 2 + 0.7;
+            const minZ = b.z - b.depth / 2 - 0.7;
+            const maxZ = b.z + b.depth / 2 + 0.7;
+
+            if (proposedX >= minX && proposedX <= maxX && p.z >= minZ && p.z <= maxZ) {
+              collidesX = true;
+            }
+            if (p.x >= minX && p.x <= maxX && proposedZ >= minZ && proposedZ <= maxZ) {
+              collidesZ = true;
+            }
+          }
+
+          if (!collidesX && Math.abs(proposedX) < 115) p.x = proposedX;
+          if (!collidesZ && Math.abs(proposedZ) < 115) p.z = proposedZ;
+        }
+
+        // Jump & Gravity
+        if (!p.isGrounded) {
+          p.velocityY -= 18.0 * dt;
+          p.y += p.velocityY * dt;
+          if (p.y <= 1.85) {
+            p.y = 1.85;
+            p.velocityY = 0;
+            p.isGrounded = true;
+          }
+        }
+
+        // Sync player state with React
+        onUpdatePlayer({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          yaw: p.yaw,
+          pitch: p.pitch,
+          isSprinting: p.keys.shift,
+          isGrounded: p.isGrounded
+        });
+      }
+
+      // 2. Camera Positioning
+      if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL') {
+        // First-Person Player View
+        camera.position.set(p.x, p.y, p.z);
+        // Look direction vector from yaw and pitch
+        const lookDir = new THREE.Vector3(
+          -Math.sin(p.yaw) * Math.cos(p.pitch),
+          Math.sin(p.pitch),
+          -Math.cos(p.yaw) * Math.cos(p.pitch)
+        );
+        camera.lookAt(new THREE.Vector3().addVectors(camera.position, lookDir));
+
+      } else if (cameraMode === 'SHOULDER_CAM') {
+        // Third-Person Over-the-Shoulder Chase
+        const back = 3.2;
+        const camX = p.x + Math.sin(p.yaw) * back + Math.cos(p.yaw) * 0.8;
+        const camZ = p.z + Math.cos(p.yaw) * back - Math.sin(p.yaw) * 0.8;
+        camera.position.set(camX, p.y + 0.8, camZ);
+        camera.lookAt(p.x, p.y, p.z);
+
       } else if (cameraMode === 'TOP_DOWN') {
-        camera.position.set(0, 120, 0.1);
+        camera.position.set(0, 130, 0.1);
         camera.lookAt(0, 0, 0);
-      } else if (cameraMode === 'STREET_LEVEL') {
-        camera.position.set(0, 3.2, 28);
-        camera.lookAt(0, 3.2, -30);
+
       } else {
-        // Orbit mode
+        // Drone Orbit View
+        const st = orbitState.current;
         camera.position.x = st.target.x + st.distance * Math.sin(st.angleX) * Math.cos(st.angleY);
         camera.position.z = st.target.z + st.distance * Math.cos(st.angleX) * Math.cos(st.angleY);
         camera.position.y = st.target.y + st.distance * Math.sin(st.angleY);
@@ -474,7 +560,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       renderer.render(scene, camera);
     };
-    animate();
+    animId = requestAnimationFrame(animate);
 
     const handleResize = () => {
       if (!container || !rendererRef.current || !cameraRef.current) return;
@@ -488,21 +574,22 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     return () => {
       cancelAnimationFrame(animId);
-      container.removeEventListener('mousedown', onMouseDown);
+      container.removeEventListener('click', onCanvasClick);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
       window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
-      container.removeEventListener('wheel', onWheel);
-      container.removeEventListener('click', onClick);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', handleResize);
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
       renderer.dispose();
     };
-  }, []);
+  }, [cameraMode]);
 
-  // --- Dynamic AI Agent Character 3D Meshes & Speech Bubbles ---
+  // --- Dynamic AI Agent Characters & Speech ---
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -513,7 +600,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         aGroup = new THREE.Group();
         aGroup.userData = { type: 'AGENT', id: ag.id };
 
-        // 1. Stylized 3D Cyber Body
+        // 3D Cyber Torso
         const bodyGeo = new THREE.CylinderGeometry(0.35, 0.28, 1.1, 8);
         const bodyMat = new THREE.MeshStandardMaterial({
           color: new THREE.Color(ag.color),
@@ -525,65 +612,63 @@ export const CityScene: React.FC<CitySceneProps> = ({
         body.castShadow = true;
         aGroup.add(body);
 
-        // Glowing Armor Core / Arc Reactor
-        const coreGeo = new THREE.SphereGeometry(0.12, 8, 8);
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-        const core = new THREE.Mesh(coreGeo, coreMat);
+        // Glowing Armor Core
+        const core = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12, 8, 8),
+          new THREE.MeshBasicMaterial({ color: 0xFFFFFF })
+        );
         core.position.set(0, 1.05, 0.32);
         aGroup.add(core);
 
         // Cyber Helmet & Glowing Visor
-        const headGeo = new THREE.SphereGeometry(0.24, 12, 12);
-        const headMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.8 });
-        const head = new THREE.Mesh(headGeo, headMat);
+        const head = new THREE.Mesh(
+          new THREE.SphereGeometry(0.24, 12, 12),
+          new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.8 })
+        );
         head.position.y = 1.7;
         head.castShadow = true;
         aGroup.add(head);
 
-        const visorGeo = new THREE.BoxGeometry(0.3, 0.08, 0.15);
-        const visorMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(ag.color) });
-        const visor = new THREE.Mesh(visorGeo, visorMat);
+        const visor = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3, 0.08, 0.15),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(ag.color) })
+        );
         visor.position.set(0, 1.7, 0.2);
         aGroup.add(visor);
 
-        // Floating Overhead Hologram Nameplate
+        // Overhead Holographic Nameplate with Profession
         const tagCanvas = document.createElement('canvas');
-        tagCanvas.width = 256; tagCanvas.height = 64;
+        tagCanvas.width = 384; tagCanvas.height = 80;
         const tCtx = tagCanvas.getContext('2d')!;
         tCtx.fillStyle = '#060B18CC';
-        if (typeof (tCtx as any).roundRect === 'function') {
-          (tCtx as any).roundRect(4, 4, 248, 56, 12);
-          tCtx.fill();
-        } else {
-          tCtx.fillRect(4, 4, 248, 56);
-        }
+        tCtx.fillRect(4, 4, 376, 72);
         tCtx.lineWidth = 3;
         tCtx.strokeStyle = ag.color;
-        if (typeof (tCtx as any).roundRect === 'function') {
-          tCtx.stroke();
-        } else {
-          tCtx.strokeRect(4, 4, 248, 56);
-        }
+        tCtx.strokeRect(4, 4, 376, 72);
+
         tCtx.fillStyle = '#FFFFFF';
-        tCtx.font = 'bold 20px monospace';
+        tCtx.font = 'bold 22px monospace';
         tCtx.textAlign = 'center';
-        tCtx.textBaseline = 'middle';
-        tCtx.fillText(ag.name.split(' ')[0], 128, 32);
+        tCtx.fillText(ag.name, 192, 32);
+
+        tCtx.fillStyle = ag.color;
+        tCtx.font = 'bold 15px monospace';
+        tCtx.fillText(ag.profession.slice(0, 28), 192, 58);
 
         const tagTex = new THREE.CanvasTexture(tagCanvas);
         const tagMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.6, 0.45),
+          new THREE.PlaneGeometry(2.0, 0.55),
           new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, side: THREE.DoubleSide })
         );
-        tagMesh.position.y = 2.25;
+        tagMesh.position.y = 2.35;
         aGroup.add(tagMesh);
 
-        // Floating Thought/Speech Bubble Mesh
+        // Thought Bubble
         const bubbleMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(3.5, 0.9),
+          new THREE.PlaneGeometry(3.6, 0.95),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide })
         );
-        bubbleMesh.position.y = 3.0;
+        bubbleMesh.position.y = 3.15;
         aGroup.add(bubbleMesh);
         agentThoughtMeshMap.current.set(ag.id, bubbleMesh);
 
@@ -591,11 +676,11 @@ export const CityScene: React.FC<CitySceneProps> = ({
         agentMeshMap.current.set(ag.id, aGroup);
       }
 
-      // Update position & heading angle
+      // Position and heading
       aGroup.position.set(ag.x, 0.05, ag.z);
       aGroup.rotation.y = -ag.angle;
 
-      // Update Thought Bubble texture when speech is active
+      // Update Thought Bubble
       const bMesh = agentThoughtMeshMap.current.get(ag.id);
       if (bMesh) {
         if (ag.thoughtBubble) {
@@ -639,7 +724,10 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
   return (
     <div className="relative w-full h-full">
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div 
+        ref={mountRef} 
+        className="w-full h-full cursor-crosshair active:cursor-crosshair"
+      />
     </div>
   );
 };

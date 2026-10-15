@@ -54,11 +54,49 @@ export interface Building {
   department?: string;
 }
 
+export interface AgentTask {
+  id: string;
+  title: string;
+  description: string;
+  expectedDeliverable: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'PENDING' | 'ASSIGNED' | 'TRAVELING' | 'WORKING' | 'VERIFYING' | 'COMPLETED' | 'BLOCKED' | 'REJECTED';
+  progress: number; // 0 to 100
+  assignedAgentId: string;
+  assignedAgentName: string;
+  source: 'INDIVIDUAL' | 'PUBLIC_MISSION';
+  publicMissionId?: string;
+  requiredSkills: string[];
+  dependencies: string[]; // IDs of tasks that must be completed first
+  deliverableResult?: string;
+  blockerReason?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface PublicMission {
+  id: string;
+  title: string;
+  description: string;
+  category: 'CONSTRUCTION' | 'SOFTWARE' | 'RESEARCH' | 'INFRASTRUCTURE' | 'SECURITY';
+  status: 'PROPOSED' | 'IN_PROGRESS' | 'PAUSED' | 'VERIFYING' | 'COMPLETED' | 'CANCELLED';
+  progress: number; // 0 to 100
+  subtasks: AgentTask[];
+  participatingAgentIds: string[];
+  blockers: string[];
+  acceptanceCriteria: string[];
+  deliverables: string[];
+  publishedAt: string;
+  completedAt?: string;
+  targetBuildingId?: string;
+}
+
 export interface AgentCharacter {
   id: string;
   role: AgentRoleType;
   name: string;
   title: string;
+  profession: string;
   department: string;
   color: string;
   x: number;
@@ -70,8 +108,12 @@ export interface AgentCharacter {
   homeBuildingId: string;
   currentBuildingId?: string;
   currentTask: string;
-  assignedTasks: string[];
-  status: 'IDLE' | 'WALKING' | 'THINKING' | 'CODING' | 'TESTING' | 'DEPLOYING' | 'COLLABORATING';
+  activeTask?: AgentTask | null;
+  taskQueue: AgentTask[];
+  taskHistory: { id: string; title: string; completedAt: string; deliverable: string }[];
+  workProgress: number; // 0 - 100%
+  availability: 'AVAILABLE' | 'BUSY' | 'ON_CALL';
+  status: 'IDLE' | 'EVALUATING' | 'ASSIGNED' | 'TRAVELING' | 'WORKING' | 'VERIFYING' | 'COMPLETED' | 'WAITING' | 'BLOCKED';
   currentThought: string;
   thoughtBubble?: string;
   speechTimer?: number;
@@ -79,7 +121,22 @@ export interface AgentCharacter {
   level: number;
   skills: string[];
   toolsInUse: string[];
+  collaboratorIds: string[];
   isFPVActive?: boolean;
+}
+
+export interface PlayerState {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  speed: number;
+  isSprinting: boolean;
+  isGrounded: boolean;
+  isPointerLocked: boolean;
+  nearbyAgentId: string | null;
+  nearbyAgentDistance: number;
 }
 
 export interface UnitedProject {

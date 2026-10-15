@@ -12,7 +12,9 @@ import {
   BuildingType, 
   RoofStyle,
   AgentCharacter,
-  UnitedProject,
+  AgentTask,
+  PublicMission,
+  PlayerState,
   AgentRoleType
 } from './types';
 
@@ -26,14 +28,29 @@ export class CitySimulationEngine {
   public incidents: Incident[] = [];
   public metrics: CityMetrics;
 
-  // The 8 Living Autonomous AI Agents
+  // The 10 Living Autonomous AI Agents
   public agentCharacters: AgentCharacter[] = [];
-  public activeUnitedProject: UnitedProject | null = null;
+  public publicMissions: PublicMission[] = [];
+  public activeMissionId: string | null = null;
   public selectedAgentId: string | null = null;
-  public fpvAgentId: string | null = null;
 
-  public simulationTime: number = 9.0; // 0.0 - 24.0 (Hour of day)
-  public simulationSpeed: number = 1.0; // 0 = paused, 1 = normal, 2 = fast, 5 = ultra
+  // First-person Player State
+  public player: PlayerState = {
+    x: 0,
+    y: 1.8,
+    z: 12,
+    yaw: 0,
+    pitch: 0,
+    speed: 5.5,
+    isSprinting: false,
+    isGrounded: true,
+    isPointerLocked: false,
+    nearbyAgentId: null,
+    nearbyAgentDistance: 999
+  };
+
+  public simulationTime: number = 9.5; // 0.0 - 24.0 (Hour of day)
+  public simulationSpeed: number = 1.0;
   public tickCount: number = 0;
   public activeScenario: ScenarioType = 'BALANCED_METROPOLIS';
 
@@ -41,26 +58,28 @@ export class CitySimulationEngine {
     this.metrics = this.createDefaultMetrics();
     this.generateCityLayout();
     this.initAIAgentCharacters();
+    this.initDefaultPublicMissions();
+    this.loadFromStorage();
   }
 
   private createDefaultMetrics(): CityMetrics {
     return {
-      population: 3200,
-      employmentRate: 96.5,
-      avgCommuteTime: 14.8,
-      trafficCongestion: 12.0,
-      powerProduction: 320.0,
-      powerDemand: 240.0,
+      population: 3450,
+      employmentRate: 96.8,
+      avgCommuteTime: 13.5,
+      trafficCongestion: 11.0,
+      powerProduction: 340.0,
+      powerDemand: 255.0,
       powerGridStatus: 100.0,
-      waterSupply: 4200.0,
-      waterDemand: 3100.0,
+      waterSupply: 4500.0,
+      waterDemand: 3200.0,
       waterGridStatus: 100.0,
-      treasury: 750000,
-      incomeRate: 520,
-      expenseRate: 280,
-      citizenSatisfaction: 92.0,
+      treasury: 820000,
+      incomeRate: 540,
+      expenseRate: 270,
+      citizenSatisfaction: 94.0,
       activeIncidentsCount: 0,
-      carbonIndex: 21.0
+      carbonIndex: 19.0
     };
   }
 
@@ -74,11 +93,10 @@ export class CitySimulationEngine {
     this.incidents = [];
 
     // 1. Generate 6x6 Connected Road Network
-    const gridSize = 5; // 6 avenues x 6 streets (5 blocks across)
-    const spacing = 28; // Distance between avenues
+    const gridSize = 5;
+    const spacing = 28;
     const offset = (gridSize * spacing) / 2;
 
-    // Intersections
     for (let r = 0; r <= gridSize; r++) {
       for (let c = 0; c <= gridSize; c++) {
         const x = c * spacing - offset;
@@ -94,20 +112,15 @@ export class CitySimulationEngine {
       }
     }
 
-    // East-West Roads
     for (let r = 0; r <= gridSize; r++) {
       for (let c = 0; c < gridSize; c++) {
-        const x1 = c * spacing - offset;
-        const z1 = r * spacing - offset;
-        const x2 = (c + 1) * spacing - offset;
-        const z2 = r * spacing - offset;
         this.roads.push({
           id: `road-ew-${r}-${c}`,
           name: `Avenue ${r + 1} E-W`,
-          start: [x1, z1],
-          end: [x2, z2],
+          start: [c * spacing - offset, r * spacing - offset],
+          end: [(c + 1) * spacing - offset, r * spacing - offset],
           lanes: 2,
-          density: 0.1,
+          density: 0.08,
           speedLimit: 50,
           isClosed: false,
           orientation: 'EW'
@@ -115,20 +128,15 @@ export class CitySimulationEngine {
       }
     }
 
-    // North-South Roads
     for (let c = 0; c <= gridSize; c++) {
       for (let r = 0; r < gridSize; r++) {
-        const x1 = c * spacing - offset;
-        const z1 = r * spacing - offset;
-        const x2 = c * spacing - offset;
-        const z2 = (r + 1) * spacing - offset;
         this.roads.push({
           id: `road-ns-${c}-${r}`,
           name: `Street ${c + 1} N-S`,
-          start: [x1, z1],
-          end: [x2, z2],
+          start: [c * spacing - offset, r * spacing - offset],
+          end: [c * spacing - offset, (r + 1) * spacing - offset],
           lanes: 2,
-          density: 0.1,
+          density: 0.08,
           speedLimit: 50,
           isClosed: false,
           orientation: 'NS'
@@ -136,13 +144,13 @@ export class CitySimulationEngine {
       }
     }
 
-    // 2. Named AI Department Headquarters & Urban Blocks
+    // 2. Named AI Department Headquarters & Landmark Buildings
     // Landmark 1: Central Innovation Plaza (Center: 0, 0)
     this.buildings.push({
       id: 'bld-park',
-      name: 'Central Innovation Plaza & AI Forum',
+      name: 'Central Innovation Plaza & Public Forum',
       signName: 'INNOVATION PLAZA',
-      department: 'Multi-Agent Collective Forum',
+      department: 'Multi-Agent Public Mission Forum',
       zone: 'PARK',
       type: 'PARK_SPACE',
       x: 0,
@@ -158,8 +166,8 @@ export class CitySimulationEngine {
       accentColor: '#38BDF8',
       residents: 0,
       maxResidents: 0,
-      workers: 25,
-      maxWorkers: 50,
+      workers: 30,
+      maxWorkers: 60,
       powerDemand: 12,
       powerSupplied: true,
       waterDemand: 250,
@@ -171,9 +179,9 @@ export class CitySimulationEngine {
     // Landmark 2: Citadel Spire (Master Orchestrator HQ)
     this.buildings.push({
       id: 'bld-citadel',
-      name: 'Citadel Spire (Executive Orchestrator)',
+      name: 'Citadel Spire (Executive Orchestrator HQ)',
       signName: 'CITADEL SPIRE',
-      department: 'Executive Master Orchestration',
+      department: 'Executive Master Orchestration & Routing',
       zone: 'COMMERCIAL',
       type: 'SKYSCRAPER',
       x: 0,
@@ -204,7 +212,7 @@ export class CitySimulationEngine {
       id: 'bld-vision-lab',
       name: 'Product Vision Lab (Requirements & PRD)',
       signName: 'VISION LAB',
-      department: 'Product Strategy & User Stories',
+      department: 'Product Strategy & User Story Mapping',
       zone: 'COMMERCIAL',
       type: 'SKYSCRAPER',
       x: 28,
@@ -233,9 +241,9 @@ export class CitySimulationEngine {
     // Landmark 4: Software Blueprint Complex (Architect HQ)
     this.buildings.push({
       id: 'bld-blueprint',
-      name: 'Blueprint Complex (Software Architecture)',
+      name: 'Blueprint Complex (Software & Civil Architecture)',
       signName: 'BLUEPRINT COMPLEX',
-      department: 'System Architecture & Schema Design',
+      department: 'System Architecture & Schema Engineering',
       zone: 'COMMERCIAL',
       type: 'SKYSCRAPER',
       x: 28,
@@ -266,7 +274,7 @@ export class CitySimulationEngine {
       id: 'bld-foundry',
       name: 'Fabrication Foundry (Code Synthesis)',
       signName: 'FABRICATION FOUNDRY',
-      department: 'Full-Stack Implementation & AST',
+      department: 'Full-Stack Implementation & AST Synthesis',
       zone: 'INDUSTRIAL',
       type: 'FACTORY',
       x: -28,
@@ -292,7 +300,7 @@ export class CitySimulationEngine {
       health: 100
     });
 
-    // Landmark 6: Quality Assurance Bastion (Testing & Pytest)
+    // Landmark 6: Quality Assurance Bastion (Testing & CI)
     this.buildings.push({
       id: 'bld-qa-bastion',
       name: 'Quality Assurance Bastion (Testing & CI)',
@@ -326,9 +334,9 @@ export class CitySimulationEngine {
     // Landmark 7: Diagnostic Core (Debugging & RCA)
     this.buildings.push({
       id: 'bld-diagnostic',
-      name: 'Diagnostic Core (Debugging & Troubleshooting)',
+      name: 'Diagnostic Core (Debugging & Fixes)',
       signName: 'DIAGNOSTIC CORE',
-      department: 'Traceback Root Cause Analysis & Fixes',
+      department: 'Traceback Root Cause Analysis & Live Patching',
       zone: 'COMMERCIAL',
       type: 'OFFICE_TOWER',
       x: -28,
@@ -354,7 +362,7 @@ export class CitySimulationEngine {
       health: 100
     });
 
-    // Landmark 8: Security Citadel & Vault (Security Sentinel)
+    // Landmark 8: Security Citadel & Policy Vault
     this.buildings.push({
       id: 'bld-security',
       name: 'Security Citadel (Policy & Sandbox Vault)',
@@ -385,10 +393,10 @@ export class CitySimulationEngine {
       health: 100
     });
 
-    // Landmark 9: Cloud Release Dock & DevOps Terminal
+    // Landmark 9: Cloud Release Dock & DevOps
     this.buildings.push({
       id: 'bld-release-dock',
-      name: 'Cloud Release Dock (Deployment & DevOps)',
+      name: 'Cloud Release Dock (Deployment & CI/CD)',
       signName: 'RELEASE DOCK',
       department: 'Containerization, Deploy & Infrastructure',
       zone: 'INDUSTRIAL',
@@ -416,45 +424,45 @@ export class CitySimulationEngine {
       health: 100
     });
 
-    // Landmark 10: Civic Mainframe Data Center
+    // Landmark 10: Civic Medical Center (Doctor HQ)
     this.buildings.push({
-      id: 'bld-datacenter',
-      name: 'Civic Mainframe & Server Farm',
-      signName: 'DATA CENTER',
-      department: 'Persistent SQLite & Vector Store',
+      id: 'bld-hospital',
+      name: 'Civic Medical Trauma Center',
+      signName: 'CIVIC HOSPITAL',
+      department: 'Emergency & Surgical Care',
       zone: 'PUBLIC',
-      type: 'SILO',
-      x: -56,
-      z: 0,
+      type: 'HOSPITAL',
+      x: -28,
+      z: 56,
       width: 12,
-      depth: 10,
+      depth: 12,
       height: 18,
-      floors: 4,
-      roofStyle: 'FLAT',
-      facadeColor: '#334155',
-      color: '#334155',
-      roofColor: '#1E293B',
-      accentColor: '#94A3B8',
+      floors: 5,
+      roofStyle: 'HELIPAD',
+      facadeColor: '#F8FAFC',
+      color: '#F8FAFC',
+      roofColor: '#E2E8F0',
+      accentColor: '#EF4444',
       residents: 0,
       maxResidents: 0,
-      workers: 40,
-      maxWorkers: 80,
-      powerDemand: 60,
+      workers: 95,
+      maxWorkers: 160,
+      powerDemand: 38,
       powerSupplied: true,
-      waterDemand: 200,
+      waterDemand: 410,
       waterSupplied: true,
       wasteAccumulated: 5,
+      underConstruction: false,
       health: 100
     });
 
-    // Add varied residential, commercial, and suburban housing blocks around perimeter
+    // Add surrounding residential, commercial, and suburban housing blocks
     let bCount = 11;
     for (let r = 0; r < gridSize; r++) {
       for (let c = 0; c < gridSize; c++) {
         const bx = (c + 0.5) * spacing - offset;
         const bz = (r + 0.5) * spacing - offset;
 
-        // Skip coordinates close to landmarks
         const isNearLandmark = this.buildings.some(b => 
           Math.abs(b.x - bx) < 14 && Math.abs(b.z - bz) < 14
         );
@@ -466,7 +474,7 @@ export class CitySimulationEngine {
 
         this.buildings.push({
           id: `bld-block-${bCount}`,
-          name: isSuburban ? `Suburban House #${bCount}` : `Metropolitan Complex #${bCount}`,
+          name: isSuburban ? `Suburban House #${bCount}` : `Urban Apartment Complex #${bCount}`,
           zone: isSuburban ? 'RESIDENTIAL' : 'COMMERCIAL',
           type: bType,
           x: bx,
@@ -495,7 +503,7 @@ export class CitySimulationEngine {
       }
     }
 
-    // 3. Populate Vehicles
+    // Populate Vehicles
     for (let v = 0; v < 36; v++) {
       const road = this.roads[v % this.roads.length];
       const isEmergency = v === 0 || v === 1;
@@ -519,8 +527,8 @@ export class CitySimulationEngine {
       });
     }
 
-    // 4. Populate Sidewalk Pedestrians
-    for (let p = 0; p < 40; p++) {
+    // Populate Pedestrians
+    for (let p = 0; p < 36; p++) {
       const road = this.roads[p % this.roads.length];
       const prog = (p * 0.1) % 1.0;
       const side = (p % 2 === 0 ? 2.6 : -2.6);
@@ -538,218 +546,438 @@ export class CitySimulationEngine {
     }
   }
 
-  // --- Initialize The 8 Autonomous AI Agent Characters ---
+  // --- Initialize The 10 Specialized AI Citizens ---
   private initAIAgentCharacters(): void {
     this.agentCharacters = [
       {
         id: 'agent-coordinator',
         role: 'COORDINATOR',
         name: 'Alex Vance',
-        title: 'Master Orchestrator & Chief Architect',
+        title: 'Master Orchestrator',
+        profession: 'Chief Systems Architect & Orchestrator',
         department: 'Executive Master Orchestration (Citadel Spire)',
-        color: '#38BDF8', // Cyan
+        color: '#38BDF8',
         x: 0,
-        z: -24,
+        z: -22,
         targetX: 0,
-        targetZ: 0, // Central Plaza
+        targetZ: -2,
         speed: 3.5,
         angle: 0,
         homeBuildingId: 'bld-citadel',
         currentBuildingId: 'bld-citadel',
-        currentTask: 'Overseeing multi-agent synchronization and pipeline throughput',
-        assignedTasks: ['Orchestrate factory state machine', 'Resolve dependency deadlocks'],
-        status: 'THINKING',
-        currentThought: 'All 8 departmental towers operating with optimal pipeline synchronization.',
-        thoughtBubble: 'Synthesizing global factory state...',
+        currentTask: 'Supervising city-wide autonomous workflows and dependency graphs',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-1', title: 'Initialize Multi-Agent DAG State Machine', completedAt: '09:00 AM', deliverable: 'State machine verified with zero cycles.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Monitoring multi-agent pipeline and scheduling availability.',
+        thoughtBubble: 'City operational at 100% capacity.',
         speechTimer: 5.0,
         avatarIcon: 'Cpu',
         level: 10,
-        skills: ['DAG Scheduling', 'State Machine Routing', 'Resource Balancing'],
-        toolsInUse: ['ProcessRunner', 'TaskStateMachine', 'EventDispatcher']
+        skills: ['Task Decomposition', 'DAG Scheduling', 'Resource Allocation', 'Deadlock Resolution'],
+        toolsInUse: ['ProcessRunner', 'TaskStateMachine', 'EventDispatcher'],
+        collaboratorIds: ['agent-architect', 'agent-analyst']
       },
       {
         id: 'agent-analyst',
         role: 'URBAN_PLANNER',
         name: 'Dr. Maya Lin',
-        title: 'Product Vision Analyst & Planner',
-        department: 'Requirements & Specification Lab (Vision Lab)',
-        color: '#C084FC', // Purple
-        x: 24,
+        title: 'Product Vision Analyst',
+        profession: 'Requirements Engineer & Product Analyst',
+        department: 'Requirements & PRD Lab (Vision Lab)',
+        color: '#C084FC',
+        x: 22,
         z: 0,
-        targetX: 0,
+        targetX: 2,
         targetZ: 0,
         speed: 3.2,
         angle: Math.PI / 2,
         homeBuildingId: 'bld-vision-lab',
         currentBuildingId: 'bld-vision-lab',
-        currentTask: 'Decomposing project objectives into verifiable acceptance criteria',
-        assignedTasks: ['Synthesize PRD specifications', 'Define behavioral test invariants'],
-        status: 'COLLABORATING',
-        currentThought: 'User directives decomposed into modular feature contracts.',
-        thoughtBubble: 'Drafting acceptance criteria...',
+        currentTask: 'Synthesizing verifiable acceptance criteria and user specifications',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-2', title: 'Draft Architectural PRD for City REST API', completedAt: '09:15 AM', deliverable: 'PRD v1.2 with 12 acceptance criteria.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Ready to evaluate user directives and draft project requirements.',
+        thoughtBubble: 'Standing by for project briefs...',
         speechTimer: 4.5,
         avatarIcon: 'Layers',
         level: 9,
-        skills: ['PRD Formulation', 'Contract Verification', 'User Stories'],
-        toolsInUse: ['SpecSynthesizer', 'AcceptanceCriteriaGenerator']
+        skills: ['PRD Formulation', 'Contract Verification', 'User Stories', 'Acceptance Testing'],
+        toolsInUse: ['SpecSynthesizer', 'AcceptanceCriteriaGenerator'],
+        collaboratorIds: ['agent-coordinator', 'agent-architect']
       },
       {
         id: 'agent-architect',
         role: 'TRAFFIC',
         name: 'Marcus Vance',
         title: 'Principal Software Architect',
+        profession: 'Domain Architect & Civil Modeler',
         department: 'System Architecture (Blueprint Complex)',
-        color: '#3B82F6', // Royal Blue
-        x: 24,
-        z: -24,
-        targetX: 24,
-        targetZ: -24,
+        color: '#3B82F6',
+        x: 22,
+        z: -22,
+        targetX: 22,
+        targetZ: -22,
         speed: 3.4,
         angle: -Math.PI / 4,
         homeBuildingId: 'bld-blueprint',
         currentBuildingId: 'bld-blueprint',
         currentTask: 'Designing domain interfaces and database schemas',
-        assignedTasks: ['Design domain model interfaces', 'Structure modular package layers'],
-        status: 'THINKING',
-        currentThought: 'Clean architecture interfaces isolated from external boundaries.',
-        thoughtBubble: 'Optimizing DB schema index...',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-3', title: 'Normalize SQLite Schema and Foreign Keys', completedAt: '09:20 AM', deliverable: 'Schema DDL validated.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Domain models structured; interfaces decoupled from outer services.',
+        thoughtBubble: 'Architecture contracts ready.',
         speechTimer: 6.0,
         avatarIcon: 'Compass',
         level: 10,
-        skills: ['Clean Architecture', 'Type Hints', 'Schema Normalization'],
-        toolsInUse: ['SchemaArchitect', 'InterfaceContractValidator']
+        skills: ['Clean Architecture', 'Type Hints', 'Schema Normalization', 'Structural Engineering'],
+        toolsInUse: ['SchemaArchitect', 'InterfaceContractValidator'],
+        collaboratorIds: ['agent-engineer', 'agent-analyst']
       },
       {
         id: 'agent-engineer',
         role: 'ENERGY',
         name: 'Devon Cross',
         title: 'Senior Implementation Engineer',
+        profession: 'Full-Stack Software Engineer',
         department: 'Source Code Fabrication (Foundry)',
-        color: '#F59E0B', // Amber Gold
-        x: -24,
-        z: 24,
-        targetX: -24,
-        targetZ: 24,
+        color: '#F59E0B',
+        x: -22,
+        z: 22,
+        targetX: -22,
+        targetZ: 22,
         speed: 3.6,
         angle: Math.PI * 0.75,
         homeBuildingId: 'bld-foundry',
         currentBuildingId: 'bld-foundry',
         currentTask: 'Synthesizing robust FastAPI route handlers and business logic',
-        assignedTasks: ['Implement endpoint controllers', 'Integrate SQLite persistence'],
-        status: 'CODING',
-        currentThought: 'Generating strongly typed Pydantic payloads with zero silent failures.',
-        thoughtBubble: 'Writing AST route handler...',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-4', title: 'Implement Auth Token Validation Endpoint', completedAt: '09:25 AM', deliverable: 'api_service.py controller compiled.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Ready to write type-safe code without silent failures.',
+        thoughtBubble: 'Awaiting coding directive...',
         speechTimer: 5.5,
         avatarIcon: 'Sliders',
         level: 9,
-        skills: ['Python 3.13 / FastAPI', 'TypeScript / React', 'AsyncIO Concurrency'],
-        toolsInUse: ['CodeFabricator', 'ASTRefactoringEngine']
+        skills: ['Python 3.13 / FastAPI', 'TypeScript / React', 'AsyncIO Concurrency', 'SQLAlchemy / SQLite'],
+        toolsInUse: ['CodeFabricator', 'ASTRefactoringEngine'],
+        collaboratorIds: ['agent-architect', 'agent-qa']
       },
       {
         id: 'agent-qa',
         role: 'WATER_WASTE',
         name: 'Elena Rostova',
         title: 'QA Bastion Test Lead',
+        profession: 'Automated Test Engineer & Verifier',
         department: 'Quality Assurance & Automated Verification (QA Bastion)',
-        color: '#10B981', // Emerald
-        x: -24,
-        z: -24,
-        targetX: -24,
-        targetZ: -24,
+        color: '#10B981',
+        x: -22,
+        z: -22,
+        targetX: -22,
+        targetZ: -22,
         speed: 3.3,
         angle: -Math.PI * 0.75,
         homeBuildingId: 'bld-qa-bastion',
         currentBuildingId: 'bld-qa-bastion',
         currentTask: 'Executing 20/20 pytest regression suites with edge-case assertion validation',
-        assignedTasks: ['Execute pytest suite', 'Validate error boundary edge cases'],
-        status: 'TESTING',
-        currentThought: '100% test pass rate across unit, integration, and security suites.',
-        thoughtBubble: '20/20 pytest assertions PASSED!',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-5', title: 'Verify 20/20 Test Suite on Backend API', completedAt: '09:30 AM', deliverable: '100% test assertions passed.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'All test assertions verified. Zero regressions in active sandbox.',
+        thoughtBubble: '20/20 tests PASSED.',
         speechTimer: 6.5,
         avatarIcon: 'ShieldCheck',
         level: 10,
-        skills: ['Pytest Test Automation', 'Coverage Profiling', 'Mutation Testing'],
-        toolsInUse: ['PytestVerifier', 'CoverageProfiler']
+        skills: ['Pytest Automation', 'Coverage Profiling', 'Mutation Testing', 'Regression Verification'],
+        toolsInUse: ['PytestVerifier', 'CoverageProfiler'],
+        collaboratorIds: ['agent-engineer', 'agent-diagnostic']
       },
       {
         id: 'agent-diagnostic',
         role: 'ECONOMY',
         name: 'Dr. Aaron Chen',
-        title: 'Root Cause & Diagnostic Specialist',
+        title: 'Diagnostic Specialist',
+        profession: 'Root Cause & Troubleshooting Specialist',
         department: 'Diagnostic Core & Troubleshooting',
-        color: '#EC4899', // Pink
-        x: -24,
+        color: '#EC4899',
+        x: -22,
         z: 0,
-        targetX: -24,
+        targetX: -22,
         targetZ: 0,
         speed: 3.4,
         angle: Math.PI,
         homeBuildingId: 'bld-diagnostic',
         currentBuildingId: 'bld-diagnostic',
-        currentTask: 'Performing automated root cause analysis on failed execution traces',
-        assignedTasks: ['Isolate exception stack traces', 'Generate precise regression diffs'],
-        status: 'THINKING',
-        currentThought: 'Zero runtime regressions detected across active sandbox threads.',
-        thoughtBubble: 'Traceback logs clean.',
+        currentTask: 'Performing automated root cause analysis on execution traces',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-6', title: 'Analyze Canvas 2D roundRect Compatibility', completedAt: '09:35 AM', deliverable: 'Applied safe polyfill across browsers.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Telemetry diagnostics clean; zero unhandled exceptions.',
+        thoughtBubble: 'Diagnostics clean.',
         speechTimer: 4.0,
         avatarIcon: 'Radio',
         level: 9,
-        skills: ['Traceback Deconstruction', 'Memory Profiling', 'Heuristic Repair'],
-        toolsInUse: ['TracebackAnalyzer', 'AutomatedPatchGenerator']
+        skills: ['Traceback Deconstruction', 'Memory Profiling', 'Heuristic Repair', 'Log Inspection'],
+        toolsInUse: ['TracebackAnalyzer', 'AutomatedPatchGenerator'],
+        collaboratorIds: ['agent-qa', 'agent-engineer']
       },
       {
         id: 'agent-security',
         role: 'PUBLIC_SAFETY',
         name: 'Kaelen Voss',
-        title: 'Security Sentinel & Bastion Lead',
+        title: 'Security Sentinel',
+        profession: 'Security Engineer & Policy Auditor',
         department: 'Security Citadel & Policy Guardrails',
-        color: '#EF4444', // Crimson
+        color: '#EF4444',
         x: 0,
-        z: 24,
+        z: 22,
         targetX: 0,
-        targetZ: 24,
+        targetZ: 22,
         speed: 3.5,
         angle: Math.PI / 2,
         homeBuildingId: 'bld-security',
         currentBuildingId: 'bld-security',
         currentTask: 'Enforcing workspace path-jail containment and secret sanitization',
-        assignedTasks: ['Audit command whitelist', 'Enforce secret token redaction'],
-        status: 'COLLABORATING',
-        currentThought: 'Path jail containment active; all execution sandboxed in secure workspace.',
-        thoughtBubble: 'Security perimeter: 100% SECURE',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-7', title: 'Audit Host Command Whitelist & Path Containment', completedAt: '09:40 AM', deliverable: 'Sandbox perimeter 100% contained.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Security guardrails active. Unauthorized filesystem access blocked.',
+        thoughtBubble: 'Security: 100% SECURE',
         speechTimer: 7.0,
         avatarIcon: 'Flame',
         level: 10,
-        skills: ['Path Traversal Jail', 'Command Whitelisting', 'Secret Redaction'],
-        toolsInUse: ['PathJailVerifier', 'SecretRedactionEngine']
+        skills: ['Path Traversal Jail', 'Command Whitelisting', 'Secret Redaction', 'OWASP Vulnerability Audit'],
+        toolsInUse: ['PathJailVerifier', 'SecretRedactionEngine'],
+        collaboratorIds: ['agent-coordinator', 'agent-devops']
       },
       {
         id: 'agent-devops',
         role: 'WELFARE',
         name: 'Sora Takahashi',
         title: 'Cloud Release Dock Chief',
+        profession: 'DevOps & Cloud Infrastructure Engineer',
         department: 'Deployment & CI/CD Pipeline (Release Dock)',
-        color: '#06B6D4', // Teal
-        x: 24,
-        z: 24,
-        targetX: 24,
-        targetZ: 24,
+        color: '#06B6D4',
+        x: 22,
+        z: 22,
+        targetX: 22,
+        targetZ: 22,
         speed: 3.3,
         angle: Math.PI / 4,
         homeBuildingId: 'bld-release-dock',
         currentBuildingId: 'bld-release-dock',
         currentTask: 'Preparing production Docker assets and GitHub Actions CI pipelines',
-        assignedTasks: ['Build Docker container artifacts', 'Validate deployment manifests'],
-        status: 'DEPLOYING',
-        currentThought: 'Container manifests verified; release artifacts packaged for production.',
-        thoughtBubble: 'Docker container ready.',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-8', title: 'Generate Dockerfile & OCI Container Spec', completedAt: '09:45 AM', deliverable: 'Multi-stage Dockerfile verified.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Container manifests verified; ready to deploy release artifacts.',
+        thoughtBubble: 'CI/CD pipeline ready.',
         speechTimer: 5.0,
         avatarIcon: 'Zap',
         level: 9,
-        skills: ['Docker OCI Containers', 'CI/CD Pipelines', 'Cloud Run Deployments'],
-        toolsInUse: ['DockerBuilder', 'ArtifactPackager']
+        skills: ['Docker OCI Containers', 'CI/CD Pipelines', 'Cloud Run Provisioning', 'Health Monitoring'],
+        toolsInUse: ['DockerBuilder', 'ArtifactPackager'],
+        collaboratorIds: ['agent-security', 'agent-engineer']
+      },
+      {
+        id: 'agent-constructor',
+        role: 'URBAN_PLANNER',
+        name: 'Harlan Drake',
+        title: 'Civil Construction Lead',
+        profession: 'Civil Infrastructure & Construction Engineer',
+        department: 'Civic Development & Construction Operations',
+        color: '#EAB308',
+        x: -12,
+        z: 28,
+        targetX: -12,
+        targetZ: 28,
+        speed: 3.1,
+        angle: 0,
+        homeBuildingId: 'bld-hospital',
+        currentBuildingId: 'bld-hospital',
+        currentTask: 'Managing structural engineering and building site progress',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-9', title: 'Foundation Survey for Civic Trauma Center', completedAt: '09:50 AM', deliverable: 'Site structural integrity certified.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Construction sites surveyed. Heavy machinery standing by.',
+        thoughtBubble: 'Cranes and scaffolding ready.',
+        speechTimer: 5.0,
+        avatarIcon: 'Building2',
+        level: 9,
+        skills: ['Structural Construction', 'Material Sourcing', 'Site Safety', 'Heavy Machinery Operation'],
+        toolsInUse: ['StructuralEstimator', 'SiteProgressTracker'],
+        collaboratorIds: ['agent-architect', 'agent-devops']
+      },
+      {
+        id: 'agent-doctor',
+        role: 'PUBLIC_SAFETY',
+        name: 'Dr. Sarah Miller',
+        title: 'Chief Medical Director',
+        profession: 'Emergency Medicine & Healthcare Operations',
+        department: 'Civic Medical Center (Hospital)',
+        color: '#F43F5E',
+        x: -24,
+        z: 50,
+        targetX: -24,
+        targetZ: 50,
+        speed: 3.2,
+        angle: -Math.PI / 2,
+        homeBuildingId: 'bld-hospital',
+        currentBuildingId: 'bld-hospital',
+        currentTask: 'Supervising emergency medical response and hospital operations',
+        taskQueue: [],
+        taskHistory: [
+          { id: 'hist-10', title: 'Equip Trauma Center Medical Oxygen Grid', completedAt: '09:55 AM', deliverable: 'Medical oxygen infrastructure verified.' }
+        ],
+        workProgress: 100,
+        availability: 'AVAILABLE',
+        status: 'IDLE',
+        currentThought: 'Medical wards operating at nominal readiness. Ambulances equipped.',
+        thoughtBubble: 'Emergency medical ready.',
+        speechTimer: 5.5,
+        avatarIcon: 'Heart',
+        level: 10,
+        skills: ['Emergency Medicine', 'Triage Protocol', 'Hospital Operations', 'Biohazard Containment'],
+        toolsInUse: ['MedicalTelemetry', 'TriageDispatcher'],
+        collaboratorIds: ['agent-security', 'agent-coordinator']
       }
     ];
+  }
+
+  // --- Default Public Missions ---
+  private initDefaultPublicMissions(): void {
+    this.publicMissions = [
+      {
+        id: 'mission-hospital',
+        title: 'Construct Modern Medical Trauma Center in Civic District',
+        description: 'Design, build, wire, and commission a high-capacity civic medical facility with emergency wards and ICU beds.',
+        category: 'CONSTRUCTION',
+        status: 'IN_PROGRESS',
+        progress: 35,
+        targetBuildingId: 'bld-hospital',
+        acceptanceCriteria: [
+          'Architectural schematics approved',
+          'Foundation and structural steel erected',
+          'Power grid & water lines connected',
+          'Medical safety inspection passed'
+        ],
+        deliverables: [
+          'hospital_architectural_blueprint.cad',
+          'structural_safety_certificate.pdf'
+        ],
+        blockers: [],
+        publishedAt: '09:00 AM',
+        participatingAgentIds: ['agent-architect', 'agent-constructor', 'agent-devops', 'agent-doctor', 'agent-security'],
+        subtasks: [
+          {
+            id: 'task-hosp-1',
+            title: 'Design Hospital Architectural Blueprint',
+            description: 'Draft structural layouts and emergency access points.',
+            expectedDeliverable: 'hospital_blueprints_v2.pdf',
+            priority: 'HIGH',
+            status: 'COMPLETED',
+            progress: 100,
+            assignedAgentId: 'agent-architect',
+            assignedAgentName: 'Marcus Vance',
+            source: 'PUBLIC_MISSION',
+            publicMissionId: 'mission-hospital',
+            requiredSkills: ['Structural Engineering'],
+            dependencies: [],
+            deliverableResult: 'Architectural schematics finalized and validated.',
+            createdAt: '09:00 AM',
+            completedAt: '09:15 AM'
+          },
+          {
+            id: 'task-hosp-2',
+            title: 'Erect Foundation & Structural Framework',
+            description: 'Coordinate cranes and steel girder construction on site.',
+            expectedDeliverable: 'foundation_structural_mesh',
+            priority: 'HIGH',
+            status: 'WORKING',
+            progress: 45,
+            assignedAgentId: 'agent-constructor',
+            assignedAgentName: 'Harlan Drake',
+            source: 'PUBLIC_MISSION',
+            publicMissionId: 'mission-hospital',
+            requiredSkills: ['Structural Construction'],
+            dependencies: ['task-hosp-1'],
+            createdAt: '09:15 AM'
+          },
+          {
+            id: 'task-hosp-3',
+            title: 'Install High-Voltage Medical Power Grid',
+            description: 'Connect primary and auxiliary battery reserves to hospital ICU.',
+            expectedDeliverable: 'power_connection_receipt',
+            priority: 'MEDIUM',
+            status: 'PENDING',
+            progress: 0,
+            assignedAgentId: 'agent-devops',
+            assignedAgentName: 'Sora Takahashi',
+            source: 'PUBLIC_MISSION',
+            publicMissionId: 'mission-hospital',
+            requiredSkills: ['Cloud Run Provisioning'],
+            dependencies: ['task-hosp-2'],
+            createdAt: '09:15 AM'
+          },
+          {
+            id: 'task-hosp-4',
+            title: 'Commission Intensive Care Unit Equipment',
+            description: 'Verify bio-monitors, medical gas pressure, and triage ward readiness.',
+            expectedDeliverable: 'icu_readiness_report.json',
+            priority: 'HIGH',
+            status: 'PENDING',
+            progress: 0,
+            assignedAgentId: 'agent-doctor',
+            assignedAgentName: 'Dr. Sarah Miller',
+            source: 'PUBLIC_MISSION',
+            publicMissionId: 'mission-hospital',
+            requiredSkills: ['Hospital Operations'],
+            dependencies: ['task-hosp-3'],
+            createdAt: '09:15 AM'
+          }
+        ]
+      }
+    ];
+
+    this.activeMissionId = 'mission-hospital';
   }
 
   // --- Authoritative Simulation Tick Loop ---
@@ -761,7 +989,26 @@ export class CitySimulationEngine {
     // Advance 24-hour simulation clock
     this.simulationTime = (this.simulationTime + (effectiveDelta * 0.04)) % 24.0;
 
-    // 1. Update Traffic Lights at Intersections
+    // 1. Proximity Detection: Player <-> AI Citizens
+    let closestDist = 999;
+    let closestId: string | null = null;
+    this.agentCharacters.forEach(ag => {
+      const dist = Math.sqrt((this.player.x - ag.x) ** 2 + (this.player.z - ag.z) ** 2);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestId = ag.id;
+      }
+    });
+
+    if (closestDist <= 3.6) {
+      this.player.nearbyAgentId = closestId;
+      this.player.nearbyAgentDistance = closestDist;
+    } else {
+      this.player.nearbyAgentId = null;
+      this.player.nearbyAgentDistance = closestDist;
+    }
+
+    // 2. Traffic Light Signals
     this.intersections.forEach(inter => {
       inter.timer += effectiveDelta;
       if (inter.timer >= inter.greenDuration) {
@@ -770,7 +1017,7 @@ export class CitySimulationEngine {
       }
     });
 
-    // 2. Move Vehicles along road network
+    // 3. Move Vehicles along road network
     this.vehicles.forEach(veh => {
       const road = this.roads.find(r => r.id === veh.roadId);
       if (!road) return;
@@ -808,208 +1055,436 @@ export class CitySimulationEngine {
       }
     });
 
-    // 3. Update AI Agent Characters (Autonomous Movement & Speech)
+    // 4. Update AI Agent Behavioral State Machine & Work Lifecycle
     this.agentCharacters.forEach(ag => {
       // Countdown speech timer
       if (ag.speechTimer !== undefined) {
         ag.speechTimer -= effectiveDelta;
         if (ag.speechTimer <= 0) {
-          // Refresh thought
           ag.thoughtBubble = undefined;
         }
       }
 
-      // Check distance to target destination
+      // Check distance to current target destination
       const dx = ag.targetX - ag.x;
       const dz = ag.targetZ - ag.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist > 0.8) {
-        // Move towards target
+        // Traveling to assigned workplace or destination
         const step = ag.speed * effectiveDelta;
         ag.x += (dx / dist) * step;
         ag.z += (dz / dist) * step;
         ag.angle = Math.atan2(dz, dx);
-        if (ag.status !== 'CODING' && ag.status !== 'TESTING') {
-          ag.status = 'WALKING';
+        if (ag.status !== 'WORKING' && ag.status !== 'VERIFYING') {
+          ag.status = 'TRAVELING';
         }
       } else {
-        // Reached destination -> collaborate or work
-        if (ag.status === 'WALKING') {
-          ag.status = 'THINKING';
-        }
-
-        // Randomly pick a new landmark to visit or return home every ~20 seconds
-        if (Math.random() < 0.005 && !this.activeUnitedProject) {
-          const destinations = [
-            { x: 0, z: 0 }, // Central Innovation Plaza
-            { x: 0, z: -24 }, // Citadel
-            { x: 24, z: 0 }, // Vision Lab
-            { x: 24, z: -24 }, // Blueprint
-            { x: -24, z: 24 }, // Foundry
-            { x: -24, z: -24 }, // QA Bastion
-            { x: -24, z: 0 }, // Diagnostic
-            { x: 0, z: 24 }, // Security
-            { x: 24, z: 24 } // Release Dock
-          ];
-          const dest = destinations[Math.floor(Math.random() * destinations.length)];
-          ag.targetX = dest.x + (Math.random() * 4 - 2);
-          ag.targetZ = dest.z + (Math.random() * 4 - 2);
+        // At target destination
+        if (ag.status === 'TRAVELING') {
+          ag.status = ag.activeTask ? 'WORKING' : 'IDLE';
         }
       }
 
-      // Check for proximity collaboration with other agents
-      this.agentCharacters.forEach(other => {
-        if (other.id !== ag.id) {
-          const interDist = Math.sqrt((ag.x - other.x) ** 2 + (ag.z - other.z) ** 2);
-          if (interDist < 4.5 && !ag.thoughtBubble && Math.random() < 0.02) {
-            ag.speechTimer = 4.0;
-            ag.thoughtBubble = `Syncing with ${other.name.split(' ')[0]}...`;
+      // Active Task Progress Lifecycle
+      if (ag.activeTask && ag.activeTask.status !== 'COMPLETED' && ag.activeTask.status !== 'BLOCKED') {
+        ag.status = 'WORKING';
+        ag.availability = 'BUSY';
+        ag.workProgress = Math.min(100, ag.workProgress + effectiveDelta * 4.5);
+        ag.activeTask.progress = Math.round(ag.workProgress);
+
+        if (ag.workProgress >= 85 && ag.activeTask.status !== 'VERIFYING') {
+          ag.activeTask.status = 'VERIFYING';
+          ag.status = 'VERIFYING';
+          ag.thoughtBubble = `Verifying ${ag.activeTask.title.slice(0, 24)}...`;
+          ag.speechTimer = 4.0;
+        }
+
+        if (ag.workProgress >= 100) {
+          // Task Completed!
+          ag.activeTask.status = 'COMPLETED';
+          ag.activeTask.completedAt = new Date().toLocaleTimeString();
+          ag.activeTask.deliverableResult = `Verified deliverable: ${ag.activeTask.expectedDeliverable} generated by ${ag.name}`;
+          
+          ag.taskHistory.unshift({
+            id: ag.activeTask.id,
+            title: ag.activeTask.title,
+            completedAt: ag.activeTask.completedAt,
+            deliverable: ag.activeTask.deliverableResult
+          });
+
+          ag.thoughtBubble = `Task Complete: ${ag.activeTask.title.slice(0, 26)}!`;
+          ag.speechTimer = 6.0;
+
+          // If linked to a Public Mission, update public mission DAG
+          if (ag.activeTask.publicMissionId) {
+            this.handleSubtaskCompleted(ag.activeTask.publicMissionId, ag.activeTask.id);
+          }
+
+          // Pick next queued task or go idle
+          if (ag.taskQueue.length > 0) {
+            ag.activeTask = ag.taskQueue.shift() || null;
+            ag.workProgress = 0;
+            ag.status = 'ASSIGNED';
+          } else {
+            ag.activeTask = null;
+            ag.status = 'IDLE';
+            ag.availability = 'AVAILABLE';
+            ag.currentTask = 'Standing by for new task directives';
           }
         }
-      });
-    });
-
-    // 4. Update United Project Progression (Real Collective Intelligence)
-    if (this.activeUnitedProject && this.activeUnitedProject.status !== 'COMPLETED') {
-      const proj = this.activeUnitedProject;
-      proj.progress = Math.min(100, proj.progress + effectiveDelta * 4.0); // ~25 seconds to complete
-
-      if (proj.progress < 25 && proj.status !== 'PLANNING') {
-        proj.status = 'PLANNING';
-        proj.activeAgentId = 'agent-analyst';
-        const analyst = this.agentCharacters.find(a => a.id === 'agent-analyst');
-        if (analyst) {
-          analyst.targetX = 0; analyst.targetZ = 0; // Head to Plaza
-          analyst.thoughtBubble = 'Synthesizing PRD for United Project...';
-          analyst.speechTimer = 5.0;
-        }
-      } else if (proj.progress >= 25 && proj.progress < 50 && proj.status !== 'ARCHITECTING') {
-        proj.status = 'ARCHITECTING';
-        proj.activeAgentId = 'agent-architect';
-        proj.stageLogs.push({
-          timestamp: new Date().toLocaleTimeString(),
-          agentName: 'Dr. Maya Lin (Analyst)',
-          message: 'PRD approved. Passing system contract to Software Architect.',
-          step: 'PLANNING'
-        });
-        const arch = this.agentCharacters.find(a => a.id === 'agent-architect');
-        if (arch) {
-          arch.targetX = 24; arch.targetZ = -24; // Head to Blueprint Complex
-          arch.thoughtBubble = 'Designing modular architecture schema...';
-          arch.speechTimer = 5.0;
-        }
-      } else if (proj.progress >= 50 && proj.progress < 75 && proj.status !== 'IMPLEMENTING') {
-        proj.status = 'IMPLEMENTING';
-        proj.activeAgentId = 'agent-engineer';
-        proj.stageLogs.push({
-          timestamp: new Date().toLocaleTimeString(),
-          agentName: 'Marcus Vance (Architect)',
-          message: 'Architecture blueprint validated. Handing code generation to Foundry.',
-          step: 'ARCHITECTING'
-        });
-        const eng = this.agentCharacters.find(a => a.id === 'agent-engineer');
-        if (eng) {
-          eng.targetX = -24; eng.targetZ = 24; // Head to Foundry
-          eng.thoughtBubble = 'Fabricating source code modules...';
-          eng.speechTimer = 5.0;
-          eng.status = 'CODING';
-        }
-      } else if (proj.progress >= 75 && proj.progress < 95 && proj.status !== 'TESTING') {
-        proj.status = 'TESTING';
-        proj.activeAgentId = 'agent-qa';
-        proj.stageLogs.push({
-          timestamp: new Date().toLocaleTimeString(),
-          agentName: 'Devon Cross (Engineer)',
-          message: 'Source code synthesized. Dispatching to QA Bastion for verification.',
-          step: 'IMPLEMENTING'
-        });
-        const qa = this.agentCharacters.find(a => a.id === 'agent-qa');
-        if (qa) {
-          qa.targetX = -24; qa.targetZ = -24; // Head to QA Bastion
-          qa.thoughtBubble = 'Running 20/20 test assertions...';
-          qa.speechTimer = 5.0;
-          qa.status = 'TESTING';
-        }
-      } else if (proj.progress >= 100 && proj.status !== 'COMPLETED') {
-        proj.status = 'COMPLETED';
-        proj.deliverables = [
-          'backend/app/controllers/api_service.py',
-          'backend/tests/test_api_service.py (20/20 PASSED)',
-          'docker-compose.yml & Dockerfile',
-          'docs/ARCHITECTURE_SPEC.md'
+      } else if (!ag.activeTask && Math.random() < 0.003) {
+        // Autonomous stroll between departments and Innovation Plaza
+        const destinations = [
+          { x: 0, z: 0 },
+          { x: 0, z: -24 },
+          { x: 24, z: 0 },
+          { x: 24, z: -24 },
+          { x: -24, z: 24 },
+          { x: -24, z: -24 },
+          { x: -24, z: 0 },
+          { x: 0, z: 24 },
+          { x: 24, z: 24 },
+          { x: -24, z: 52 }
         ];
-        proj.stageLogs.push({
-          timestamp: new Date().toLocaleTimeString(),
-          agentName: 'Alex Vance (Orchestrator)',
-          message: `United Project '${proj.title}' successfully verified and completed!`,
-          step: 'COMPLETED'
-        });
-        // Celebration in plaza
-        this.agentCharacters.forEach((ag, idx) => {
-          ag.targetX = Math.cos(idx) * 6;
-          ag.targetZ = Math.sin(idx) * 6;
-          ag.thoughtBubble = 'United Project Complete!';
-          ag.speechTimer = 8.0;
-        });
+        const dest = destinations[Math.floor(Math.random() * destinations.length)];
+        ag.targetX = dest.x + (Math.random() * 4 - 2);
+        ag.targetZ = dest.z + (Math.random() * 4 - 2);
       }
-    }
+    });
 
     this.recalculateMetrics();
-  }
 
-  // --- Assign Direct Task to an Individual Agent ---
-  public assignTaskToAgent(agentId: string, taskDescription: string): void {
-    const ag = this.agentCharacters.find(a => a.id === agentId);
-    if (!ag) return;
-
-    ag.currentTask = taskDescription;
-    ag.assignedTasks.unshift(taskDescription);
-    ag.thoughtBubble = `Directive received: "${taskDescription.slice(0, 32)}..."`;
-    ag.speechTimer = 6.0;
-
-    // Head to their department or target building
-    const homeBld = this.buildings.find(b => b.id === ag.homeBuildingId);
-    if (homeBld) {
-      ag.targetX = homeBld.x;
-      ag.targetZ = homeBld.z;
+    // Auto-save every 10 seconds
+    if (this.tickCount % 60 === 0) {
+      this.saveToStorage();
     }
-    ag.status = ag.role === 'ENERGY' ? 'CODING' : (ag.role === 'WATER_WASTE' ? 'TESTING' : 'THINKING');
-    ag.currentThought = `Executing directive: ${taskDescription}`;
   }
 
-  // --- Deploy City-Wide United Project ---
-  public deployUnitedProject(title: string, description: string): UnitedProject {
-    const proj: UnitedProject = {
-      id: `proj-${Date.now()}`,
-      title,
-      description,
-      status: 'PLANNING',
-      progress: 5,
-      activeAgentId: 'agent-coordinator',
-      startedAt: new Date().toLocaleTimeString(),
-      deliverables: [],
-      stageLogs: [
-        {
-          timestamp: new Date().toLocaleTimeString(),
-          agentName: 'Alex Vance (Chief Architect)',
-          message: `Broadcasted United Project directive: "${title}". All 8 agents mobilized.`,
-          step: 'INITIATION'
-        }
-      ]
+  // --- Assign Direct Individual Task to an Agent ---
+  public assignIndividualTask(
+    agentId: string, 
+    taskData: { title: string; description: string; expectedDeliverable: string; priority: AgentTask['priority'] }
+  ): { success: boolean; message: string; task?: AgentTask } {
+    const ag = this.agentCharacters.find(a => a.id === agentId);
+    if (!ag) return { success: false, message: 'Agent not found.' };
+
+    const task: AgentTask = {
+      id: `task-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: taskData.title,
+      description: taskData.description,
+      expectedDeliverable: taskData.expectedDeliverable,
+      priority: taskData.priority,
+      status: 'ASSIGNED',
+      progress: 0,
+      assignedAgentId: ag.id,
+      assignedAgentName: ag.name,
+      source: 'INDIVIDUAL',
+      requiredSkills: [ag.skills[0] || 'General'],
+      dependencies: [],
+      createdAt: new Date().toLocaleTimeString()
     };
 
-    this.activeUnitedProject = proj;
-
-    // Mobilize agents towards Central Innovation Plaza for initial briefing
-    this.agentCharacters.forEach((ag, idx) => {
-      ag.targetX = Math.cos((idx / 8) * Math.PI * 2) * 5;
-      ag.targetZ = Math.sin((idx / 8) * Math.PI * 2) * 5;
-      ag.thoughtBubble = 'Rallying at Innovation Plaza...';
+    if (ag.activeTask) {
+      ag.taskQueue.push(task);
+      ag.thoughtBubble = `Task queued: "${task.title.slice(0, 24)}..."`;
       ag.speechTimer = 5.0;
+      return { success: true, message: `Task queued behind ${ag.activeTask.title}.`, task };
+    } else {
+      ag.activeTask = task;
+      ag.currentTask = task.title;
+      ag.workProgress = 0;
+      ag.status = 'ASSIGNED';
+      ag.availability = 'BUSY';
+      ag.thoughtBubble = `Directive received: "${task.title.slice(0, 24)}..."`;
+      ag.speechTimer = 6.0;
+
+      // Head to home department
+      const home = this.buildings.find(b => b.id === ag.homeBuildingId);
+      if (home) {
+        ag.targetX = home.x;
+        ag.targetZ = home.z;
+      }
+      return { success: true, message: `Direct task assigned to ${ag.name}.`, task };
+    }
+  }
+
+  // --- Publish Public Mission ---
+  public publishPublicMission(data: {
+    title: string;
+    description: string;
+    category: PublicMission['category'];
+  }): PublicMission {
+    const missionId = `mission-${Date.now()}`;
+    const mission: PublicMission = {
+      id: missionId,
+      title: data.title,
+      description: data.description,
+      category: data.category,
+      status: 'IN_PROGRESS',
+      progress: 5,
+      subtasks: [],
+      participatingAgentIds: [],
+      blockers: [],
+      acceptanceCriteria: [
+        'All dependency subtasks executed and validated',
+        'Artifacts produced and verified against system invariants'
+      ],
+      deliverables: [],
+      publishedAt: new Date().toLocaleTimeString()
+    };
+
+    // Auto-decompose based on category into dependency-aware subtasks
+    if (data.category === 'SOFTWARE') {
+      mission.subtasks = [
+        {
+          id: `${missionId}-1`,
+          title: 'PRD & API Specification',
+          description: 'Define REST endpoints, payload schemas, and acceptance criteria.',
+          expectedDeliverable: 'api_spec.yaml',
+          priority: 'HIGH',
+          status: 'WORKING',
+          progress: 10,
+          assignedAgentId: 'agent-analyst',
+          assignedAgentName: 'Dr. Maya Lin',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['PRD Formulation'],
+          dependencies: [],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-2`,
+          title: 'Database Schema & Interfaces',
+          description: 'Design normalized tables and Pydantic schema contracts.',
+          expectedDeliverable: 'schema.py',
+          priority: 'HIGH',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-architect',
+          assignedAgentName: 'Marcus Vance',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Clean Architecture'],
+          dependencies: [`${missionId}-1`],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-3`,
+          title: 'FastAPI Controller Implementation',
+          description: 'Synthesize route controllers with SQLite persistence.',
+          expectedDeliverable: 'main.py',
+          priority: 'CRITICAL',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-engineer',
+          assignedAgentName: 'Devon Cross',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Python 3.13 / FastAPI'],
+          dependencies: [`${missionId}-2`],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-4`,
+          title: 'Automated Pytest Regression Suite',
+          description: 'Execute test assertions and ensure 100% test coverage.',
+          expectedDeliverable: 'test_api.py (20/20 PASSED)',
+          priority: 'HIGH',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-qa',
+          assignedAgentName: 'Elena Rostova',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Pytest Automation'],
+          dependencies: [`${missionId}-3`],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-5`,
+          title: 'Docker Containerization & CI Pipeline',
+          description: 'Build OCI Dockerfile and configure GitHub Actions workflow.',
+          expectedDeliverable: 'Dockerfile & ci.yml',
+          priority: 'MEDIUM',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-devops',
+          assignedAgentName: 'Sora Takahashi',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Docker OCI Containers'],
+          dependencies: [`${missionId}-4`],
+          createdAt: new Date().toLocaleTimeString()
+        }
+      ];
+    } else if (data.category === 'CONSTRUCTION') {
+      mission.subtasks = [
+        {
+          id: `${missionId}-1`,
+          title: 'Civil Architectural Schematics',
+          description: 'Draft structural blueprints and municipal permits.',
+          expectedDeliverable: 'blueprints.cad',
+          priority: 'HIGH',
+          status: 'WORKING',
+          progress: 10,
+          assignedAgentId: 'agent-architect',
+          assignedAgentName: 'Marcus Vance',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Structural Engineering'],
+          dependencies: [],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-2`,
+          title: 'Foundation Steel & Crane Operations',
+          description: 'Erect structural frames and poured concrete slabs.',
+          expectedDeliverable: 'structural_frame',
+          priority: 'HIGH',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-constructor',
+          assignedAgentName: 'Harlan Drake',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Structural Construction'],
+          dependencies: [`${missionId}-1`],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-3`,
+          title: 'Grid Power & Utility Coupling',
+          description: 'Connect high-voltage municipal grid lines.',
+          expectedDeliverable: 'utility_certification',
+          priority: 'MEDIUM',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-devops',
+          assignedAgentName: 'Sora Takahashi',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Cloud Run Provisioning'],
+          dependencies: [`${missionId}-2`],
+          createdAt: new Date().toLocaleTimeString()
+        }
+      ];
+    } else {
+      mission.subtasks = [
+        {
+          id: `${missionId}-1`,
+          title: 'Technical Investigation & Analysis',
+          description: `Analyze objectives for ${data.title}`,
+          expectedDeliverable: 'investigation_summary.md',
+          priority: 'HIGH',
+          status: 'WORKING',
+          progress: 15,
+          assignedAgentId: 'agent-diagnostic',
+          assignedAgentName: 'Dr. Aaron Chen',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Traceback Deconstruction'],
+          dependencies: [],
+          createdAt: new Date().toLocaleTimeString()
+        },
+        {
+          id: `${missionId}-2`,
+          title: 'Implement Core Solution',
+          description: `Execute core engineering for ${data.title}`,
+          expectedDeliverable: 'solution_artifact',
+          priority: 'HIGH',
+          status: 'PENDING',
+          progress: 0,
+          assignedAgentId: 'agent-engineer',
+          assignedAgentName: 'Devon Cross',
+          source: 'PUBLIC_MISSION',
+          publicMissionId: missionId,
+          requiredSkills: ['Python 3.13 / FastAPI'],
+          dependencies: [`${missionId}-1`],
+          createdAt: new Date().toLocaleTimeString()
+        }
+      ];
+    }
+
+    mission.participatingAgentIds = Array.from(new Set(mission.subtasks.map(s => s.assignedAgentId)));
+
+    // Mobilize participating agents
+    mission.subtasks.forEach(st => {
+      const ag = this.agentCharacters.find(a => a.id === st.assignedAgentId);
+      if (ag) {
+        if (!ag.activeTask) {
+          ag.activeTask = st;
+          ag.currentTask = st.title;
+          ag.workProgress = st.progress;
+          ag.status = st.status === 'WORKING' ? 'WORKING' : 'WAITING';
+          ag.thoughtBubble = `Mobilized for "${mission.title.slice(0, 22)}..."`;
+          ag.speechTimer = 5.0;
+        } else {
+          ag.taskQueue.push(st);
+        }
+      }
     });
 
-    return proj;
+    this.publicMissions.unshift(mission);
+    this.activeMissionId = mission.id;
+    this.saveToStorage();
+    return mission;
+  }
+
+  // --- Handle Dependency Resolution When Subtask Completes ---
+  private handleSubtaskCompleted(missionId: string, completedSubtaskId: string): void {
+    const mission = this.publicMissions.find(m => m.id === missionId);
+    if (!mission) return;
+
+    // Calculate overall mission progress
+    const total = mission.subtasks.length || 1;
+    const completedCount = mission.subtasks.filter(s => s.status === 'COMPLETED').length;
+    mission.progress = Math.round((completedCount / total) * 100);
+
+    // Unlock dependent subtasks
+    mission.subtasks.forEach(st => {
+      if (st.status === 'PENDING') {
+        const remainingDeps = st.dependencies.filter(depId => {
+          const depTask = mission.subtasks.find(s => s.id === depId);
+          return depTask && depTask.status !== 'COMPLETED';
+        });
+
+        if (remainingDeps.length === 0) {
+          // Unlocked!
+          st.status = 'WORKING';
+          st.progress = 5;
+          const ag = this.agentCharacters.find(a => a.id === st.assignedAgentId);
+          if (ag) {
+            ag.activeTask = st;
+            ag.currentTask = st.title;
+            ag.workProgress = 5;
+            ag.status = 'WORKING';
+            ag.thoughtBubble = `Starting unlocked task: ${st.title.slice(0, 24)}...`;
+            ag.speechTimer = 5.0;
+          }
+        }
+      }
+    });
+
+    // Check if entire mission is completed
+    if (completedCount === total) {
+      mission.status = 'COMPLETED';
+      mission.progress = 100;
+      mission.completedAt = new Date().toLocaleTimeString();
+      mission.deliverables = mission.subtasks.map(s => s.deliverableResult || s.expectedDeliverable);
+
+      // Real city state change!
+      if (mission.category === 'CONSTRUCTION' && mission.targetBuildingId) {
+        const b = this.buildings.find(item => item.id === mission.targetBuildingId);
+        if (b) {
+          b.underConstruction = false;
+          b.constructionProgress = 100;
+          b.workers = b.maxWorkers;
+        }
+      }
+
+      this.metrics.citizenSatisfaction = Math.min(100, this.metrics.citizenSatisfaction + 4);
+    }
   }
 
   public recalculateMetrics(): void {
@@ -1039,16 +1514,48 @@ export class CitySimulationEngine {
     this.metrics.waterGridStatus = this.metrics.waterSupply >= this.metrics.waterDemand 
       ? 100 
       : Math.round((this.metrics.waterSupply / this.metrics.waterDemand) * 100);
+  }
 
-    // Citizen Satisfaction
-    let sat = 92 - (congestionPct * 0.35);
-    if (this.activeUnitedProject?.status === 'COMPLETED') sat = 98;
-    this.metrics.citizenSatisfaction = Math.max(15, Math.min(100, Math.round(sat)));
+  // --- Persistence with LocalStorage ---
+  public saveToStorage(): void {
+    try {
+      const data = {
+        missions: this.publicMissions,
+        agentsHistory: this.agentCharacters.map(a => ({ id: a.id, history: a.taskHistory })),
+        timestamp: Date.now()
+      };
+      localStorage.setItem('forge_metropolis_sim_v1', JSON.stringify(data));
+    } catch (e) {
+      // storage error silently handled
+    }
+  }
+
+  public loadFromStorage(): void {
+    try {
+      const raw = localStorage.getItem('forge_metropolis_sim_v1');
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data.missions && Array.isArray(data.missions) && data.missions.length > 0) {
+          this.publicMissions = data.missions;
+        }
+        if (data.agentsHistory && Array.isArray(data.agentsHistory)) {
+          data.agentsHistory.forEach((item: { id: string; history: any[] }) => {
+            const ag = this.agentCharacters.find(a => a.id === item.id);
+            if (ag && Array.isArray(item.history)) {
+              ag.taskHistory = item.history;
+            }
+          });
+        }
+      }
+    } catch (e) {
+      // parse error
+    }
   }
 
   public loadScenario(scenario: ScenarioType): void {
     this.activeScenario = scenario;
     this.generateCityLayout();
     this.initAIAgentCharacters();
+    this.initDefaultPublicMissions();
   }
 }

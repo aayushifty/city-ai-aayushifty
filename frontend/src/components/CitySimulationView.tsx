@@ -1,188 +1,143 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { CitySimulationEngine } from '../simulation/engine';
 import { CityGovernmentCouncil } from '../simulation/agents';
 import { CityScene } from './city3d/CityScene';
 import { CityHUD } from './city3d/CityHUD';
 import { 
-  Building, 
-  Vehicle,
-  AgentCharacter,
   CameraMode, 
   OverlayMode, 
-  ScenarioType, 
   AgentObservation,
   SimulationEvent,
-  CityMetrics
+  CityMetrics,
+  AgentCharacter,
+  PublicMission,
+  AgentTask,
+  PlayerState
 } from '../simulation/types';
 
 export const CitySimulationView: React.FC = () => {
   const engineRef = useRef<CitySimulationEngine>(new CitySimulationEngine());
   const councilRef = useRef<CityGovernmentCouncil>(new CityGovernmentCouncil());
 
-  // Reactive UI state synchronized with simulation engine
+  // Primary First-Person exploration & simulation state
+  const [cameraMode, setCameraMode] = useState<CameraMode>('FPV');
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('NONE');
   const [metrics, setMetrics] = useState<CityMetrics>(engineRef.current.metrics);
   const [simulationTime, setSimulationTime] = useState<number>(engineRef.current.simulationTime);
-  const [simulationSpeed, setSimulationSpeed] = useState<number>(engineRef.current.simulationSpeed);
-  const [activeScenario, setActiveScenario] = useState<ScenarioType>(engineRef.current.activeScenario);
-  const [cameraMode, setCameraMode] = useState<CameraMode>('ORBIT');
-  const [overlayMode, setOverlayMode] = useState<OverlayMode>('NONE');
-
-  const [selectedEntity, setSelectedEntity] = useState<{ type: 'BUILDING' | 'VEHICLE' | 'AGENT'; id: string } | null>(null);
-  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
-  const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<AgentCharacter | null>(null);
-
   const [agentCharacters, setAgentCharacters] = useState<AgentCharacter[]>(engineRef.current.agentCharacters);
-  const [activeUnitedProject, setActiveUnitedProject] = useState(engineRef.current.activeUnitedProject);
+  const [publicMissions, setPublicMissions] = useState<PublicMission[]>(engineRef.current.publicMissions);
+  const [activeMissionId, setActiveMissionId] = useState<string | null>(engineRef.current.activeMissionId);
+  const [playerState, setPlayerState] = useState<PlayerState>(engineRef.current.player);
 
-  const [agents, setAgents] = useState<AgentObservation[]>(
-    Array.from(councilRef.current.agents.values())
-  );
+  // Modal / Interaction states
+  const [interactingAgentId, setInteractingAgentId] = useState<string | null>(null);
+  const [showPublicMissionsModal, setShowPublicMissionsModal] = useState<boolean>(false);
+
+  // Background government council / notifications
   const [events, setEvents] = useState<SimulationEvent[]>(councilRef.current.events);
 
-  // Main 60fps Animation & Authoritative Simulation Loop
+  // Find currently interacting agent
+  const interactingAgent = interactingAgentId 
+    ? agentCharacters.find(a => a.id === interactingAgentId) || null 
+    : null;
+
+  // Authoritative 60 FPS simulation loop
   useEffect(() => {
     let animId: number;
     let lastTime = performance.now();
-    let tickAccumulator = 0;
+    let councilAccumulator = 0;
 
     const loop = (currentTime: number) => {
       animId = requestAnimationFrame(loop);
-      const delta = (currentTime - lastTime) / 1000.0;
+      const delta = Math.min((currentTime - lastTime) / 1000.0, 0.1); // clamp delta
       lastTime = currentTime;
 
       const engine = engineRef.current;
       const council = councilRef.current;
 
-      // Authoritative Simulation Tick
+      // Authoritative engine tick
       engine.tick(delta);
-      tickAccumulator += delta;
+      councilAccumulator += delta;
 
-      // Agent Council evaluates every 1.5 seconds
-      if (tickAccumulator >= 1.5 / Math.max(1, engine.simulationSpeed)) {
-        tickAccumulator = 0;
+      // Background council evaluation
+      if (councilAccumulator >= 2.0 / Math.max(1, engine.simulationSpeed)) {
+        councilAccumulator = 0;
         council.evaluateAndAct(engine);
-        setAgents(Array.from(council.agents.values()));
         setEvents([...council.events]);
       }
 
-      // Sync UI metrics periodically
-      if (engine.tickCount % 5 === 0) {
+      // Sync state to React
+      if (engine.tickCount % 4 === 0) {
         setMetrics({ ...engine.metrics });
         setSimulationTime(engine.simulationTime);
         setAgentCharacters([...engine.agentCharacters]);
-        setActiveUnitedProject(engine.activeUnitedProject ? { ...engine.activeUnitedProject } : null);
-
-        // Keep entity telemetry up to date if selected
-        if (selectedEntity?.type === 'VEHICLE') {
-          const v = engine.vehicles.find(item => item.id === selectedEntity.id);
-          if (v) setSelectedVehicle({ ...v });
-        } else if (selectedEntity?.type === 'AGENT') {
-          const ag = engine.agentCharacters.find(item => item.id === selectedEntity.id);
-          if (ag) setSelectedAgent({ ...ag });
-        }
+        setPublicMissions([...engine.publicMissions]);
+        setActiveMissionId(engine.activeMissionId);
+        setPlayerState({ ...engine.player });
       }
     };
 
     animId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animId);
-  }, [selectedEntity]);
+  }, []);
 
-  // Update selected entity inspector (Building, Vehicle, or Agent)
-  useEffect(() => {
+  // Player position update handler from CityScene controls
+  const handleUpdatePlayer = useCallback((update: Partial<PlayerState>) => {
     const engine = engineRef.current;
-    if (selectedEntity?.type === 'BUILDING') {
-      const b = engine.buildings.find(item => item.id === selectedEntity.id) || null;
-      setSelectedBuilding(b);
-      setSelectedVehicle(null);
-      setSelectedAgent(null);
-    } else if (selectedEntity?.type === 'VEHICLE') {
-      const v = engine.vehicles.find(item => item.id === selectedEntity.id) || null;
-      setSelectedVehicle(v);
-      setSelectedBuilding(null);
-      setSelectedAgent(null);
-    } else if (selectedEntity?.type === 'AGENT') {
-      const ag = engine.agentCharacters.find(item => item.id === selectedEntity.id) || null;
-      setSelectedAgent(ag);
-      setSelectedBuilding(null);
-      setSelectedVehicle(null);
-    } else {
-      setSelectedBuilding(null);
-      setSelectedVehicle(null);
-      setSelectedAgent(null);
+    Object.assign(engine.player, update);
+    setPlayerState({ ...engine.player });
+  }, []);
+
+  // Agent interaction triggers
+  const handleInteractWithAgent = useCallback((agentId: string) => {
+    setInteractingAgentId(agentId);
+  }, []);
+
+  const handleCloseAgentInteraction = useCallback(() => {
+    setInteractingAgentId(null);
+  }, []);
+
+  // Public missions modal toggles
+  const handleOpenPublicMissions = useCallback(() => {
+    setShowPublicMissionsModal(true);
+  }, []);
+
+  const handleClosePublicMissions = useCallback(() => {
+    setShowPublicMissionsModal(false);
+  }, []);
+
+  // Assign direct task to selected agent
+  const handleAssignIndividualTask = useCallback((
+    agentId: string, 
+    taskData: { title: string; description: string; expectedDeliverable: string; priority: AgentTask['priority'] }
+  ) => {
+    const engine = engineRef.current;
+    engine.assignIndividualTask(agentId, taskData);
+    setAgentCharacters([...engine.agentCharacters]);
+  }, []);
+
+  // Publish city-wide public mission
+  const handlePublishPublicMission = useCallback((missionData: { title: string; description: string; category: PublicMission['category'] }) => {
+    const engine = engineRef.current;
+    engine.publishPublicMission(missionData);
+    setPublicMissions([...engine.publicMissions]);
+    setActiveMissionId(engine.activeMissionId);
+    setAgentCharacters([...engine.agentCharacters]);
+  }, []);
+
+  // Request status report from agent
+  const handleRequestAgentStatus = useCallback((agentId: string) => {
+    const agent = engineRef.current.agentCharacters.find(a => a.id === agentId);
+    if (!agent) return 'Agent not found in registry.';
+    if (agent.activeTask) {
+      return `Currently ${agent.status}: "${agent.activeTask.title}" (${agent.workProgress.toFixed(0)}% complete). Deliverable: ${agent.activeTask.expectedDeliverable}`;
     }
-  }, [selectedEntity]);
-
-  // Handlers
-  const handleSetSpeed = (speed: number) => {
-    engineRef.current.simulationSpeed = speed;
-    setSimulationSpeed(speed);
-  };
-
-  const handleSelectScenario = (scen: ScenarioType) => {
-    engineRef.current.loadScenario(scen);
-    setActiveScenario(scen);
-    setMetrics({ ...engineRef.current.metrics });
-    setAgentCharacters([...engineRef.current.agentCharacters]);
-  };
-
-  const handleSelectEntity = (type: 'BUILDING' | 'VEHICLE' | 'AGENT', id: string) => {
-    setSelectedEntity({ type, id });
-  };
-
-  const handleDoubleClickAgent = (agentId: string) => {
-    const ag = engineRef.current.agentCharacters.find(a => a.id === agentId);
-    if (ag) {
-      setSelectedEntity({ type: 'AGENT', id: agentId });
-      setSelectedAgent({ ...ag });
-    }
-  };
-
-  const handleEnterAgentFPV = (agentId: string) => {
-    const ag = engineRef.current.agentCharacters.find(a => a.id === agentId);
-    if (ag) {
-      setSelectedEntity({ type: 'AGENT', id: agentId });
-      setSelectedAgent({ ...ag });
-    }
-  };
-
-  const handleDeployUnitedProject = (title: string, desc: string) => {
-    const proj = engineRef.current.deployUnitedProject(title, desc);
-    setActiveUnitedProject({ ...proj });
-    setMetrics({ ...engineRef.current.metrics });
-  };
-
-  const handleAssignTaskToAgent = (agentId: string, task: string) => {
-    engineRef.current.assignTaskToAgent(agentId, task);
-    setAgentCharacters([...engineRef.current.agentCharacters]);
-    const ag = engineRef.current.agentCharacters.find(a => a.id === agentId);
-    if (ag) setSelectedAgent({ ...ag });
-  };
-
-  const handleMoveAgent = (agentId: string, dx: number, dz: number) => {
-    const ag = engineRef.current.agentCharacters.find(a => a.id === agentId);
-    if (ag) {
-      ag.x += dx;
-      ag.z += dz;
-      ag.targetX = ag.x;
-      ag.targetZ = ag.z;
-    }
-  };
-
-  const handleTriggerIntervention = (action: string) => {
-    if (selectedBuilding) {
-      selectedBuilding.powerSupplied = true;
-      selectedBuilding.waterSupplied = true;
-      selectedBuilding.wasteAccumulated = 0;
-      selectedBuilding.onFire = false;
-      engineRef.current.recalculateMetrics();
-      setMetrics({ ...engineRef.current.metrics });
-    }
-  };
+    return `Currently ${agent.status}. Status: ${agent.thoughtBubble || 'Available'}. Skills: ${agent.skills.join(', ')}.`;
+  }, []);
 
   return (
     <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden bg-[#06080E]">
-      {/* 3D WebGL Three.js City World */}
+      {/* 3D WebGL Three.js First-Person Explorable City */}
       <CityScene
         buildings={engineRef.current.buildings}
         roads={engineRef.current.roads}
@@ -194,38 +149,36 @@ export const CitySimulationView: React.FC = () => {
         simulationTime={simulationTime}
         cameraMode={cameraMode}
         overlayMode={overlayMode}
-        selectedEntityId={selectedEntity?.id || null}
-        selectedAgentId={selectedAgent?.id || null}
-        onSelectEntity={handleSelectEntity}
-        onDoubleClickAgent={handleDoubleClickAgent}
-        onMoveAgent={handleMoveAgent}
+        selectedEntityId={interactingAgentId}
+        selectedAgentId={interactingAgentId}
+        playerState={playerState}
+        onUpdatePlayer={handleUpdatePlayer}
+        onInteractWithAgent={handleInteractWithAgent}
+        onOpenPublicMissions={handleOpenPublicMissions}
+        onSelectEntity={(_type, id) => setInteractingAgentId(id)}
       />
 
-      {/* Overseer Control Center & HUD */}
+      {/* First-Person HUD, Interaction Prompts, Agent Profile Modal, and Public Missions */}
       <CityHUD
         metrics={metrics}
-        agents={agents}
         agentCharacters={agentCharacters}
-        activeUnitedProject={activeUnitedProject}
+        publicMissions={publicMissions}
+        activeMissionId={activeMissionId}
         events={events}
         simulationTime={simulationTime}
-        simulationSpeed={simulationSpeed}
-        activeScenario={activeScenario}
         cameraMode={cameraMode}
-        overlayMode={overlayMode}
-        selectedBuilding={selectedBuilding}
-        selectedVehicle={selectedVehicle}
-        selectedAgent={selectedAgent}
-        onSetSpeed={handleSetSpeed}
-        onSelectScenario={handleSelectScenario}
+        playerState={playerState}
+        interactingAgent={interactingAgent}
+        showPublicMissionsModal={showPublicMissionsModal}
         onSelectCameraMode={setCameraMode}
-        onSelectOverlayMode={setOverlayMode}
-        onTriggerIntervention={handleTriggerIntervention}
-        onDeployUnitedProject={handleDeployUnitedProject}
-        onAssignTaskToAgent={handleAssignTaskToAgent}
-        onCloseAgentModal={() => setSelectedAgent(null)}
-        onEnterAgentFPV={handleEnterAgentFPV}
+        onCloseAgentInteraction={handleCloseAgentInteraction}
+        onOpenPublicMissions={handleOpenPublicMissions}
+        onClosePublicMissions={handleClosePublicMissions}
+        onAssignIndividualTask={handleAssignIndividualTask}
+        onPublishPublicMission={handlePublishPublicMission}
+        onRequestAgentStatus={handleRequestAgentStatus}
       />
     </div>
   );
 };
+

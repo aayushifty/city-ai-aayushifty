@@ -117,12 +117,20 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const ctx = canvas.getContext('2d')!;
 
     ctx.fillStyle = '#0F172ACC';
-    ctx.roundRect(4, 4, 504, 120, 20);
-    ctx.fill();
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(4, 4, 504, 120, 20);
+      ctx.fill();
+    } else {
+      ctx.fillRect(4, 4, 504, 120);
+    }
 
     ctx.lineWidth = 4;
     ctx.strokeStyle = '#38BDF8';
-    ctx.stroke();
+    if (typeof (ctx as any).roundRect === 'function') {
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(4, 4, 504, 120);
+    }
 
     ctx.fillStyle = '#F8FAFC';
     ctx.font = 'bold 26px "Courier New", monospace';
@@ -144,16 +152,19 @@ export const CityScene: React.FC<CitySceneProps> = ({
     scene.background = new THREE.Color(0x060913);
     scene.fog = new THREE.FogExp2(0x060913, 0.005);
 
+    const width = container.clientWidth || window.innerWidth || 800;
+    const height = container.clientHeight || Math.max(500, window.innerHeight - 65);
+
     const camera = new THREE.PerspectiveCamera(
       45,
-      container.clientWidth / container.clientHeight,
+      width / height,
       0.1,
       1200
     );
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -467,9 +478,11 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     const handleResize = () => {
       if (!container || !rendererRef.current || !cameraRef.current) return;
-      cameraRef.current.aspect = container.clientWidth / container.clientHeight;
+      const w = container.clientWidth || window.innerWidth || 800;
+      const h = container.clientHeight || Math.max(500, window.innerHeight - 65);
+      cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(container.clientWidth, container.clientHeight);
+      rendererRef.current.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
@@ -538,11 +551,19 @@ export const CityScene: React.FC<CitySceneProps> = ({
         tagCanvas.width = 256; tagCanvas.height = 64;
         const tCtx = tagCanvas.getContext('2d')!;
         tCtx.fillStyle = '#060B18CC';
-        tCtx.roundRect(4, 4, 248, 56, 12);
-        tCtx.fill();
+        if (typeof (tCtx as any).roundRect === 'function') {
+          (tCtx as any).roundRect(4, 4, 248, 56, 12);
+          tCtx.fill();
+        } else {
+          tCtx.fillRect(4, 4, 248, 56);
+        }
         tCtx.lineWidth = 3;
         tCtx.strokeStyle = ag.color;
-        tCtx.stroke();
+        if (typeof (tCtx as any).roundRect === 'function') {
+          tCtx.stroke();
+        } else {
+          tCtx.strokeRect(4, 4, 248, 56);
+        }
         tCtx.fillStyle = '#FFFFFF';
         tCtx.font = 'bold 20px monospace';
         tCtx.textAlign = 'center';

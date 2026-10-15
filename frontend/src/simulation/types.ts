@@ -124,6 +124,12 @@ export interface AgentCharacter {
   collaboratorIds: string[];
   isFPVActive?: boolean;
   chatHistory?: AgentChatMessage[];
+  aiModel: string;
+  aiProvider: string;
+  aiModelBadgeColor: string;
+  clothingStyle: 'CONSTRUCTION' | 'DOCTOR' | 'ARCHITECT' | 'ENGINEER' | 'QA' | 'SECURITY' | 'DEVOPS' | 'EXECUTIVE' | 'SCIENTIST' | 'DIAGNOSTIC';
+  skinColor: string;
+  hairColor: string;
 }
 
 export interface AgentChatMessage {

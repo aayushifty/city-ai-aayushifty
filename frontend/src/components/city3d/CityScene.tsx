@@ -609,27 +609,179 @@ export const CityScene: React.FC<CitySceneProps> = ({
         aGroup = new THREE.Group();
         aGroup.userData = { type: 'AGENT', id: ag.id };
 
-        // 3D Cyber Torso
-        const bodyGeo = new THREE.CylinderGeometry(0.35, 0.28, 1.1, 8);
-        const bodyMat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(ag.color),
-          metalness: 0.6,
-          roughness: 0.3
-        });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.95;
-        body.castShadow = true;
-        aGroup.add(body);
+        const skinColorHex = ag.skinColor || '#E0AC69';
+        const hairColorHex = ag.hairColor || '#2D251E';
 
-        // Glowing Armor Core
-        const core = new THREE.Mesh(
-          new THREE.SphereGeometry(0.12, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xFFFFFF })
-        );
-        core.position.set(0, 1.05, 0.32);
-        aGroup.add(core);
+        const skinMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(skinColorHex), roughness: 0.6 });
+        const hairMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(hairColorHex), roughness: 0.8 });
 
-        // Glowing Base Status Ring
+        // 1. Role Clothing Palette
+        let jacketColor = new THREE.Color(ag.color);
+        let pantsColor = new THREE.Color('#1E293B');
+        let shoesColor = new THREE.Color('#0F172A');
+
+        if (ag.clothingStyle === 'CONSTRUCTION') {
+          jacketColor = new THREE.Color('#EA580C'); // Safety Orange
+          pantsColor = new THREE.Color('#1D4ED8'); // Blue denim
+          shoesColor = new THREE.Color('#B45309'); // Workboots
+        } else if (ag.clothingStyle === 'DOCTOR') {
+          jacketColor = new THREE.Color('#FFFFFF'); // White Lab Coat
+          pantsColor = new THREE.Color('#0F172A'); // Dark slacks
+          shoesColor = new THREE.Color('#334155');
+        } else if (ag.clothingStyle === 'ARCHITECT') {
+          jacketColor = new THREE.Color('#1E3A8A'); // Navy blazer
+          pantsColor = new THREE.Color('#475569'); // Slate trousers
+          shoesColor = new THREE.Color('#1E293B');
+        } else if (ag.clothingStyle === 'ENGINEER') {
+          jacketColor = new THREE.Color('#27272A'); // Developer hoodie
+          pantsColor = new THREE.Color('#18181B'); // Black jeans
+          shoesColor = new THREE.Color('#F59E0B'); // Orange sneakers
+        } else if (ag.clothingStyle === 'SECURITY') {
+          jacketColor = new THREE.Color('#18181B'); // Tactical enforcement
+          pantsColor = new THREE.Color('#09090B');
+          shoesColor = new THREE.Color('#000000'); // Combat boots
+        } else if (ag.clothingStyle === 'DEVOPS') {
+          jacketColor = new THREE.Color('#0891B2'); // Cyan SRE windbreaker
+          pantsColor = new THREE.Color('#334155');
+          shoesColor = new THREE.Color('#0E7490');
+        } else if (ag.clothingStyle === 'EXECUTIVE') {
+          jacketColor = new THREE.Color('#0F172A'); // Command Trench Coat
+          pantsColor = new THREE.Color('#1E293B');
+          shoesColor = new THREE.Color('#000000');
+        }
+
+        const jacketMat = new THREE.MeshStandardMaterial({ color: jacketColor, roughness: 0.4 });
+        const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.5 });
+        const shoesMat = new THREE.MeshStandardMaterial({ color: shoesColor, roughness: 0.7 });
+
+        // 2. Articulated Legs
+        // Left Leg
+        const leftLegGroup = new THREE.Group();
+        leftLegGroup.position.set(-0.14, 0.72, 0);
+        const leftThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.40, 0.16), pantsMat);
+        leftThigh.position.y = -0.18;
+        leftLegGroup.add(leftThigh);
+        const leftFoot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.26), shoesMat);
+        leftFoot.position.set(0, -0.42, 0.04);
+        leftLegGroup.add(leftFoot);
+        aGroup.add(leftLegGroup);
+
+        // Right Leg
+        const rightLegGroup = new THREE.Group();
+        rightLegGroup.position.set(0.14, 0.72, 0);
+        const rightThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.40, 0.16), pantsMat);
+        rightThigh.position.y = -0.18;
+        rightLegGroup.add(rightThigh);
+        const rightFoot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.26), shoesMat);
+        rightFoot.position.set(0, -0.42, 0.04);
+        rightLegGroup.add(rightFoot);
+        aGroup.add(rightLegGroup);
+
+        // 3. Human Torso & Uniform
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.60, 0.28), jacketMat);
+        torso.position.y = 1.05;
+        torso.castShadow = true;
+        aGroup.add(torso);
+
+        // Construction Reflective Stripes
+        if (ag.clothingStyle === 'CONSTRUCTION') {
+          const stripeGeo = new THREE.BoxGeometry(0.49, 0.06, 0.29);
+          const stripeMat = new THREE.MeshBasicMaterial({ color: 0xE2E8F0 });
+          const stripe1 = new THREE.Mesh(stripeGeo, stripeMat);
+          stripe1.position.y = 1.10;
+          aGroup.add(stripe1);
+          const stripe2 = new THREE.Mesh(stripeGeo, stripeMat);
+          stripe2.position.y = 0.95;
+          aGroup.add(stripe2);
+        } else if (ag.clothingStyle === 'DOCTOR') {
+          // Stethoscope
+          const stethGeo = new THREE.TorusGeometry(0.14, 0.018, 8, 16, Math.PI * 1.3);
+          const stethMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6 });
+          const steth = new THREE.Mesh(stethGeo, stethMat);
+          steth.position.set(0, 1.25, 0.14);
+          steth.rotation.x = Math.PI / 4;
+          aGroup.add(steth);
+        }
+
+        // 4. Articulated Arms & Hands
+        // Left Arm
+        const leftArmGroup = new THREE.Group();
+        leftArmGroup.position.set(-0.31, 1.28, 0);
+        const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), jacketMat);
+        leftSleeve.position.y = -0.18;
+        leftArmGroup.add(leftSleeve);
+        const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinMat);
+        leftHand.position.y = -0.40;
+        leftArmGroup.add(leftHand);
+        aGroup.add(leftArmGroup);
+
+        // Right Arm
+        const rightArmGroup = new THREE.Group();
+        rightArmGroup.position.set(0.31, 1.28, 0);
+        const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), jacketMat);
+        rightSleeve.position.y = -0.18;
+        rightArmGroup.add(rightSleeve);
+        const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinMat);
+        rightHand.position.y = -0.40;
+        rightArmGroup.add(rightHand);
+        aGroup.add(rightArmGroup);
+
+        // 5. Neck & Head with Realistic Face
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.10, 0.14, 8), skinMat);
+        neck.position.y = 1.38;
+        aGroup.add(neck);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.20, 16, 16), skinMat);
+        head.position.y = 1.54;
+        head.castShadow = true;
+        aGroup.add(head);
+
+        // Eyes
+        const eyeGeo = new THREE.SphereGeometry(0.025, 8, 8);
+        const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+        const pupilGeo = new THREE.SphereGeometry(0.012, 8, 8);
+        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111827 });
+
+        const leftEye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
+        leftEye.position.set(-0.065, 1.56, 0.18);
+        const leftPupil = new THREE.Mesh(pupilGeo, pupilMat);
+        leftPupil.position.set(-0.065, 1.56, 0.20);
+        aGroup.add(leftEye);
+        aGroup.add(leftPupil);
+
+        const rightEye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
+        rightEye.position.set(0.065, 1.56, 0.18);
+        const rightPupil = new THREE.Mesh(pupilGeo, pupilMat);
+        rightPupil.position.set(0.065, 1.56, 0.20);
+        aGroup.add(rightEye);
+        aGroup.add(rightPupil);
+
+        // Nose
+        const nose = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.05, 4), skinMat);
+        nose.position.set(0, 1.53, 0.20);
+        nose.rotation.x = Math.PI / 2;
+        aGroup.add(nose);
+
+        // Hair or Hard Hat
+        if (ag.clothingStyle === 'CONSTRUCTION') {
+          // Yellow Safety Hard Hat
+          const hatGeo = new THREE.SphereGeometry(0.23, 12, 12);
+          const hatMat = new THREE.MeshStandardMaterial({ color: 0xFACC15, roughness: 0.3 });
+          const hat = new THREE.Mesh(hatGeo, hatMat);
+          hat.position.set(0, 1.62, 0.02);
+          const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.03, 16), hatMat);
+          brim.position.set(0, 1.58, 0.04);
+          aGroup.add(hat);
+          aGroup.add(brim);
+        } else {
+          // Sculpted Hair
+          const hairGeo = new THREE.SphereGeometry(0.21, 14, 14);
+          const hair = new THREE.Mesh(hairGeo, hairMat);
+          hair.position.set(0, 1.59, -0.02);
+          aGroup.add(hair);
+        }
+
+        // 6. Glowing Base Status Ring
         const ringGeo = new THREE.RingGeometry(0.55, 0.72, 24);
         const ringMat = new THREE.MeshBasicMaterial({
           color: ag.status === 'WORKING' ? 0xF59E0B : 0x10B981,
@@ -639,64 +791,62 @@ export const CityScene: React.FC<CitySceneProps> = ({
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.04;
         aGroup.add(ring);
-        (aGroup as any)._statusRing = ring;
 
-        // Cyber Helmet & Glowing Visor
-        const head = new THREE.Mesh(
-          new THREE.SphereGeometry(0.24, 12, 12),
-          new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.8 })
-        );
-        head.position.y = 1.7;
-        head.castShadow = true;
-        aGroup.add(head);
-
-        const visor = new THREE.Mesh(
-          new THREE.BoxGeometry(0.3, 0.08, 0.15),
-          new THREE.MeshBasicMaterial({ color: new THREE.Color(ag.color) })
-        );
-        visor.position.set(0, 1.7, 0.2);
-        aGroup.add(visor);
-
-        // Overhead Holographic Nameplate with Actions [E] Talk & [F] Work
+        // 7. Overhead Holographic Badge showing Citizen Name + AI Model + Worker Role + Keys
         const tagCanvas = document.createElement('canvas');
-        tagCanvas.width = 440; tagCanvas.height = 100;
+        tagCanvas.width = 512; tagCanvas.height = 128;
         const tCtx = tagCanvas.getContext('2d')!;
-        tCtx.fillStyle = '#060B18CC';
-        tCtx.fillRect(4, 4, 432, 92);
+        tCtx.fillStyle = '#060B18EE';
+        tCtx.fillRect(4, 4, 504, 120);
         tCtx.lineWidth = 3;
-        tCtx.strokeStyle = ag.color;
-        tCtx.strokeRect(4, 4, 432, 92);
+        tCtx.strokeStyle = ag.aiModelBadgeColor || ag.color;
+        tCtx.strokeRect(4, 4, 504, 120);
 
+        // Citizen Name
         tCtx.fillStyle = '#FFFFFF';
-        tCtx.font = 'bold 24px monospace';
+        tCtx.font = 'bold 26px monospace';
         tCtx.textAlign = 'center';
-        tCtx.fillText(ag.name, 220, 32);
+        tCtx.fillText(ag.name, 256, 32);
 
+        // AI Model & Provider
+        tCtx.fillStyle = ag.aiModelBadgeColor || '#38BDF8';
+        tCtx.font = 'bold 17px monospace';
+        tCtx.fillText(`[${ag.aiProvider || 'AI'} • ${ag.aiModel || 'Worker Model'}]`, 256, 62);
+
+        // Worker Role
         tCtx.fillStyle = ag.color;
-        tCtx.font = 'bold 16px monospace';
-        tCtx.fillText(ag.profession.slice(0, 30), 220, 58);
+        tCtx.font = 'bold 15px monospace';
+        tCtx.fillText(ag.profession.slice(0, 34), 256, 88);
 
+        // Action Key Hints
         tCtx.fillStyle = '#F59E0B';
         tCtx.font = 'bold 14px monospace';
-        tCtx.fillText(`[E] Talk  •  [F] Work  •  ${ag.status}`, 220, 84);
+        tCtx.fillText(`[E] 2-Way Comms  •  [F] Work  •  ${ag.status}`, 256, 114);
 
         const tagTex = new THREE.CanvasTexture(tagCanvas);
         const tagMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(2.3, 0.65),
+          new THREE.PlaneGeometry(2.5, 0.72),
           new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, side: THREE.DoubleSide })
         );
-        tagMesh.position.y = 2.45;
+        tagMesh.position.y = 2.48;
         aGroup.add(tagMesh);
-        (aGroup as any)._tagMesh = tagMesh;
 
         // Thought Bubble
         const bubbleMesh = new THREE.Mesh(
           new THREE.PlaneGeometry(3.6, 0.95),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide })
         );
-        bubbleMesh.position.y = 3.25;
+        bubbleMesh.position.y = 3.30;
         aGroup.add(bubbleMesh);
         agentThoughtMeshMap.current.set(ag.id, bubbleMesh);
+
+        // Save limbs for walk cycle animation
+        (aGroup as any)._leftLeg = leftLegGroup;
+        (aGroup as any)._rightLeg = rightLegGroup;
+        (aGroup as any)._leftArm = leftArmGroup;
+        (aGroup as any)._rightArm = rightArmGroup;
+        (aGroup as any)._torso = torso;
+        (aGroup as any)._statusRing = ring;
 
         scene.add(aGroup);
         agentMeshMap.current.set(ag.id, aGroup);
@@ -717,6 +867,28 @@ export const CityScene: React.FC<CitySceneProps> = ({
       const ring = (aGroup as any)._statusRing;
       if (ring) {
         ring.material.color.setHex(ag.status === 'WORKING' ? 0xF59E0B : 0x10B981);
+      }
+
+      // Animate limb walk stride
+      const leftLeg = (aGroup as any)._leftLeg;
+      const rightLeg = (aGroup as any)._rightLeg;
+      const leftArm = (aGroup as any)._leftArm;
+      const rightArm = (aGroup as any)._rightArm;
+      const isMoving = Math.hypot(ag.x - ag.targetX, ag.z - ag.targetZ) > 0.4 || ag.status === 'TRAVELING';
+
+      if (leftLeg && rightLeg && leftArm && rightArm) {
+        if (isMoving) {
+          const walkCycle = Date.now() * 0.008 * (ag.speed || 3.2);
+          leftLeg.rotation.x = Math.sin(walkCycle) * 0.55;
+          rightLeg.rotation.x = -Math.sin(walkCycle) * 0.55;
+          leftArm.rotation.x = -Math.sin(walkCycle) * 0.45;
+          rightArm.rotation.x = Math.sin(walkCycle) * 0.45;
+        } else {
+          leftLeg.rotation.x = 0;
+          rightLeg.rotation.x = 0;
+          leftArm.rotation.x = 0;
+          rightArm.rotation.x = 0;
+        }
       }
 
       // Update Thought Bubble

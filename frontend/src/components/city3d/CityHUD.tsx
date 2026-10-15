@@ -250,12 +250,23 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         {/* Proximity Interaction Prompt when approaching an agent */}
         {nearbyAgent && !interactingAgent && (
           <div className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/60 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 animate-bounce border-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <span className="w-6 h-6 rounded-lg bg-emerald-500 text-black font-black flex items-center justify-center text-xs shadow-md">
                 E
               </span>
               <span>
-                <strong>2-Way Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong> ({nearbyAgent.profession})
+                <strong>2-Way Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong>
+                <span 
+                  className="ml-2 px-2 py-0.5 rounded text-[10px] font-black uppercase border"
+                  style={{
+                    backgroundColor: `${nearbyAgent.aiModelBadgeColor}20`,
+                    borderColor: nearbyAgent.aiModelBadgeColor,
+                    color: nearbyAgent.aiModelBadgeColor
+                  }}
+                >
+                  {nearbyAgent.aiProvider} • {nearbyAgent.aiModel}
+                </span>
+                <span className="text-slate-400 ml-1.5 font-medium">({nearbyAgent.profession})</span>
               </span>
             </div>
             <div className="h-5 w-px bg-slate-700" />
@@ -286,14 +297,24 @@ export const CityHUD: React.FC<CityHUDProps> = ({
             <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#060A13]">
               <div className="flex items-center gap-3">
                 <div 
-                  className="w-11 h-11 rounded-xl flex items-center justify-center font-bold text-white text-lg shadow-lg border border-white/20"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-lg shadow-lg border border-white/20"
                   style={{ backgroundColor: interactingAgent.color }}
                 >
                   {interactingAgent.name.charAt(0)}
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2 flex-wrap">
                     <span>{interactingAgent.name}</span>
+                    <span 
+                      className="text-[10px] px-2 py-0.5 rounded font-black uppercase border shadow-sm"
+                      style={{ 
+                        backgroundColor: `${interactingAgent.aiModelBadgeColor}20`, 
+                        borderColor: interactingAgent.aiModelBadgeColor,
+                        color: interactingAgent.aiModelBadgeColor 
+                      }}
+                    >
+                      {interactingAgent.aiProvider} • {interactingAgent.aiModel}
+                    </span>
                     <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold ${
                       interactingAgent.status === 'WORKING' 
                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
@@ -302,7 +323,9 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                       {interactingAgent.status} ({interactingAgent.workProgress.toFixed(0)}%)
                     </span>
                   </h2>
-                  <div className="text-[11px] text-slate-400">{interactingAgent.profession} • {interactingAgent.department}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                    {interactingAgent.profession} • {interactingAgent.department}
+                  </div>
                 </div>
               </div>
 

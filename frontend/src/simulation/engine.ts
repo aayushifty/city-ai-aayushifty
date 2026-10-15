@@ -547,7 +547,7 @@ export class CitySimulationEngine {
     }
   }
 
-  // --- Initialize The 10 Specialized AI Citizens ---
+  // --- Initialize The 10 Specialized AI Citizens with Human Personas & AI Models ---
   private initAIAgentCharacters(): void {
     this.agentCharacters = [
       {
@@ -558,6 +558,12 @@ export class CitySimulationEngine {
         profession: 'Chief Systems Architect & Orchestrator',
         department: 'Executive Master Orchestration (Citadel Spire)',
         color: '#38BDF8',
+        aiModel: 'OpenAI o1 / o3 High-Reasoning',
+        aiProvider: 'OpenAI',
+        aiModelBadgeColor: '#10A37F',
+        clothingStyle: 'EXECUTIVE',
+        skinColor: '#E0AC69',
+        hairColor: '#2D251E',
         x: 2.2,
         z: 8.5,
         targetX: 2.2,
@@ -587,7 +593,7 @@ export class CitySimulationEngine {
             id: 'init-coord',
             sender: 'AGENT',
             senderName: 'Alex Vance',
-            text: 'Greetings Commander! Alex Vance, Chief Architect, at your service. All autonomous workflows in the metropolis are operational. Press [F] to issue an immediate work order or ask me anything!',
+            text: 'Greetings Commander! Alex Vance, Chief Architect, powered by OpenAI o1 reasoning engine. All autonomous city workflows are operational. Press [F] to issue an immediate work order or ask me anything!',
             timestamp: '09:00 AM'
           }
         ]
@@ -600,6 +606,12 @@ export class CitySimulationEngine {
         profession: 'Requirements Engineer & Product Analyst',
         department: 'Requirements & PRD Lab (Vision Lab)',
         color: '#C084FC',
+        aiModel: 'Claude 3.5 Sonnet',
+        aiProvider: 'Anthropic',
+        aiModelBadgeColor: '#D97706',
+        clothingStyle: 'SCIENTIST',
+        skinColor: '#F5D0C5',
+        hairColor: '#1A1A1A',
         x: -2.4,
         z: 7.8,
         targetX: -2.4,
@@ -629,7 +641,7 @@ export class CitySimulationEngine {
             id: 'init-analyst',
             sender: 'AGENT',
             senderName: 'Dr. Maya Lin',
-            text: 'Hello Commander. Dr. Maya Lin here. I translate your high-level vision into verifiable PRDs, edge-case specs, and acceptance contracts.',
+            text: 'Hello Commander. Dr. Maya Lin here, powered by Claude 3.5 Sonnet. I specialize in deep technical reasoning, PRD formulation, and system acceptance criteria.',
             timestamp: '09:05 AM'
           }
         ]
@@ -642,6 +654,12 @@ export class CitySimulationEngine {
         profession: 'Domain Architect & Civil Modeler',
         department: 'System Architecture (Blueprint Complex)',
         color: '#3B82F6',
+        aiModel: 'DeepSeek R1 Reasoning',
+        aiProvider: 'DeepSeek',
+        aiModelBadgeColor: '#0284C7',
+        clothingStyle: 'ARCHITECT',
+        skinColor: '#C68642',
+        hairColor: '#3E2723',
         x: 3.5,
         z: 13.5,
         targetX: 3.5,
@@ -671,7 +689,7 @@ export class CitySimulationEngine {
             id: 'init-arch',
             sender: 'AGENT',
             senderName: 'Marcus Vance',
-            text: 'Marcus Vance ready for structural modeling. Whether civil construction or backend system boundaries, I ensure clean separation of concerns.',
+            text: 'Marcus Vance ready for structural modeling, powered by DeepSeek R1. I verify mathematical structural proofs and clean architecture contracts.',
             timestamp: '09:10 AM'
           }
         ]
@@ -684,6 +702,12 @@ export class CitySimulationEngine {
         profession: 'Full-Stack Software Engineer',
         department: 'Source Code Fabrication (Foundry)',
         color: '#F59E0B',
+        aiModel: 'Qwen 2.5 Coder 32B',
+        aiProvider: 'Alibaba Cloud',
+        aiModelBadgeColor: '#F59E0B',
+        clothingStyle: 'ENGINEER',
+        skinColor: '#E5A65E',
+        hairColor: '#4A3525',
         x: -3.2,
         z: 12.8,
         targetX: -3.2,
@@ -713,7 +737,7 @@ export class CitySimulationEngine {
             id: 'init-eng',
             sender: 'AGENT',
             senderName: 'Devon Cross',
-            text: 'Devon Cross on standby! My compilers and editors are warm. Press [F] to make me start writing production code or controllers right now.',
+            text: 'Devon Cross on standby! Powered by Qwen 2.5 Coder. High-speed code fabrication, async logic, and AST transformations are ready to compile.',
             timestamp: '09:15 AM'
           }
         ]
@@ -726,6 +750,12 @@ export class CitySimulationEngine {
         profession: 'Automated Test Engineer & Verifier',
         department: 'Quality Assurance & Automated Verification (QA Bastion)',
         color: '#10B981',
+        aiModel: 'GPT-4o Omnimodal',
+        aiProvider: 'OpenAI',
+        aiModelBadgeColor: '#10A37F',
+        clothingStyle: 'QA',
+        skinColor: '#F8D9D6',
+        hairColor: '#8B0000',
         x: -1.5,
         z: 16.5,
         targetX: -1.5,
@@ -755,7 +785,7 @@ export class CitySimulationEngine {
             id: 'init-qa',
             sender: 'AGENT',
             senderName: 'Elena Rostova',
-            text: 'Elena Rostova standing by. I run rigorous pytest and integration test suites. Nothing ships in this metropolis without formal test verification.',
+            text: 'Elena Rostova standing by, powered by GPT-4o. I run rigorous pytest and integration test suites. 20/20 test assertions currently verified.',
             timestamp: '09:20 AM'
           }
         ]
@@ -768,6 +798,12 @@ export class CitySimulationEngine {
         profession: 'Root Cause & Troubleshooting Specialist',
         department: 'Diagnostic Core & Troubleshooting',
         color: '#EC4899',
+        aiModel: 'Gemini 2.0 Flash Thinking',
+        aiProvider: 'Google DeepMind',
+        aiModelBadgeColor: '#4285F4',
+        clothingStyle: 'DIAGNOSTIC',
+        skinColor: '#ECC0A0',
+        hairColor: '#0F0F0F',
         x: 2.8,
         z: 5.5,
         targetX: 2.8,
@@ -797,7 +833,7 @@ export class CitySimulationEngine {
             id: 'init-diag',
             sender: 'AGENT',
             senderName: 'Dr. Aaron Chen',
-            text: 'Dr. Chen here. I monitor exception logs, tracebacks, and memory heaps across all city services.',
+            text: 'Dr. Chen here, powered by Gemini 2.0 Flash. Real-time telemetry, exception tracing, and automated heuristic repair operational.',
             timestamp: '09:25 AM'
           }
         ]
@@ -810,6 +846,12 @@ export class CitySimulationEngine {
         profession: 'Security Engineer & Policy Auditor',
         department: 'Security Citadel & Policy Guardrails',
         color: '#EF4444',
+        aiModel: 'Llama 3.1 70B Instruct',
+        aiProvider: 'Meta AI',
+        aiModelBadgeColor: '#0668E1',
+        clothingStyle: 'SECURITY',
+        skinColor: '#D29E74',
+        hairColor: '#212121',
         x: -4.5,
         z: 9.8,
         targetX: -4.5,
@@ -839,7 +881,7 @@ export class CitySimulationEngine {
             id: 'init-sec',
             sender: 'AGENT',
             senderName: 'Kaelen Voss',
-            text: 'Security Sentinel Voss active. Workspace jail boundaries, secret filtering, and command whitelist policies are strictly enforced.',
+            text: 'Security Sentinel Voss active, powered by Llama 3.1 70B. Workspace jail boundaries, secret filtering, and command whitelist policies are strictly enforced.',
             timestamp: '09:30 AM'
           }
         ]
@@ -852,6 +894,12 @@ export class CitySimulationEngine {
         profession: 'DevOps & Cloud Infrastructure Engineer',
         department: 'Deployment & CI/CD Pipeline (Release Dock)',
         color: '#06B6D4',
+        aiModel: 'Claude 3 Opus',
+        aiProvider: 'Anthropic',
+        aiModelBadgeColor: '#D97706',
+        clothingStyle: 'DEVOPS',
+        skinColor: '#F3CFB6',
+        hairColor: '#1F2937',
         x: 4.8,
         z: 10.5,
         targetX: 4.8,
@@ -881,7 +929,7 @@ export class CitySimulationEngine {
             id: 'init-devops',
             sender: 'AGENT',
             senderName: 'Sora Takahashi',
-            text: 'Sora Takahashi here! I manage Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
+            text: 'Sora Takahashi here, powered by Claude 3 Opus! Managing Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
             timestamp: '09:35 AM'
           }
         ]
@@ -894,6 +942,12 @@ export class CitySimulationEngine {
         profession: 'Civil Infrastructure & Construction Engineer',
         department: 'Civic Development & Construction Operations',
         color: '#EAB308',
+        aiModel: 'Mistral Large 2',
+        aiProvider: 'Mistral AI',
+        aiModelBadgeColor: '#F97316',
+        clothingStyle: 'CONSTRUCTION',
+        skinColor: '#C08A58',
+        hairColor: '#4B3621',
         x: -4.2,
         z: 15.0,
         targetX: -4.2,
@@ -923,7 +977,7 @@ export class CitySimulationEngine {
             id: 'init-con',
             sender: 'AGENT',
             senderName: 'Harlan Drake',
-            text: 'Harlan Drake on site! I oversee heavy infrastructure, building construction, and urban repairs. Press [F] to command construction work.',
+            text: 'Harlan Drake on site, powered by Mistral Large! High-visibility vest on, hard hat ready. Press [F] to command construction and structural repairs.',
             timestamp: '09:40 AM'
           }
         ]
@@ -936,6 +990,12 @@ export class CitySimulationEngine {
         profession: 'Emergency Medicine & Healthcare Operations',
         department: 'Civic Medical Center (Hospital)',
         color: '#F43F5E',
+        aiModel: 'Gemini 1.5 Pro',
+        aiProvider: 'Google DeepMind',
+        aiModelBadgeColor: '#4285F4',
+        clothingStyle: 'DOCTOR',
+        skinColor: '#F7D5C8',
+        hairColor: '#B5814C',
         x: 1.5,
         z: 17.0,
         targetX: 1.5,
@@ -965,7 +1025,7 @@ export class CitySimulationEngine {
             id: 'init-doc',
             sender: 'AGENT',
             senderName: 'Dr. Sarah Miller',
-            text: 'Greetings Commander. Dr. Sarah Miller here from the Medical Directorate. Citizen health indexes and trauma response lines are at 98% readiness.',
+            text: 'Greetings Commander. Dr. Sarah Miller, Chief Medical Director, powered by Gemini 1.5 Pro. White coat on, bio-telemetry online. Citizen health index at 98%.',
             timestamp: '09:45 AM'
           }
         ]

@@ -627,6 +627,8 @@ export const CitySimulationView: React.FC = () => {
       {/* First-Person HUD, Interaction Prompts, Agent Profile Modal, and Public Missions */}
       <CityHUD
         metrics={metrics}
+        buildings={engineRef.current.buildings}
+        roads={engineRef.current.roads}
         agentCharacters={agentCharacters}
         publicMissions={publicMissions}
         activeMissionId={activeMissionId}

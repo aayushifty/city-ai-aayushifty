@@ -39,16 +39,27 @@ import {
   AgentTask,
   PublicMission,
   PlayerState,
-  AgentChatMessage
+  AgentChatMessage,
+  Building,
+  RoadSegment
 } from '../../simulation/types';
 import { DeliverableArtifact } from '../../types';
 import { absoluteLink } from '../../api/client';
 import { HostApprovalPanel } from './HostApprovalPanel';
 import { ModelPicker } from './ModelPicker';
 import { TaskHistoryPanel } from './TaskHistoryPanel';
+import { CityLiveDataContext, PANEL, useCityLiveDataPoller } from './hud/useCityLiveData';
+import { MiniMap, isLandmark, shortName } from './hud/MiniMap';
+import { MissionTracker } from './hud/MissionTracker';
+import { CitizenActivityPanel } from './hud/CitizenActivityPanel';
+import { StatusCluster } from './hud/StatusCluster';
+import { NotificationFeed, useHudNotifications } from './hud/Notifications';
+import { DEFAULT_HUD_SETTINGS, HudSettings, PhoneMenu } from './hud/PhoneMenu';
 
 interface CityHUDProps {
   metrics: CityMetrics;
+  buildings: Building[];
+  roads: RoadSegment[];
   agentCharacters: AgentCharacter[];
   publicMissions: PublicMission[];
   activeMissionId: string | null;
@@ -78,6 +89,8 @@ interface CityHUDProps {
 
 export const CityHUD: React.FC<CityHUDProps> = ({
   metrics,
+  buildings,
+  roads,
   agentCharacters,
   publicMissions,
   activeMissionId,
@@ -123,6 +136,71 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   const [missionCategory, setMissionCategory] = useState<PublicMission['category']>('SOFTWARE');
 
   const nearbyAgent = agentCharacters.find(a => a.id === playerState.nearbyAgentId);
+
+  // --- GTA-style HUD: live backend data, notifications, phone, panel visibility ---
+  const live = useCityLiveDataPoller();
+  const notifications = useHudNotifications(live);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const [mapSignal, setMapSignal] = useState(0);
+  const [panelsHidden, setPanelsHidden] = useState(false);
+  // Your computer's clock (the 3D sky keeps its own daylight cycle)
+  const [realNow, setRealNow] = useState(() => new Date());
+  React.useEffect(() => {
+    const t = window.setInterval(() => setRealNow(new Date()), 15000);
+    return () => window.clearInterval(t);
+  }, []);
+  const [hudSettings, setHudSettings] = useState<HudSettings>(() => {
+    try {
+      const saved = window.localStorage.getItem('cityai.hudSettings');
+      return saved ? { ...DEFAULT_HUD_SETTINGS, ...JSON.parse(saved) } : DEFAULT_HUD_SETTINGS;
+    } catch {
+      return DEFAULT_HUD_SETTINGS;
+    }
+  });
+  const updateHudSettings = (next: HudSettings) => {
+    setHudSettings(next);
+    try { window.localStorage.setItem('cityai.hudSettings', JSON.stringify(next)); } catch { /* storage unavailable */ }
+  };
+
+  // [P] phone, [H] hide/show HUD panels, Esc closes the phone (never while typing)
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'p' && !e.repeat) {
+        if (document.pointerLockElement) document.exitPointerLock();
+        setPhoneOpen(o => !o);
+      } else if (k === 'h' && !e.repeat) {
+        setPanelsHidden(h => !h);
+      } else if (e.key === 'Escape') {
+        setPhoneOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Where you are: the nearest named workplace (from the same layout the 3D scene is built from)
+  const px = Math.round(playerState.x / 2), pz = Math.round(playerState.z / 2);
+  const locationName = React.useMemo(() => {
+    let best: Building | null = null;
+    let bestD = Infinity;
+    for (const b of buildings) {
+      if (!isLandmark(b)) continue;
+      const d = Math.hypot(b.x - px * 2, b.z - pz * 2);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    if (!best) return 'City streets';
+    return bestD < 22 ? shortName(best.name) : `Near ${shortName(best.name)}`;
+  }, [buildings, px, pz]);
+
+  const openCitizen = (id: string) => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    if (onInteractWithAgent) onInteractWithAgent(id);
+  };
+  const modalOpen = !!interactingAgent || showPublicMissionsModal || !!activeArtifact;
+  const showPanels = !panelsHidden && !modalOpen;
 
   // Auto-scroll chat to bottom
   React.useEffect(() => {
@@ -236,125 +314,104 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   };
 
   return (
+    <CityLiveDataContext.Provider value={live}>
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between overflow-hidden font-mono">
       <HostApprovalPanel />
-      {/* 1. TOP MINIMAL EXPLORATION BAR */}
-      <div className="p-4 flex items-center justify-between">
-        {/* Compass & Location Tag */}
-        <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl px-4 py-2 pointer-events-auto flex items-center gap-4 text-xs shadow-2xl">
-          <div className="flex items-center gap-2 text-slate-100">
-            <Compass size={15} className="text-blue-400 animate-spin-slow" />
-            <span className="font-bold tracking-wider text-emerald-400">CITY_AI_AAYUSHIFTY METROPOLIS</span>
-          </div>
-
-          <div className="h-4 w-px bg-slate-800" />
-
-          <div className="text-[11px] text-slate-400">
-            POS: <span className="text-slate-200">X: {playerState.x.toFixed(1)}, Z: {playerState.z.toFixed(1)}</span>
-          </div>
-
-          <div className="h-4 w-px bg-slate-800" />
-
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-300">
-            {simulationTime >= 6 && simulationTime <= 18 ? (
-              <Sun size={13} className="text-amber-400" />
-            ) : (
-              <Moon size={13} className="text-blue-400" />
-            )}
-            <span>{timeString}</span>
-          </div>
+      {/* 1. TOP BAR: brand, clock, live status, quick actions, camera */}
+      <div className="px-3 sm:px-4 pt-3 flex items-start justify-between gap-2 font-sans">
+        <div className={`${PANEL} pointer-events-auto flex items-center gap-3 px-3.5 py-1.5 whitespace-nowrap shrink-0`}>
+          <span className="text-[17px] font-black italic tracking-tight bg-gradient-to-r from-amber-300 via-orange-300 to-pink-400 bg-clip-text text-transparent select-none">CITY AI</span>
+          <span className="h-4 w-px bg-white/15" />
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-200 font-semibold">
+            {realNow.getHours() >= 6 && realNow.getHours() < 19 ? <Sun size={13} className="text-amber-300" /> : <Moon size={13} className="text-blue-300" />}
+            {realNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className="hidden md:flex items-center gap-1 text-[11px] text-amber-200 font-semibold">
+            <Crown size={12} className="text-amber-300 fill-amber-300" /> Governor
+          </span>
         </div>
 
-        {/* Public Mission & Camera & Private Jet Buttons */}
-        <div className="flex items-center gap-2.5 pointer-events-auto">
-          {/* Supreme Governor Crest Pill */}
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/60 text-amber-300 text-xs font-bold shadow-lg shadow-amber-950/40">
-            <Crown size={14} className="text-amber-400 fill-amber-400" />
-            <span className="tracking-wide">SUPREME GOVERNOR</span>
+        <div className="pointer-events-auto flex items-center gap-1.5 flex-wrap justify-end">
+          <div className={`${PANEL} px-1.5 py-1`}><StatusCluster /></div>
+
+          <div className={`${PANEL} hidden md:flex items-center gap-1 p-1 text-[11px] font-semibold`}>
+            <button
+              type="button"
+              onClick={() => {
+                if (document.pointerLockElement) {
+                  try { document.exitPointerLock(); } catch (_) {}
+                }
+                const targetId = nearbyAgent?.id || (agentCharacters.length > 0 ? agentCharacters[0].id : 'agent-coordinator');
+                if (onInteractWithAgent) onInteractWithAgent(targetId);
+              }}
+              className="px-2.5 py-1 rounded-xl text-emerald-200 hover:bg-emerald-500/15 flex items-center gap-1.5"
+              title="Open 2-Way Live Comms with the nearest citizen [E]"
+            >
+              <MessageSquare size={13} /> Comms <kbd className="text-[9px] text-slate-400">E</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenPublicMissions}
+              className="px-2.5 py-1 rounded-xl text-amber-200 hover:bg-amber-500/15 flex items-center gap-1.5"
+              title="Mission board [M]"
+            >
+              <Sparkles size={13} /> Missions <kbd className="text-[9px] text-slate-400">M</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (onToggleJetFlight) onToggleJetFlight(!playerState.isPilotingJet); }}
+              className={`px-2.5 py-1 rounded-xl flex items-center gap-1.5 ${playerState.isPilotingJet ? 'bg-rose-500/25 text-rose-100 animate-pulse' : 'text-cyan-200 hover:bg-cyan-500/15'}`}
+              title="Board or land the Sovereign-X1 jet [G]"
+            >
+              <Plane size={13} className={playerState.isPilotingJet ? 'rotate-90' : ''} /> {playerState.isPilotingJet ? 'Land' : 'Jet'} <kbd className="text-[9px] text-slate-400">G</kbd>
+            </button>
           </div>
 
-          {/* Sovereign-X1 Private Jet Board / Land Button */}
-          <button
-            type="button"
-            onClick={() => {
-              if (onToggleJetFlight) {
-                onToggleJetFlight(!playerState.isPilotingJet);
-              }
-            }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border shadow-lg ${
-              playerState.isPilotingJet
-                ? 'bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white border-rose-400 shadow-rose-900/50 animate-pulse'
-                : 'bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white border-cyan-400 shadow-cyan-950/50'
-            }`}
-            title="Board or Land the Sovereign-X1 Private Jet (Shortcut: G)"
-          >
-            <Plane size={14} className={playerState.isPilotingJet ? 'rotate-90' : ''} />
-            <span>{playerState.isPilotingJet ? '🛬 Land Jet [G]' : '✈️ Sovereign-X1 Jet [G]'}</span>
-          </button>
+          <div className="hidden sm:block"><TaskHistoryPanel /></div>
 
-          {/* 2-Way Live Comms [E] Button */}
-          <button
-            type="button"
-            onClick={() => {
-              if (document.pointerLockElement) {
-                try {
-                  document.exitPointerLock();
-                } catch (_) {}
-              }
-              const targetId = nearbyAgent?.id || (agentCharacters.length > 0 ? agentCharacters[0].id : 'agent-coordinator');
-              if (onInteractWithAgent) onInteractWithAgent(targetId);
-            }}
-            className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg shadow-emerald-950/50 flex items-center gap-2 border border-emerald-400 transition"
-            title="Open 2-Way Live Comms with Citizens (Shortcut: E)"
-          >
-            <MessageSquare size={14} className="text-emerald-200" />
-            <span>🎙️ Comms [E]</span>
-          </button>
-
-          <button
-            onClick={onOpenPublicMissions}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-blue-500/20 flex items-center gap-2 transition"
-          >
-            <Sparkles size={14} className="text-amber-300" />
-            <span>[M] Missions ({publicMissions.length})</span>
-          </button>
-
-          <TaskHistoryPanel />
-
-          <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl p-1 flex items-center gap-1 text-[11px]">
+          <div className={`${PANEL} hidden sm:flex items-center gap-0.5 p-1 text-[11px] font-semibold`}>
             <button
               onClick={() => onSelectCameraMode('FPV')}
-              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
-                cameraMode === 'FPV' || cameraMode === 'JET_COCKPIT' 
-                  ? 'bg-blue-600 text-white font-bold' 
-                  : 'text-slate-400 hover:text-white'
+              className={`px-2 py-1 rounded-xl transition flex items-center gap-1 ${
+                cameraMode === 'FPV' || cameraMode === 'JET_COCKPIT' ? 'bg-white/15 text-white' : 'text-slate-300 hover:text-white'
               }`}
               title="First-Person View (Shortcut: V)"
             >
               <Eye size={12} />
-              <span>1st Person [V]</span>
+              <span className="hidden sm:inline">1st</span>
             </button>
             <button
               onClick={() => onSelectCameraMode('TPV')}
-              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
-                cameraMode === 'TPV' || cameraMode === 'SHOULDER_CAM' || cameraMode === 'JET_CHASE' 
-                  ? 'bg-blue-600 text-white font-bold' 
-                  : 'text-slate-400 hover:text-white'
+              className={`px-2 py-1 rounded-xl transition flex items-center gap-1 ${
+                cameraMode === 'TPV' || cameraMode === 'SHOULDER_CAM' || cameraMode === 'JET_CHASE' ? 'bg-white/15 text-white' : 'text-slate-300 hover:text-white'
               }`}
               title="Third-Person View (Shortcut: V)"
             >
               <Users size={12} />
-              <span>3rd Person</span>
+              <span className="hidden sm:inline">3rd</span>
             </button>
             <button
               onClick={() => onSelectCameraMode('ORBIT')}
-              className={`px-2.5 py-1 rounded transition ${cameraMode === 'ORBIT' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              className={`px-2 py-1 rounded-xl transition ${cameraMode === 'ORBIT' ? 'bg-white/15 text-white' : 'text-slate-300 hover:text-white'}`}
+              title="Orbit view"
             >
               Orbit
             </button>
           </div>
         </div>
       </div>
+
+      {/* 1.2 SIDE PANELS: citizen activity (left) and mission tracker (right), from live backend data */}
+      {showPanels && hudSettings.citizens && (
+        <div className="absolute left-3 sm:left-4 top-[64px] z-20 hidden md:block hud-fade-in">
+          <CitizenActivityPanel onSelectCitizen={openCitizen} />
+        </div>
+      )}
+      {showPanels && hudSettings.missions && !playerState.isPilotingJet && (
+        <div className="absolute right-3 sm:right-4 top-[64px] z-20 hidden md:block hud-fade-in">
+          <MissionTracker onOpenMissions={onOpenPublicMissions} />
+        </div>
+      )}
 
       {/* 1.5. SOVEREIGN-X1 PRIVATE JET AVIONICS FLIGHT HUD */}
       {playerState.isPilotingJet && (
@@ -1195,22 +1252,49 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         </div>
       )}
 
-      {/* 5. BOTTOM NOTIFICATION FEED */}
-      <div className="p-4 pointer-events-auto">
-        <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl px-4 py-2 shadow-2xl flex items-center justify-between text-xs text-slate-300">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span className="font-bold text-slate-100 uppercase text-[11px]">Metropolis Status:</span>
-            <span className="text-slate-400 text-[11px]">
-              {events[0]?.message || 'All 15 AI citizens operating autonomously across city districts.'}
-            </span>
-          </div>
+      {/* 5. BOTTOM: mini-map + notification feed (left), controls hint (center), phone (right) */}
+      <div className="absolute left-3 sm:left-4 bottom-3 sm:bottom-4 z-30 flex flex-col gap-2 items-start">
+        {hudSettings.notifications && !modalOpen && (
+          <NotificationFeed toasts={notifications.toasts} onDismiss={notifications.dismiss} />
+        )}
+        {hudSettings.minimap && !panelsHidden && (
+          <MiniMap
+            buildings={buildings}
+            roads={roads}
+            agents={agentCharacters}
+            player={playerState}
+            onSelectCitizen={openCitizen}
+            locationName={locationName}
+            openSignal={mapSignal}
+          />
+        )}
+      </div>
 
-          <div className="text-[10px] text-slate-500">
-            Press [E] to interact with citizens • [M] for Public Missions • Esc to unlock cursor
-          </div>
+      {!modalOpen && !phoneOpen && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-full bg-slate-950/45 backdrop-blur border border-white/10 text-[10px] text-slate-300 font-sans pointer-events-none">
+          {[['WASD', 'move'], ['E', 'talk'], ['F', 'work order'], ['M', 'missions'], ['N', 'map'], ['P', 'phone'], ['V', 'camera'], ['H', panelsHidden ? 'show HUD' : 'hide HUD']].map(([k, l]) => (
+            <span key={k} className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-white/10 text-slate-100 font-bold">{k}</kbd>{l}</span>
+          ))}
         </div>
+      )}
+
+      <div className="absolute right-3 sm:right-4 bottom-3 sm:bottom-4 z-40 font-sans">
+        <PhoneMenu
+          open={phoneOpen}
+          onOpenChange={setPhoneOpen}
+          onSelectCitizen={openCitizen}
+          onOpenMissions={onOpenPublicMissions}
+          onOpenMap={() => setMapSignal(n => n + 1)}
+          cameraMode={cameraMode}
+          onSelectCameraMode={onSelectCameraMode}
+          isPilotingJet={!!playerState.isPilotingJet}
+          onToggleJet={(p) => { if (onToggleJetFlight) onToggleJetFlight(p); }}
+          notices={notifications.history}
+          settings={hudSettings}
+          onSettingsChange={updateHudSettings}
+        />
       </div>
     </div>
+    </CityLiveDataContext.Provider>
   );
 };

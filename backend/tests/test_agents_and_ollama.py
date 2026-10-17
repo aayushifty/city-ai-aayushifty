@@ -9,6 +9,7 @@ from app.models.schemas import CitizenTaskRequest, PublicMissionCreateRequest
 from app.providers.ollama_provider import OllamaModelProvider
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
+from app.execution.task_history import TaskHistory
 
 @pytest.fixture
 def agent_service(tmp_path):
@@ -17,6 +18,7 @@ def agent_service(tmp_path):
     svc = CitizenExecutionService(db)
     svc.workspaces_root = tmp_path / "workspaces"
     svc.workspaces_root.mkdir(parents=True, exist_ok=True)
+    svc.history = TaskHistory(tmp_path / "task_history.json")  # never write test tasks into the real history
     return svc
 
 @pytest.mark.asyncio

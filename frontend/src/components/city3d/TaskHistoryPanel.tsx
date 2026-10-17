@@ -37,7 +37,6 @@ function timeOf(iso: string | null): string {
 export const TaskHistoryPanel: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
-  const [expanded, setExpanded] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -60,7 +59,7 @@ export const TaskHistoryPanel: React.FC = () => {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="bg-[#070B14]/90 hover:bg-slate-800 text-slate-100 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-700 flex items-center gap-2 transition pointer-events-auto"
+        className="font-sans bg-slate-950/55 backdrop-blur-md hover:bg-slate-900/70 text-slate-100 px-3 py-1.5 rounded-2xl text-[11px] font-semibold border border-white/10 flex items-center gap-2 transition pointer-events-auto"
         title="Task history and live progress"
       >
         <History size={14} className="text-cyan-300" />
@@ -81,77 +80,85 @@ export const TaskHistoryPanel: React.FC = () => {
               <X size={14} />
             </button>
           </div>
-          <div className="overflow-y-auto p-2 space-y-1.5">
-            {tasks.length === 0 && <div className="text-[11px] text-slate-500 p-3 text-center">No tasks yet.</div>}
-            {tasks.map(t => {
-              const isRunning = RUNNING.includes(t.status);
-              const v = t.verification;
-              return (
-                <div key={t.task_id} className="bg-black/40 border border-slate-800 rounded-lg p-2">
-                  <button
-                    type="button"
-                    className="w-full text-left"
-                    onClick={() => setExpanded(e => (e === t.task_id ? null : t.task_id))}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <StatusIcon status={t.status} />
-                      <span className="text-[11px] font-semibold text-slate-100 truncate flex-1">{t.title}</span>
-                      <span className={`text-[9px] font-bold border rounded px-1 ${STATUS_STYLE[t.status] || ''}`}>{t.status}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                      <span className="truncate">{t.agent_name}</span>
-                      {t.mission_id && <span className="text-indigo-400">mission</span>}
-                      {v && v.repair_attempts > 0 && <span className="text-amber-400">{v.repair_attempts} repair{v.repair_attempts > 1 ? 's' : ''}</span>}
-                      <span className="ml-auto">{timeOf(t.created_at)}</span>
-                    </div>
-                  </button>
-                  {isRunning && (
-                    <div className="mt-1.5">
-                      <div className="h-1 bg-slate-800 rounded overflow-hidden">
-                        <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${Math.max(3, Math.min(100, t.progress))}%` }} />
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5 truncate">{t.stage}</div>
-                    </div>
-                  )}
-                  {t.deliverables.filter(d => d.url).map(d => (
-                    <a
-                      key={d.path}
-                      href={absoluteLink(d.url!)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200 truncate"
-                    >
-                      <ExternalLink size={10} className="shrink-0" />
-                      <span className="truncate">{absoluteLink(d.url!)}</span>
-                    </a>
-                  ))}
-                  {expanded === t.task_id && (
-                    <div className="mt-1.5 space-y-1 text-[10px]">
-                      {t.deliverables.filter(d => !d.url).length > 0 && (
-                        <div className="text-slate-400 font-mono break-all">
-                          Files: {t.deliverables.filter(d => !d.url).map(d => d.path).join(', ')}
-                        </div>
-                      )}
-                      {v && (
-                        <div className={v.verified ? 'text-emerald-300' : 'text-red-300'}>
-                          {v.verified ? 'Verified' : 'Not verified'}: {v.passed} passed, {v.failed} failed ({v.suite})
-                        </div>
-                      )}
-                      {v?.output && (
-                        <pre className="font-mono text-slate-400 bg-black/60 border border-slate-800 rounded p-1.5 whitespace-pre-wrap break-all max-h-40 overflow-y-auto">{v.output}</pre>
-                      )}
-                      {t.notes.map((n, i) => (
-                        <div key={i} className="text-amber-200/80">• {n}</div>
-                      ))}
-                      {t.completed_at && <div className="text-slate-500">Finished {timeOf(t.completed_at)}</div>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <div className="overflow-y-auto p-2"><TaskHistoryList tasks={tasks} /></div>
         </div>
       )}
     </>
+  );
+};
+
+/** The task list itself (also shown inside the HUD phone). */
+export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) => {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  return (
+    <div className="space-y-1.5">
+      {tasks.length === 0 && <div className="text-[11px] text-slate-500 p-3 text-center">No tasks yet.</div>}
+      {tasks.map(t => {
+        const isRunning = RUNNING.includes(t.status);
+        const v = t.verification;
+        return (
+          <div key={t.task_id} className="bg-black/40 border border-slate-800 rounded-lg p-2">
+            <button
+              type="button"
+              className="w-full text-left"
+              onClick={() => setExpanded(e => (e === t.task_id ? null : t.task_id))}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <StatusIcon status={t.status} />
+                <span className="text-[11px] font-semibold text-slate-100 truncate flex-1">{t.title}</span>
+                <span className={`text-[9px] font-bold border rounded px-1 ${STATUS_STYLE[t.status] || ''}`}>{t.status}</span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                <span className="truncate">{t.agent_name}</span>
+                {t.mission_id && <span className="text-indigo-400">mission</span>}
+                {v && v.repair_attempts > 0 && <span className="text-amber-400">{v.repair_attempts} repair{v.repair_attempts > 1 ? 's' : ''}</span>}
+                <span className="ml-auto">{timeOf(t.created_at)}</span>
+              </div>
+            </button>
+            {isRunning && (
+              <div className="mt-1.5">
+                <div className="h-1 bg-slate-800 rounded overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${Math.max(3, Math.min(100, t.progress))}%` }} />
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{t.stage}</div>
+              </div>
+            )}
+            {t.deliverables.filter(d => d.url).map(d => (
+              <a
+                key={d.path}
+                href={absoluteLink(d.url!)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200 truncate"
+              >
+                <ExternalLink size={10} className="shrink-0" />
+                <span className="truncate">{absoluteLink(d.url!)}</span>
+              </a>
+            ))}
+            {expanded === t.task_id && (
+              <div className="mt-1.5 space-y-1 text-[10px]">
+                {t.deliverables.filter(d => !d.url).length > 0 && (
+                  <div className="text-slate-400 font-mono break-all">
+                    Files: {t.deliverables.filter(d => !d.url).map(d => d.path).join(', ')}
+                  </div>
+                )}
+                {v && (
+                  <div className={v.verified ? 'text-emerald-300' : 'text-red-300'}>
+                    {v.verified ? 'Verified' : 'Not verified'}: {v.passed} passed, {v.failed} failed ({v.suite})
+                  </div>
+                )}
+                {v?.output && (
+                  <pre className="font-mono text-slate-400 bg-black/60 border border-slate-800 rounded p-1.5 whitespace-pre-wrap break-all max-h-40 overflow-y-auto">{v.output}</pre>
+                )}
+                {t.notes.map((n, i) => (
+                  <div key={i} className="text-amber-200/80">• {n}</div>
+                ))}
+                {t.completed_at && <div className="text-slate-500">Finished {timeOf(t.completed_at)}</div>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 };

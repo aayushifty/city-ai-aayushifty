@@ -72,3 +72,10 @@ def health_check():
         "project": "city_ai_aayushifty",
         "version": "2.1.0"
     }
+
+
+# The built 3D city (frontend/dist) is served at / so the desktop app needs only this one process.
+# Mounted last: /api, /ws, /deliverables, /docs and /health keep priority.
+_FRONTEND_DIST = config.BASE_DIR.parent / "frontend" / "dist"
+if (_FRONTEND_DIST / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")

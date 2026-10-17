@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import config
+from app.core.windows_console import hide_child_consoles
+
+hide_child_consoles()  # desktop app (pythonw): no console windows flashing for git/pytest/PowerShell
 from app.api.routes_projects import router as projects_router
 from app.api.routes_tasks import router as tasks_router
 from app.api.routes_misc import memory_router, approval_router, budget_router, ws_router

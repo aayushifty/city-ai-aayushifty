@@ -1328,8 +1328,9 @@ class ComputerService:
                     "message": f"Opened URL '{launch_target}' in host default browser."
                 }
             else:
-                # Launch via start / subprocess
-                subprocess.Popen(launch_target, shell=True)
+                # `start` opens the program in its own window (console programs like cmd get a visible one);
+                # the helper shell itself stays hidden.
+                subprocess.Popen(f'start "" {launch_target}', shell=True)
                 return {
                     "success": True,
                     "target": launch_target,

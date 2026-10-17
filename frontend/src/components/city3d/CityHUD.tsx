@@ -167,8 +167,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         }
       }
 
-      // [F] Key: Work Command
-      if (k === 'f') {
+      // [F] Key: Work Command (ignore auto-repeat so holding F sends one order)
+      if (k === 'f' && !e.repeat) {
         const ag = interactingAgent || nearbyAgent || (agentCharacters.length > 0 ? agentCharacters[0] : null);
         if (ag) {
           e.preventDefault();

@@ -13,6 +13,7 @@ import {
   PlayerState 
 } from '../../simulation/types';
 import { WorkplaceArchitect } from './WorkplaceArchitect';
+import { createHumanoid, animateHumanoid, ClothingStyle } from './HumanoidBuilder';
 
 interface CitySceneProps {
   buildings: Building[];
@@ -218,110 +219,10 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const root = new THREE.Group();
     root.name = 'SupremeGovernorAvatar';
 
-    const coatMat = new THREE.MeshStandardMaterial({ color: 0x090D18, roughness: 0.35, metalness: 0.25 });
-    const goldTrimMat = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.88, roughness: 0.2 });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5 });
-    const bootsMat = new THREE.MeshStandardMaterial({ color: 0x030712, roughness: 0.4, metalness: 0.3 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xE0AC69, roughness: 0.6 });
-    const hairMat = new THREE.MeshStandardMaterial({ color: 0x1E1B18, roughness: 0.7 });
-    const visorMat = new THREE.MeshBasicMaterial({ color: 0x38BDF8 });
-    const crestMat = new THREE.MeshBasicMaterial({ color: 0xF59E0B });
-
-    // 1. Articulated Legs
-    const leftLeg = new THREE.Group();
-    leftLeg.position.set(-0.16, 0.75, 0);
-    const leftThigh = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.18), pantsMat);
-    leftThigh.position.y = -0.21;
-    leftThigh.castShadow = true;
-    leftLeg.add(leftThigh);
-    const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.16, 0.28), bootsMat);
-    leftBoot.position.set(0, -0.44, 0.04);
-    leftBoot.castShadow = true;
-    leftLeg.add(leftBoot);
-    const leftGoldBand = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.04, 0.20), goldTrimMat);
-    leftGoldBand.position.y = -0.36;
-    leftLeg.add(leftGoldBand);
-    root.add(leftLeg);
-
-    const rightLeg = new THREE.Group();
-    rightLeg.position.set(0.16, 0.75, 0);
-    const rightThigh = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.42, 0.18), pantsMat);
-    rightThigh.position.y = -0.21;
-    rightThigh.castShadow = true;
-    rightLeg.add(rightThigh);
-    const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.16, 0.28), bootsMat);
-    rightBoot.position.set(0, -0.44, 0.04);
-    rightBoot.castShadow = true;
-    rightLeg.add(rightBoot);
-    const rightGoldBand = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.04, 0.20), goldTrimMat);
-    rightGoldBand.position.y = -0.36;
-    rightLeg.add(rightGoldBand);
-    root.add(rightLeg);
-
-    // 2. Torso & Executive Trenchcoat
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.64, 0.32), coatMat);
-    torso.position.y = 1.10;
-    torso.castShadow = true;
-    root.add(torso);
-
-    // Gold Trim Epaulettes on Shoulders
-    const epauletteGeo = new THREE.BoxGeometry(0.18, 0.06, 0.34);
-    const leftEpaulette = new THREE.Mesh(epauletteGeo, goldTrimMat);
-    leftEpaulette.position.set(-0.31, 1.40, 0);
-    root.add(leftEpaulette);
-    const rightEpaulette = new THREE.Mesh(epauletteGeo, goldTrimMat);
-    rightEpaulette.position.set(0.31, 1.40, 0);
-    root.add(rightEpaulette);
-
-    // Longcoat Mantle Flaps hanging down
-    const coatTail = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.42, 0.12), coatMat);
-    coatTail.position.set(0, 0.68, -0.12);
-    root.add(coatTail);
-
-    // Chest Glowing Governor Gorget / Core
-    const crestGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.04, 16);
-    crestGeo.rotateX(Math.PI / 2);
-    const crest = new THREE.Mesh(crestGeo, crestMat);
-    crest.position.set(0, 1.25, 0.18);
-    root.add(crest);
-
-    // 3. Articulated Arms
-    const leftArm = new THREE.Group();
-    leftArm.position.set(-0.35, 1.34, 0);
-    const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.42, 0.15), coatMat);
-    leftSleeve.position.y = -0.21;
-    leftArm.add(leftSleeve);
-    const leftGlove = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.14), goldTrimMat);
-    leftGlove.position.y = -0.44;
-    leftArm.add(leftGlove);
-    root.add(leftArm);
-
-    const rightArm = new THREE.Group();
-    rightArm.position.set(0.35, 1.34, 0);
-    const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.42, 0.15), coatMat);
-    rightSleeve.position.y = -0.21;
-    rightArm.add(rightSleeve);
-    const rightGlove = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.14), goldTrimMat);
-    rightGlove.position.y = -0.44;
-    rightArm.add(rightGlove);
-    root.add(rightArm);
-
-    // 4. Head, Crown & Visor
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.30, 0.28), skinMat);
-    head.position.y = 1.62;
-    root.add(head);
-
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.12, 0.30), hairMat);
-    hair.position.set(0, 1.78, 0);
-    root.add(hair);
-
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.08, 0.12), visorMat);
-    visor.position.set(0, 1.64, 0.12);
-    root.add(visor);
-
-    const crown = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.32), goldTrimMat);
-    crown.position.set(0, 1.76, 0);
-    root.add(crown);
+    // Realistic rigged human figure in the Governor's coat and gold circlet (see HumanoidBuilder)
+    const human = createHumanoid({ seed: 'supreme-governor', style: 'GOVERNOR', accentColor: '#F59E0B', skinColor: '#E0AC69', hairColor: '#1E1B18' });
+    root.add(human);
+    (root as any)._human = human;
 
     // 5. Overhead Floating 3D Billboard Banner
     const canvas = document.createElement('canvas');
@@ -358,10 +259,6 @@ export const CityScene: React.FC<CitySceneProps> = ({
     banner.position.y = 2.45;
     root.add(banner);
 
-    (root as any)._leftLeg = leftLeg;
-    (root as any)._rightLeg = rightLeg;
-    (root as any)._leftArm = leftArm;
-    (root as any)._rightArm = rightArm;
     (root as any)._billboard = banner;
 
     return root;
@@ -798,48 +695,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
       }
 
-      // 'E' Key: Interact with nearby citizen (open 2-way comms) - Fresh Ref Lookup (Never Stale)
-      if (k === 'e') {
-        let closestAgent: AgentCharacter | null = null;
-        let minDist = 999;
-        for (const ag of agentCharactersRef.current) {
-          const d = Math.hypot(fpv.current.x - ag.x, fpv.current.z - ag.z);
-          if (d < minDist) {
-            minDist = d;
-            closestAgent = ag;
-          }
-        }
-
-        if (document.pointerLockElement) {
-          try {
-            document.exitPointerLock();
-          } catch (_) {}
-        }
-
-        if (closestAgent) {
-          cbRef.current.onInteractWithAgent(closestAgent.id);
-        } else if (agentCharactersRef.current.length > 0) {
-          cbRef.current.onInteractWithAgent(agentCharactersRef.current[0].id);
-        }
-      }
-
-      // 'F' Key: Direct Work Command (Make citizen work immediately)
-      if (k === 'f') {
-        let closestAgent: AgentCharacter | null = null;
-        let minDist = 999;
-        for (const ag of agentCharactersRef.current) {
-          const d = Math.hypot(fpv.current.x - ag.x, fpv.current.z - ag.z);
-          if (d < minDist) {
-            minDist = d;
-            closestAgent = ag;
-          }
-        }
-        if (closestAgent) {
-          cbRef.current.onDirectWorkCommand(closestAgent.id);
-        } else if (agentCharactersRef.current.length > 0) {
-          cbRef.current.onDirectWorkCommand(agentCharactersRef.current[0].id);
-        }
-      }
+      // E (2-way comms) and F (work order) are handled once, in CityHUD; handling them here too sent
+      // every work order twice.
 
       // 'M' Key: Open Public Missions
       if (k === 'm') {
@@ -882,6 +739,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     // when another citizen is clearly closer, so the Comms prompt stays put while you stand next to someone.
     const NEAR_ENTER = 7.0, NEAR_EXIT = 10.0, NEAR_SWITCH_MARGIN = 1.5;
     let lockedNearbyId: string | null = null;
+    const billboardQ = new THREE.Quaternion();
     const syncPlayer = (update: Partial<PlayerState>) => {
       const now = performance.now();
       if (now - lastPlayerSync < 100 && update.nearbyAgentId === lastNearbyId) return;
@@ -1145,13 +1003,11 @@ export const CityScene: React.FC<CitySceneProps> = ({
           // Hide avatar in first person view so own head does not block view; show in third person & orbit!
           gov.visible = (cameraModeRef.current !== 'FPV' && cameraModeRef.current !== 'STREET_LEVEL');
 
-          // Walking leg & arm swing animations
+          // Walk / run cycle (only worth animating when the avatar is visible)
           const isMoving = p.keys.w || p.keys.s || p.keys.a || p.keys.d;
-          const swing = isMoving ? Math.sin(currentTime * 0.012) * 0.45 : 0;
-          if ((gov as any)._leftLeg) (gov as any)._leftLeg.rotation.x = swing;
-          if ((gov as any)._rightLeg) (gov as any)._rightLeg.rotation.x = -swing;
-          if ((gov as any)._leftArm) (gov as any)._leftArm.rotation.x = -swing * 0.8;
-          if ((gov as any)._rightArm) (gov as any)._rightArm.rotation.x = swing * 0.8;
+          if (gov.visible && (gov as any)._human) {
+            animateHumanoid((gov as any)._human, currentTime / 1000, dt, { moving: isMoving, speed: p.keys.shift ? 1.8 : 1 });
+          }
         }
 
         // Jet stays parked on executive runway
@@ -1240,12 +1096,21 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
       }
 
-      // Always rotate holographic banners to face camera
+      // Always rotate holographic banners to face camera. The parent (avatar, jet, citizen) is itself rotated,
+      // so undo its world rotation first; copying the camera rotation directly mirrored the text.
+      const faceCamera = (obj: THREE.Object3D) => {
+        if (!obj.parent) return;
+        obj.parent.getWorldQuaternion(billboardQ);
+        obj.quaternion.copy(billboardQ.invert().multiply(camera.quaternion));
+      };
       if (governorRef.current && (governorRef.current as any)._billboard) {
-        (governorRef.current as any)._billboard.quaternion.copy(camera.quaternion);
+        const banner = (governorRef.current as any)._billboard as THREE.Object3D;
+        // Your own banner would sit right in front of the camera in third-person view
+        banner.visible = camera.position.distanceTo(governorRef.current.position) > 9;
+        if (banner.visible) faceCamera(banner);
       }
       if (jetRef.current && (jetRef.current as any)._billboard) {
-        (jetRef.current as any)._billboard.quaternion.copy(camera.quaternion);
+        faceCamera((jetRef.current as any)._billboard);
       }
 
       // Citizens face the Governor when close and swing their limbs while walking
@@ -1257,22 +1122,24 @@ export const CityScene: React.FC<CitySceneProps> = ({
         const dz = p.z - ag.z;
         aGroup.rotation.y = Math.hypot(dx, dz) <= 4.2 ? Math.atan2(dx, dz) : -ag.angle;
         const g = aGroup as any;
-        if (g._leftLeg && g._rightLeg && g._leftArm && g._rightArm) {
+        if (g._human) {
+          const near = Math.hypot(dx, dz) <= 4.2;
           const isMoving = Math.hypot(ag.x - ag.targetX, ag.z - ag.targetZ) > 0.4 || ag.status === 'TRAVELING';
-          const swing = isMoving ? Math.sin(walkNow * 0.008 * (ag.speed || 3.2)) : 0;
-          g._leftLeg.rotation.x = swing * 0.55;
-          g._rightLeg.rotation.x = -swing * 0.55;
-          g._leftArm.rotation.x = -swing * 0.45;
-          g._rightArm.rotation.x = swing * 0.45;
+          animateHumanoid(g._human, walkNow / 1000, dt, {
+            moving: isMoving,
+            speed: (ag.speed || 3.2) > 4.5 ? 1.6 : 1,
+            talking: near,
+            working: ag.status === 'WORKING' || ag.status === 'VERIFYING',
+          });
         }
       }
 
       // Always rotate holographic citizen badges and thought bubbles to face the camera
       agentMeshMap.current.forEach((aGroup) => {
         const bb = (aGroup as any)._billboard;
-        if (bb) bb.quaternion.copy(camera.quaternion);
+        if (bb) faceCamera(bb);
         const tb = (aGroup as any)._thought;
-        if (tb && tb.visible) tb.quaternion.copy(camera.quaternion);
+        if (tb && tb.visible) faceCamera(tb);
       });
 
       // Animate dynamic holographic workplace features (rotating globes, diagnostic cores, data rings)
@@ -1342,307 +1209,28 @@ export const CityScene: React.FC<CitySceneProps> = ({
         aGroup = new THREE.Group();
         aGroup.userData = { type: 'AGENT', id: ag.id };
 
-        const skinColorHex = ag.skinColor || '#E0AC69';
-        const hairColorHex = ag.hairColor || '#2D251E';
-
-        const skinMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(skinColorHex), roughness: 0.6 });
-        const hairMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(hairColorHex), roughness: 0.8 });
-
-        // 1. Role Clothing Palette
-        let jacketColor = new THREE.Color(ag.color);
-        let pantsColor = new THREE.Color('#1E293B');
-        let shoesColor = new THREE.Color('#0F172A');
-
-        if (ag.clothingStyle === 'CONSTRUCTION') {
-          jacketColor = new THREE.Color('#EA580C'); // Safety Orange
-          pantsColor = new THREE.Color('#1D4ED8'); // Blue denim
-          shoesColor = new THREE.Color('#B45309'); // Workboots
-        } else if (ag.clothingStyle === 'DOCTOR') {
-          jacketColor = new THREE.Color('#FFFFFF'); // White Lab Coat
-          pantsColor = new THREE.Color('#0F172A'); // Dark slacks
-          shoesColor = new THREE.Color('#334155');
-        } else if (ag.clothingStyle === 'ARCHITECT') {
-          jacketColor = new THREE.Color('#1E3A8A'); // Navy blazer
-          pantsColor = new THREE.Color('#475569'); // Slate trousers
-          shoesColor = new THREE.Color('#1E293B');
-        } else if (ag.clothingStyle === 'ENGINEER') {
-          jacketColor = new THREE.Color('#27272A'); // Developer hoodie
-          pantsColor = new THREE.Color('#18181B'); // Black jeans
-          shoesColor = new THREE.Color('#F59E0B'); // Orange sneakers
-        } else if (ag.clothingStyle === 'SECURITY') {
-          jacketColor = new THREE.Color('#18181B'); // Tactical enforcement
-          pantsColor = new THREE.Color('#09090B');
-          shoesColor = new THREE.Color('#000000'); // Combat boots
-        } else if (ag.clothingStyle === 'DEVOPS') {
-          jacketColor = new THREE.Color('#0891B2'); // Cyan SRE windbreaker
-          pantsColor = new THREE.Color('#334155');
-          shoesColor = new THREE.Color('#0E7490');
-        } else if (ag.clothingStyle === 'EXECUTIVE') {
-          jacketColor = new THREE.Color('#0F172A'); // Command Trench Coat
-          pantsColor = new THREE.Color('#1E293B');
-          shoesColor = new THREE.Color('#000000');
-        }
-
-        const jacketMat = new THREE.MeshStandardMaterial({ color: jacketColor, roughness: 0.4 });
-        const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.5 });
-        const shoesMat = new THREE.MeshStandardMaterial({ color: shoesColor, roughness: 0.7 });
-
-        // 2. Articulated Legs
-        // Left Leg
-        const leftLegGroup = new THREE.Group();
-        leftLegGroup.position.set(-0.14, 0.72, 0);
-        const leftThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.40, 0.16), pantsMat);
-        leftThigh.position.y = -0.18;
-        leftLegGroup.add(leftThigh);
-        const leftFoot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.26), shoesMat);
-        leftFoot.position.set(0, -0.42, 0.04);
-        leftLegGroup.add(leftFoot);
-        aGroup.add(leftLegGroup);
-
-        // Right Leg
-        const rightLegGroup = new THREE.Group();
-        rightLegGroup.position.set(0.14, 0.72, 0);
-        const rightThigh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.40, 0.16), pantsMat);
-        rightThigh.position.y = -0.18;
-        rightLegGroup.add(rightThigh);
-        const rightFoot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.26), shoesMat);
-        rightFoot.position.set(0, -0.42, 0.04);
-        rightLegGroup.add(rightFoot);
-        aGroup.add(rightLegGroup);
-
-        // 3. Human Torso & Uniform
-        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.60, 0.28), jacketMat);
-        torso.position.y = 1.05;
-        torso.castShadow = true;
-        aGroup.add(torso);
-
-        // Construction Reflective Stripes
-        if (ag.clothingStyle === 'CONSTRUCTION') {
-          const stripeGeo = new THREE.BoxGeometry(0.49, 0.06, 0.29);
-          const stripeMat = new THREE.MeshBasicMaterial({ color: 0xE2E8F0 });
-          const stripe1 = new THREE.Mesh(stripeGeo, stripeMat);
-          stripe1.position.y = 1.10;
-          aGroup.add(stripe1);
-          const stripe2 = new THREE.Mesh(stripeGeo, stripeMat);
-          stripe2.position.y = 0.95;
-          aGroup.add(stripe2);
-        } else if (ag.clothingStyle === 'DOCTOR') {
-          // Stethoscope
-          const stethGeo = new THREE.TorusGeometry(0.14, 0.018, 8, 16, Math.PI * 1.3);
-          const stethMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6 });
-          const steth = new THREE.Mesh(stethGeo, stethMat);
-          steth.position.set(0, 1.25, 0.14);
-          steth.rotation.x = Math.PI / 4;
-          aGroup.add(steth);
-        }
-
-        // 4. Articulated Arms & Hands
-        // Left Arm
-        const leftArmGroup = new THREE.Group();
-        leftArmGroup.position.set(-0.31, 1.28, 0);
-        const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), jacketMat);
-        leftSleeve.position.y = -0.18;
-        leftArmGroup.add(leftSleeve);
-        const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinMat);
-        leftHand.position.y = -0.40;
-        leftArmGroup.add(leftHand);
-        aGroup.add(leftArmGroup);
-
-        // Right Arm
-        const rightArmGroup = new THREE.Group();
-        rightArmGroup.position.set(0.31, 1.28, 0);
-        const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.13), jacketMat);
-        rightSleeve.position.y = -0.18;
-        rightArmGroup.add(rightSleeve);
-        const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), skinMat);
-        rightHand.position.y = -0.40;
-        rightArmGroup.add(rightHand);
-        aGroup.add(rightArmGroup);
-
-        // 5. Neck & Head with Expressive Face & Realistic Hair
-        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.10, 0.14, 8), skinMat);
-        neck.position.y = 1.38;
-        aGroup.add(neck);
-
-        const head = new THREE.Mesh(new THREE.SphereGeometry(0.20, 16, 16), skinMat);
-        head.position.y = 1.54;
-        head.castShadow = true;
-        aGroup.add(head);
-
-        // Eyes (Sclera + Iris + Pupil)
-        const eyeGeo = new THREE.SphereGeometry(0.025, 8, 8);
-        const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-        const pupilGeo = new THREE.SphereGeometry(0.012, 8, 8);
-        const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111827 });
-        const irisMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(ag.color) });
-
-        // Left Eye
-        const leftEye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-        leftEye.position.set(-0.065, 1.56, 0.18);
-        const leftIris = new THREE.Mesh(pupilGeo, irisMat);
-        leftIris.position.set(-0.065, 1.56, 0.195);
-        const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 8), pupilMat);
-        leftPupil.position.set(-0.065, 1.56, 0.203);
-        aGroup.add(leftEye);
-        aGroup.add(leftIris);
-        aGroup.add(leftPupil);
-
-        // Right Eye
-        const rightEye = new THREE.Mesh(eyeGeo, eyeWhiteMat);
-        rightEye.position.set(0.065, 1.56, 0.18);
-        const rightIris = new THREE.Mesh(pupilGeo, irisMat);
-        rightIris.position.set(0.065, 1.56, 0.195);
-        const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 8), pupilMat);
-        rightPupil.position.set(0.065, 1.56, 0.203);
-        aGroup.add(rightEye);
-        aGroup.add(rightIris);
-        aGroup.add(rightPupil);
-
-        // Eyebrows
-        const browGeo = new THREE.BoxGeometry(0.045, 0.012, 0.015);
-        const browMat = hairMat;
-        const leftBrow = new THREE.Mesh(browGeo, browMat);
-        leftBrow.position.set(-0.065, 1.60, 0.185);
-        const rightBrow = new THREE.Mesh(browGeo, browMat);
-        rightBrow.position.set(0.065, 1.60, 0.185);
-        aGroup.add(leftBrow);
-        aGroup.add(rightBrow);
-
-        // Nose
-        const nose = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.05, 4), skinMat);
-        nose.position.set(0, 1.53, 0.20);
-        nose.rotation.x = Math.PI / 2;
-        aGroup.add(nose);
-
-        // Mouth / Smile
-        const mouthGeo = new THREE.BoxGeometry(0.05, 0.012, 0.01);
-        const mouthMat = new THREE.MeshBasicMaterial({ color: 0x991B1B });
-        const mouth = new THREE.Mesh(mouthGeo, mouthMat);
-        mouth.position.set(0, 1.47, 0.195);
-        aGroup.add(mouth);
-
-        // Ears
-        const earGeo = new THREE.SphereGeometry(0.04, 8, 8);
-        const leftEar = new THREE.Mesh(earGeo, skinMat);
-        leftEar.position.set(-0.20, 1.54, 0.02);
-        const rightEar = new THREE.Mesh(earGeo, skinMat);
-        rightEar.position.set(0.20, 1.54, 0.02);
-        aGroup.add(leftEar);
-        aGroup.add(rightEar);
-
-        // Role-Specific Headwear & Accessories
-        if (ag.clothingStyle === 'CONSTRUCTION') {
-          // Yellow Safety Hard Hat with Brim
-          const hatGeo = new THREE.SphereGeometry(0.23, 14, 14);
-          const hatMat = new THREE.MeshStandardMaterial({ color: 0xFACC15, roughness: 0.3 });
-          const hat = new THREE.Mesh(hatGeo, hatMat);
-          hat.position.set(0, 1.62, 0.02);
-          const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.03, 16), hatMat);
-          brim.position.set(0, 1.58, 0.04);
-          aGroup.add(hat);
-          aGroup.add(brim);
-        } else if (ag.clothingStyle === 'ENGINEER') {
-          // Programmer Headset + Hair
-          const hairGeo = new THREE.SphereGeometry(0.21, 14, 14);
-          const hair = new THREE.Mesh(hairGeo, hairMat);
-          hair.position.set(0, 1.60, -0.02);
-          aGroup.add(hair);
-
-          const bandGeo = new THREE.TorusGeometry(0.23, 0.025, 8, 16, Math.PI);
-          const bandMat = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.7 });
-          const band = new THREE.Mesh(bandGeo, bandMat);
-          band.position.set(0, 1.65, 0);
-          band.rotation.z = Math.PI;
-          aGroup.add(band);
-
-          const earpieceGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.04, 8);
-          const earpieceMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, metalness: 0.8 });
-          const leftCup = new THREE.Mesh(earpieceGeo, earpieceMat);
-          leftCup.rotation.z = Math.PI / 2;
-          leftCup.position.set(-0.23, 1.55, 0);
-          const rightCup = new THREE.Mesh(earpieceGeo, earpieceMat);
-          rightCup.rotation.z = Math.PI / 2;
-          rightCup.position.set(0.23, 1.55, 0);
-          aGroup.add(leftCup);
-          aGroup.add(rightCup);
-
-          // Tablet in left hand
-          const tablet = new THREE.Mesh(
-            new THREE.BoxGeometry(0.18, 0.02, 0.26),
-            new THREE.MeshStandardMaterial({ color: 0x0F172A, metalness: 0.8 })
-          );
-          tablet.position.set(-0.35, 0.90, 0.20);
-          tablet.rotation.set(Math.PI / 4, 0, 0);
-          aGroup.add(tablet);
-        } else if (ag.clothingStyle === 'ARCHITECT') {
-          // Hair + Blueprint tube on back
-          const hairGeo = new THREE.SphereGeometry(0.21, 14, 14);
-          const hair = new THREE.Mesh(hairGeo, hairMat);
-          hair.position.set(0, 1.59, -0.02);
-          aGroup.add(hair);
-
-          const tube = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.06, 0.06, 0.75, 8),
-            new THREE.MeshStandardMaterial({ color: 0x1E3A8A, roughness: 0.5 })
-          );
-          tube.position.set(0, 1.10, -0.20);
-          tube.rotation.z = Math.PI / 4;
-          aGroup.add(tube);
-        } else if (ag.clothingStyle === 'QA') {
-          // Hair + QA Checklist Clipboard
-          const hairGeo = new THREE.SphereGeometry(0.21, 14, 14);
-          const hair = new THREE.Mesh(hairGeo, hairMat);
-          hair.position.set(0, 1.59, -0.02);
-          aGroup.add(hair);
-
-          const clipboard = new THREE.Mesh(
-            new THREE.BoxGeometry(0.16, 0.22, 0.02),
-            new THREE.MeshStandardMaterial({ color: 0x78350F, roughness: 0.7 })
-          );
-          clipboard.position.set(0.35, 0.95, 0.18);
-          clipboard.rotation.set(Math.PI / 6, 0, 0);
-          aGroup.add(clipboard);
-        } else if (ag.clothingStyle === 'SECURITY') {
-          // Tactical Pauldrons & Crew Cut
-          const hairGeo = new THREE.SphereGeometry(0.205, 14, 14);
-          const hair = new THREE.Mesh(hairGeo, hairMat);
-          hair.position.set(0, 1.58, -0.01);
-          aGroup.add(hair);
-
-          const pauldronGeo = new THREE.BoxGeometry(0.18, 0.08, 0.20);
-          const pauldronMat = new THREE.MeshStandardMaterial({ color: 0x09090B, metalness: 0.7 });
-          const leftP = new THREE.Mesh(pauldronGeo, pauldronMat);
-          leftP.position.set(-0.32, 1.35, 0);
-          const rightP = new THREE.Mesh(pauldronGeo, pauldronMat);
-          rightP.position.set(0.32, 1.35, 0);
-          aGroup.add(leftP);
-          aGroup.add(rightP);
-        } else if (ag.clothingStyle === 'DOCTOR') {
-          // Medical Scrub Cap
-          const capGeo = new THREE.SphereGeometry(0.22, 14, 14);
-          const capMat = new THREE.MeshStandardMaterial({ color: 0x0284C7, roughness: 0.5 });
-          const cap = new THREE.Mesh(capGeo, capMat);
-          cap.position.set(0, 1.62, 0);
-          aGroup.add(cap);
-        } else {
-          // Sculpted Executive / Persona Hair
-          const hairGeo = new THREE.SphereGeometry(0.21, 14, 14);
-          const hair = new THREE.Mesh(hairGeo, hairMat);
-          hair.position.set(0, 1.59, -0.02);
-          aGroup.add(hair);
-        }
+        // Realistic rigged human figure (see HumanoidBuilder)
+        const human = createHumanoid({
+          seed: ag.id,
+          style: (ag.clothingStyle || 'EXECUTIVE') as ClothingStyle,
+          accentColor: ag.color,
+          skinColor: ag.skinColor,
+          hairColor: ag.hairColor,
+        });
+        aGroup.add(human);
 
         // 6. Glowing District Light Beacon (14 Meters High - Visible Across Metropolis)
-        const beaconGeo = new THREE.CylinderGeometry(0.10, 0.45, 14.0, 16);
+        // Starts above the head so it marks the citizen from afar without cutting through the figure.
+        const beaconGeo = new THREE.CylinderGeometry(0.06, 0.22, 12.0, 12, 1, true);
         const beaconMat = new THREE.MeshBasicMaterial({
           color: new THREE.Color(ag.color),
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.22,
           side: THREE.DoubleSide,
           depthWrite: false
         });
         const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-        beacon.position.y = 7.0;
+        beacon.position.y = 8.6;
         aGroup.add(beacon);
 
         // 7. Glowing Base Status Ring
@@ -1708,11 +1296,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         aGroup.scale.set(1.4, 1.4, 1.4);
 
         // Save limbs and billboard references for render loop
-        (aGroup as any)._leftLeg = leftLegGroup;
-        (aGroup as any)._rightLeg = rightLegGroup;
-        (aGroup as any)._leftArm = leftArmGroup;
-        (aGroup as any)._rightArm = rightArmGroup;
-        (aGroup as any)._torso = torso;
+        (aGroup as any)._human = human;
         (aGroup as any)._statusRing = ring;
         (aGroup as any)._billboard = tagMesh;
         (aGroup as any)._thought = bubbleMesh;

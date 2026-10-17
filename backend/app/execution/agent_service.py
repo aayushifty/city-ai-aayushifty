@@ -50,6 +50,7 @@ class CitizenExecutionService:
         self.public_missions: List[Dict[str, Any]] = []
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._citizen_locks: Dict[str, asyncio.Lock] = {}
+        self._chat_memory: Dict[str, List[Tuple[str, str]]] = {}  # recent chat turns per citizen
         self.history = TaskHistory(config.DATA_DIR / "task_history.json")
         self._init_citizens()
 
@@ -413,10 +414,20 @@ class CitizenExecutionService:
             )
 
         # --- 6. General Intelligent QA via Local Model with Grounded Context ---
+        if citizen.current_task:
+            work = f"You are currently working on: {citizen.current_task} ({citizen.status}, {citizen.work_progress:.0f}% done)."
+        else:
+            work = "You have no task in progress right now."
+        recent = self.history.list(limit=5, agent_id=citizen.id)
+        if recent:
+            work += " Your recent tasks: " + "; ".join(f"{r['title']} [{r['status']}]" for r in recent) + "."
+        past = self._chat_memory.get(citizen.id, [])
+        transcript = "\n".join(f"{'Governor' if who == 'user' else citizen.name}: {text}" for who, text in past[-8:])
         system_prompt = (
             f"You are {citizen.name}, the {citizen.profession} in {citizen.department} of 'city_ai_aayushifty'.\n"
             f"Your capabilities: {', '.join(citizen.capabilities)}.\n"
-            f"Your current status is {citizen.status}.\n"
+            f"Your current status is {citizen.status}. {work}\n"
+            + (f"Conversation so far:\n{transcript}\n" if transcript else "") +
             f"REAL-TIME HOST CLOCK: {telemetry['current_time']}.\n"
             f"METROPOLIS STATUS: 100% power, 100% water, 94.2% satisfaction, 0 incidents.\n"
             f"HOST COMPUTER: Windows ({telemetry['os_name']} {telemetry['os_release']}) [{telemetry['architecture']}], "
@@ -432,7 +443,7 @@ class CitizenExecutionService:
             temperature=0.3
         )
 
-        resp = await model_router.route_completion(req, preferred_provider="ollama")
+        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama")
         reply_content = resp.content.strip()
 
         # Sanitize any accidental raw JSON / mock engine code structures into articulate human dialogue
@@ -459,6 +470,9 @@ class CitizenExecutionService:
                 pass
 
         # Update thought
+        memory = self._chat_memory.setdefault(citizen.id, [])
+        memory.extend([("user", message[:1000]), ("citizen", reply_content[:1000])])
+        del memory[:-16]
         citizen.thought = reply_content[:80] + ("..." if len(reply_content) > 80 else "")
 
         # Broadcast chat event to live event bus

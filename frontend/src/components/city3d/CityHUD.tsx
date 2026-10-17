@@ -446,7 +446,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         {nearbyAgent && !interactingAgent && (
           <div 
             onClick={() => onInteractWithAgent ? onInteractWithAgent(nearbyAgent.id) : null}
-            className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/80 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 animate-bounce border-2 pointer-events-auto cursor-pointer hover:bg-slate-900/90 transition select-none"
+            className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/80 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 border-2 pointer-events-auto cursor-pointer hover:bg-slate-900/90 transition select-none"
             title="Press E or click to open 2-Way Live Comms"
           >
             <div className="flex items-center gap-2.5">

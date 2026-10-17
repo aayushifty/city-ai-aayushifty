@@ -256,3 +256,32 @@ def test_task_history_persists_and_marks_interrupted_tasks(tmp_path):
     reloaded = TaskHistory(tmp_path / "h.json")
     assert reloaded.get("t2")["status"] == "VERIFIED"
     assert reloaded.get("t1")["status"] == "FAILED"
+
+
+# --- 2-way chat -----------------------------------------------------------------------------------
+
+def test_only_bare_greetings_skip_the_model():
+    from app.execution.computer_service import computer_service
+    assert computer_service.detect_intent("whats up")["intent"] == "GREETING"
+    assert computer_service.detect_intent("hey safal, what are you working on today?")["intent"] == "GENERAL_QUERY"
+    assert computer_service.detect_intent("what are you doing")["intent"] == "GENERAL_QUERY"
+
+
+@pytest.mark.asyncio
+async def test_chat_remembers_the_conversation_and_current_task(svc, monkeypatch):
+    model = ScriptedModel(["I am reviewing the firewall rules.", "Yes, the firewall review I mentioned."])
+    seen = []
+
+    async def spy(request, preferred_provider=None):
+        seen.append(request.system_prompt)
+        return await model(request, preferred_provider)
+
+    monkeypatch.setattr(model_router, "route_completion", spy)
+    citizen = svc.get_citizen("agent-security")
+    citizen.current_task = "Audit firewall rules"
+    first = await svc.chat_with_citizen("agent-security", "hey, what are you working on?")
+    second = await svc.chat_with_citizen("agent-security", "is that the same thing as before?")
+    assert first.reply == "I am reviewing the firewall rules."
+    assert "Audit firewall rules" in seen[0]
+    assert "I am reviewing the firewall rules." in seen[1] and "what are you working on" in seen[1]
+    assert second.reply.startswith("Yes")

@@ -1961,24 +1961,8 @@ export class CitySimulationEngine {
     // Daytime High Noon Clock (Stays between 11:00 AM and 1:30 PM for permanent bright visibility)
     this.simulationTime = 12.0 + (Math.sin(this.tickCount * 0.0003) * 1.5);
 
-    // 1. Proximity Detection: Player <-> AI Citizens
-    let closestDist = 999;
-    let closestId: string | null = null;
-    this.agentCharacters.forEach(ag => {
-      const dist = Math.sqrt((this.player.x - ag.x) ** 2 + (this.player.z - ag.z) ** 2);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestId = ag.id;
-      }
-    });
-
-    if (closestDist <= 3.6) {
-      this.player.nearbyAgentId = closestId;
-      this.player.nearbyAgentDistance = closestDist;
-    } else {
-      this.player.nearbyAgentId = null;
-      this.player.nearbyAgentDistance = closestDist;
-    }
+    // 1. Proximity (player.nearbyAgentId) is owned by CityScene's render loop, which tracks the real
+    //    on-foot position every frame; recomputing it here with another radius made the prompt flicker.
 
     // 2. Traffic Light Signals
     this.intersections.forEach(inter => {

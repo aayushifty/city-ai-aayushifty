@@ -741,6 +741,9 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     // Keyboard WASD, Shift, Space, E, M, Esc Listeners
     const onKeyDown = (e: KeyboardEvent) => {
+      // Typing in the chat/task boxes must not drive the game (E/F/G/M shortcuts, WASD, jump).
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
       const k = e.key.toLowerCase();
       if (k === 'w') fpv.current.keys.w = true;
       if (k === 'a') fpv.current.keys.a = true;
@@ -875,6 +878,10 @@ export const CityScene: React.FC<CitySceneProps> = ({
     // Player position goes to React at most 10x/second, or at once when the nearby citizen changes.
     let lastPlayerSync = 0;
     let lastNearbyId: string | null | undefined;
+    // Nearby citizen with hysteresis: lock on within NEAR_ENTER, keep until beyond NEAR_EXIT, and only switch
+    // when another citizen is clearly closer, so the Comms prompt stays put while you stand next to someone.
+    const NEAR_ENTER = 7.0, NEAR_EXIT = 10.0, NEAR_SWITCH_MARGIN = 1.5;
+    let lockedNearbyId: string | null = null;
     const syncPlayer = (update: Partial<PlayerState>) => {
       const now = performance.now();
       if (now - lastPlayerSync < 100 && update.nearbyAgentId === lastNearbyId) return;
@@ -1002,6 +1009,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           yaw: jet.yaw,
           pitch: jet.pitch,
           isPilotingJet: true,
+          nearbyAgentId: null,
           jetSpeed: Math.round(jet.speed * 3.6),
           jetAltitude: Math.round(jet.y),
           jetHeading: Math.round(((-jet.yaw * 180 / Math.PI) % 360 + 360) % 360)
@@ -1091,17 +1099,24 @@ export const CityScene: React.FC<CitySceneProps> = ({
             }
           }
 
-          // Compute nearby agent dynamically every frame
+          // Nearby citizen (sticky, see NEAR_ENTER/NEAR_EXIT)
           let closestAgentDist = 999;
           let closestAgentId: string | null = null;
+          let lockedDist = Infinity;
           agentCharactersRef.current.forEach(ag => {
             const d = Math.hypot(p.x - ag.x, p.z - ag.z);
+            if (ag.id === lockedNearbyId) lockedDist = d;
             if (d < closestAgentDist) {
               closestAgentDist = d;
               closestAgentId = ag.id;
             }
           });
-          const nearbyId = closestAgentDist <= 8.5 ? closestAgentId : null;
+          if (lockedNearbyId) {
+            if (lockedDist > NEAR_EXIT) lockedNearbyId = null;
+            else if (closestAgentId !== lockedNearbyId && closestAgentDist + NEAR_SWITCH_MARGIN < lockedDist) lockedNearbyId = closestAgentId;
+          }
+          if (!lockedNearbyId && closestAgentDist <= NEAR_ENTER) lockedNearbyId = closestAgentId;
+          const nearbyId = lockedNearbyId;
 
           // Sync player state with React
           syncPlayer({

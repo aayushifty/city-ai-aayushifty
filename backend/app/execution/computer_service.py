@@ -169,10 +169,10 @@ class ComputerService:
             r"^(?:what'?s\s+up|whats\s+up|sup|hello|hi|hey|greetings|good\s+(?:morning|afternoon|evening))\b",
             r"\bhow\s+are\s+you\b",
             r"\bhow\s+is\s+it\s+going\b",
-            r"\bwhat('?s|\s+is)\s+going\s+on\b",
-            r"\bwhat\s+are\s+you\s+doing\b"
         ]
-        if any(re.search(pat, lower) for pat in greeting_patterns):
+        # Only a bare greeting gets the quick in-character reply; a message with a real question in it
+        # ("hey, what are you working on?") goes to the citizen's model.
+        if len(re.findall(r"[a-z']+", lower)) <= 4 and any(re.search(pat, lower) for pat in greeting_patterns):
             return {"intent": "GREETING", "confidence": 0.97}
 
         # 5. Shell / CLI Command Execution (Jarvis command execution)

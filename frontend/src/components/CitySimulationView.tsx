@@ -390,12 +390,23 @@ export const CitySimulationView: React.FC = () => {
       timestamp: new Date().toLocaleTimeString()
     };
     ag.chatHistory.push(playerMsg);
+    // Visible "thinking" line in the chat until the local model answers (can take a while on first load).
+    const pendingId = `pending-${Date.now()}`;
+    ag.chatHistory.push({
+      id: pendingId,
+      sender: 'AGENT' as const,
+      senderName: ag.name,
+      text: `${ag.name} is thinking…`,
+      timestamp: new Date().toLocaleTimeString()
+    });
     ag.thoughtBubble = 'Thinking via local Ollama model...';
     ag.speechTimer = 10.0;
     setAgentCharacters([...engine.agentCharacters]);
+    const dropPending = () => { ag.chatHistory = (ag.chatHistory || []).filter(m => m.id !== pendingId); };
 
     try {
       const response = await api.chatWithAgent(agentId, message);
+      dropPending();
       ag.chatHistory.push({
         id: response.message_id || `amsg-${Date.now()}`,
         sender: 'AGENT' as const,
@@ -419,8 +430,16 @@ export const CitySimulationView: React.FC = () => {
 
       setAgentCharacters([...engine.agentCharacters]);
     } catch (err: any) {
-      // Fallback to local heuristic response if server is offline
-      engine.interactWithAgent(agentId, message);
+      // Say what went wrong instead of inventing a reply.
+      dropPending();
+      ag.chatHistory.push({
+        id: `err-${Date.now()}`,
+        sender: 'AGENT' as const,
+        senderName: ag.name,
+        text: `⚠️ ${ag.name} could not answer: ${err?.message || 'the City AI backend is not reachable'}. Check that the app (or backend) and Ollama are running, then try again.`,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      ag.thoughtBubble = 'Could not reach my model.';
       setAgentCharacters([...engine.agentCharacters]);
     }
   }, []);

@@ -44,6 +44,32 @@ interface CitySceneProps {
   onToggleJetFlight?: (piloting: boolean) => void;
 }
 
+/** Canvas for a citizen's overhead badge (name, model it runs, role, keys). */
+function drawCitizenTag(ag: AgentCharacter): HTMLCanvasElement {
+  const tagCanvas = document.createElement('canvas');
+  tagCanvas.width = 512; tagCanvas.height = 128;
+  const tCtx = tagCanvas.getContext('2d')!;
+  tCtx.fillStyle = '#060B18EE';
+  tCtx.fillRect(4, 4, 504, 120);
+  tCtx.lineWidth = 3;
+  tCtx.strokeStyle = ag.aiModelBadgeColor || ag.color;
+  tCtx.strokeRect(4, 4, 504, 120);
+  tCtx.fillStyle = '#FFFFFF';
+  tCtx.font = 'bold 26px monospace';
+  tCtx.textAlign = 'center';
+  tCtx.fillText(`👤 ${ag.name}`, 256, 32);
+  tCtx.fillStyle = ag.aiModelBadgeColor || '#38BDF8';
+  tCtx.font = 'bold 17px monospace';
+  tCtx.fillText(`[${ag.aiProvider || 'Local'} • ${ag.aiModel || 'connecting…'}]`, 256, 62);
+  tCtx.fillStyle = ag.color;
+  tCtx.font = 'bold 15px monospace';
+  tCtx.fillText(ag.profession.slice(0, 34), 256, 88);
+  tCtx.fillStyle = '#F59E0B';
+  tCtx.font = 'bold 14px monospace';
+  tCtx.fillText('[E] Talk  •  [T] Assign  •  [Q] Inspect', 256, 114);
+  return tagCanvas;
+}
+
 export const CityScene: React.FC<CitySceneProps> = ({
   buildings,
   roads,
@@ -1261,43 +1287,15 @@ export const CityScene: React.FC<CitySceneProps> = ({
         ring.position.y = 0.04;
         aGroup.add(ring);
 
-        // 8. Overhead Holographic Badge showing Citizen Name + AI Model + Worker Role + Keys
-        const tagCanvas = document.createElement('canvas');
-        tagCanvas.width = 512; tagCanvas.height = 128;
-        const tCtx = tagCanvas.getContext('2d')!;
-        tCtx.fillStyle = '#060B18EE';
-        tCtx.fillRect(4, 4, 504, 120);
-        tCtx.lineWidth = 3;
-        tCtx.strokeStyle = ag.aiModelBadgeColor || ag.color;
-        tCtx.strokeRect(4, 4, 504, 120);
-
-        // Citizen Name
-        tCtx.fillStyle = '#FFFFFF';
-        tCtx.font = 'bold 26px monospace';
-        tCtx.textAlign = 'center';
-        tCtx.fillText(`👤 ${ag.name}`, 256, 32);
-
-        // AI Model & Provider
-        tCtx.fillStyle = ag.aiModelBadgeColor || '#38BDF8';
-        tCtx.font = 'bold 17px monospace';
-        tCtx.fillText(`[${ag.aiProvider || 'AI'} • ${ag.aiModel || 'Worker Model'}]`, 256, 62);
-
-        // Worker Role
-        tCtx.fillStyle = ag.color;
-        tCtx.font = 'bold 15px monospace';
-        tCtx.fillText(ag.profession.slice(0, 34), 256, 88);
-
-        // Action Key Hints
-        tCtx.fillStyle = '#F59E0B';
-        tCtx.font = 'bold 14px monospace';
-        tCtx.fillText('[E] Talk  •  [T] Assign  •  [Q] Inspect', 256, 114);   // live status is in the HUD
-
+        // 8. Overhead badge: name, the model it really runs (from the backend) and role
+        const tagCanvas = drawCitizenTag(ag);
         const tagTex = new THREE.CanvasTexture(tagCanvas);
         const tagMesh = new THREE.Mesh(
           new THREE.PlaneGeometry(1.6, 0.46),
           new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, side: THREE.DoubleSide })
         );
         tagMesh.position.y = 2.15;
+        tagMesh.userData.model = `${ag.aiProvider}|${ag.aiModel}`;
         aGroup.add(tagMesh);
 
         // Thought Bubble
@@ -1326,13 +1324,26 @@ export const CityScene: React.FC<CitySceneProps> = ({
         scene.add(aGroup);
       }
 
+      // Redraw the badge when the backend reports the citizen's real model
+      const tagMeshNow = (aGroup as any)._billboard as THREE.Mesh | undefined;
+      const modelKey = `${ag.aiProvider}|${ag.aiModel}`;
+      if (tagMeshNow && tagMeshNow.userData.model !== modelKey) {
+        const mat = tagMeshNow.material as THREE.MeshBasicMaterial;
+        mat.map?.dispose();
+        mat.map = new THREE.CanvasTexture(drawCitizenTag(ag));
+        mat.needsUpdate = true;
+        tagMeshNow.userData.model = modelKey;
+      }
+
       // Position and heading
       aGroup.position.set(ag.x, 0.05, ag.z);
       
       // Update ring color based on status
       const ring = (aGroup as any)._statusRing;
       if (ring) {
-        ring.material.color.setHex(ag.status === 'WORKING' ? 0xF59E0B : 0x10B981);
+        // honest status colours: amber busy, red failed, green idle, grey when the backend is offline
+        const busyNow = ag.status === 'WORKING' || ag.status === 'VERIFYING';
+        ring.material.color.setHex(!ag.live || !ag.live.online ? 0x64748B : busyNow ? 0xF59E0B : ag.status === 'BLOCKED' ? 0xEF4444 : 0x10B981);
       }
 
       // Update Thought Bubble

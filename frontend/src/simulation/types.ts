@@ -120,6 +120,8 @@ export interface AgentCharacter {
   currentDestinationName?: string;
   currentThought: string;
   thoughtBubble?: string;
+  /** Real state from the backend (/api/agents); the 3D citizen only acts this out. */
+  live?: { online: boolean; status: string; task: string | null; progress: number; thought: string | null };
   speechTimer?: number;
   avatarIcon: string;
   level: number;

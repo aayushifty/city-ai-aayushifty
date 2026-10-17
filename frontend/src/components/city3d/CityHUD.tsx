@@ -609,7 +609,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                 className={`flex-1 py-2.5 font-bold transition flex items-center justify-center gap-1.5 ${activeAgentTab === 'HISTORY' ? 'text-blue-400 border-b-2 border-blue-500 bg-blue-950/20' : 'text-slate-400 hover:text-white'}`}
               >
                 <History size={14} />
-                <span>Task History & Deliverables ({interactingAgent.taskHistory.length})</span>
+                <span>Task History & Deliverables ({live.tasks.filter(t => t.agent_id === interactingAgent.id).length})</span>
               </button>
             </div>
 
@@ -951,21 +951,32 @@ export const CityHUD: React.FC<CityHUDProps> = ({
             {/* Tab 3: Task History */}
             {activeAgentTab === 'HISTORY' && (
               <div className="p-5 space-y-3 max-h-72 overflow-y-auto">
-                {interactingAgent.taskHistory.length === 0 ? (
-                  <div className="text-center py-8 text-slate-500 text-xs">No task history recorded yet.</div>
+                {!live.online ? (
+                  <div className="text-center py-8 text-red-300 text-xs">Backend offline: task history unavailable.</div>
+                ) : live.tasks.filter(t => t.agent_id === interactingAgent.id).length === 0 ? (
+                  <div className="text-center py-8 text-slate-500 text-xs">No tasks recorded for {interactingAgent.name} yet.</div>
                 ) : (
-                  interactingAgent.taskHistory.map(item => (
-                    <div key={item.id} className="bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-1">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-200">{item.title}</span>
-                        <span className="text-slate-500">{item.completedAt}</span>
+                  live.tasks.filter(t => t.agent_id === interactingAgent.id).map(t => (
+                    <div key={t.task_id} className="bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-1">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-bold text-slate-200">{t.title}</span>
+                        <span className={`font-bold ${t.status === 'VERIFIED' ? 'text-emerald-400' : t.status === 'FAILED' ? 'text-red-400' : 'text-slate-400'}`}>{t.status}</span>
                       </div>
-                      <div className="text-[10px] text-emerald-400">Result: {item.deliverable}</div>
-                      {onViewArtifact && (
+                      {t.verification && (
+                        <div className="text-[10px] text-slate-400">
+                          {t.verification.passed} passed · {t.verification.failed} failed ({t.verification.suite}){t.verification.repair_attempts > 0 ? ` · ${t.verification.repair_attempts} repairs` : ''}
+                        </div>
+                      )}
+                      {t.deliverables.map(d => (
+                        <div key={d.path} className="text-[10px] font-mono text-cyan-300 break-all">
+                          {d.url ? <a href={absoluteLink(d.url)} target="_blank" rel="noreferrer" className="hover:underline">{absoluteLink(d.url)}</a> : d.path}
+                        </div>
+                      ))}
+                      {onViewArtifact && t.deliverables.length > 0 && (
                         <div className="pt-1 flex justify-end">
                           <button
                             type="button"
-                            onClick={() => onViewArtifact(item.id)}
+                            onClick={() => onViewArtifact(t.task_id)}
                             className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded text-[10px] font-semibold flex items-center gap-1.5 border border-emerald-500/40 transition"
                           >
                             <FileCode2 size={12} />

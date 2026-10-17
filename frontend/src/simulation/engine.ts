@@ -1299,8 +1299,8 @@ export class CitySimulationEngine {
         profession: 'Chief Systems Architect & Orchestrator',
         department: 'Executive Master Orchestration (Citadel Spire)',
         color: '#38BDF8',
-        aiModel: 'OpenAI o1 / o3 High-Reasoning',
-        aiProvider: 'OpenAI',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#10A37F',
         clothingStyle: 'EXECUTIVE',
         skinColor: '#E0AC69',
@@ -1322,22 +1322,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Monitoring multi-agent pipeline and scheduling availability.',
-        thoughtBubble: 'City operational at 100% capacity.',
         speechTimer: 5.0,
         avatarIcon: 'Cpu',
         level: 10,
         skills: ['Task Decomposition', 'DAG Scheduling', 'Resource Allocation', 'Deadlock Resolution'],
         toolsInUse: ['ProcessRunner', 'TaskStateMachine', 'EventDispatcher'],
         collaboratorIds: ['agent-architect', 'agent-analyst'],
-        chatHistory: [
-          {
-            id: 'init-coord',
-            sender: 'AGENT',
-            senderName: 'Sahas Lamichhane',
-            text: 'Greetings Commander! Sahas Lamichhane, Chief Architect, powered by OpenAI o1 reasoning engine. All autonomous city workflows are operational. Press [F] to issue an immediate work order or ask me anything!',
-            timestamp: '09:00 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-analyst',
@@ -1347,8 +1338,8 @@ export class CitySimulationEngine {
         profession: 'Requirements Engineer & Product Analyst',
         department: 'Requirements & PRD Lab (Vision Lab)',
         color: '#C084FC',
-        aiModel: 'Claude 3.5 Sonnet',
-        aiProvider: 'Anthropic',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#D97706',
         clothingStyle: 'SCIENTIST',
         skinColor: '#F5D0C5',
@@ -1370,22 +1361,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Ready to evaluate user directives and draft project requirements.',
-        thoughtBubble: 'Standing by for project briefs...',
         speechTimer: 4.5,
         avatarIcon: 'Layers',
         level: 9,
         skills: ['PRD Formulation', 'Contract Verification', 'User Stories', 'Acceptance Testing'],
         toolsInUse: ['SpecSynthesizer', 'AcceptanceCriteriaGenerator'],
         collaboratorIds: ['agent-coordinator', 'agent-architect'],
-        chatHistory: [
-          {
-            id: 'init-analyst',
-            sender: 'AGENT',
-            senderName: 'Rajib Karki',
-            text: 'Hello Commander. Rajib Karki here, powered by Claude 3.5 Sonnet. I specialize in deep technical reasoning, PRD formulation, and system acceptance criteria.',
-            timestamp: '09:05 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-architect',
@@ -1395,8 +1377,8 @@ export class CitySimulationEngine {
         profession: 'Domain Architect & Civil Modeler',
         department: 'System Architecture (Blueprint Complex)',
         color: '#3B82F6',
-        aiModel: 'DeepSeek R1 Reasoning',
-        aiProvider: 'DeepSeek',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#0284C7',
         clothingStyle: 'ARCHITECT',
         skinColor: '#C68642',
@@ -1418,22 +1400,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Domain models structured; interfaces decoupled from outer services.',
-        thoughtBubble: 'Architecture contracts ready.',
         speechTimer: 6.0,
         avatarIcon: 'Compass',
         level: 10,
         skills: ['Clean Architecture', 'Type Hints', 'Schema Normalization', 'Structural Engineering'],
         toolsInUse: ['SchemaArchitect', 'InterfaceContractValidator'],
         collaboratorIds: ['agent-engineer', 'agent-analyst'],
-        chatHistory: [
-          {
-            id: 'init-arch',
-            sender: 'AGENT',
-            senderName: 'Prasanna Basyal',
-            text: 'Prasanna Basyal ready for structural modeling, powered by DeepSeek R1. I verify mathematical structural proofs and clean architecture contracts.',
-            timestamp: '09:10 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-engineer',
@@ -1443,8 +1416,8 @@ export class CitySimulationEngine {
         profession: 'Full-Stack Software Engineer',
         department: 'Source Code Fabrication (Foundry)',
         color: '#F59E0B',
-        aiModel: 'Qwen 2.5 Coder 32B',
-        aiProvider: 'Alibaba Cloud',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#F59E0B',
         clothingStyle: 'ENGINEER',
         skinColor: '#E5A65E',
@@ -1466,22 +1439,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Ready to write type-safe code without silent failures.',
-        thoughtBubble: 'Awaiting coding directive...',
         speechTimer: 5.5,
         avatarIcon: 'Sliders',
         level: 9,
         skills: ['Python 3.13 / FastAPI', 'TypeScript / React', 'AsyncIO Concurrency', 'SQLAlchemy / SQLite'],
         toolsInUse: ['CodeFabricator', 'ASTRefactoringEngine'],
         collaboratorIds: ['agent-architect', 'agent-qa'],
-        chatHistory: [
-          {
-            id: 'init-eng',
-            sender: 'AGENT',
-            senderName: 'Drishya Adhikari',
-            text: 'Drishya Adhikari on standby! Powered by Qwen 2.5 Coder. High-speed code fabrication, async logic, and AST transformations are ready to compile.',
-            timestamp: '09:15 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-qa',
@@ -1491,8 +1455,8 @@ export class CitySimulationEngine {
         profession: 'Automated Test Engineer & Verifier',
         department: 'Quality Assurance & Automated Verification (QA Bastion)',
         color: '#10B981',
-        aiModel: 'GPT-4o Omnimodal',
-        aiProvider: 'OpenAI',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#10A37F',
         clothingStyle: 'QA',
         skinColor: '#F8D9D6',
@@ -1514,22 +1478,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'All test assertions verified. Zero regressions in active sandbox.',
-        thoughtBubble: '20/20 tests PASSED.',
         speechTimer: 6.5,
         avatarIcon: 'ShieldCheck',
         level: 10,
         skills: ['Pytest Automation', 'Coverage Profiling', 'Mutation Testing', 'Regression Verification'],
         toolsInUse: ['PytestVerifier', 'CoverageProfiler'],
         collaboratorIds: ['agent-engineer', 'agent-diagnostic'],
-        chatHistory: [
-          {
-            id: 'init-qa',
-            sender: 'AGENT',
-            senderName: 'Johan Karki',
-            text: 'Johan Karki standing by, powered by GPT-4o. I run rigorous pytest and integration test suites. 20/20 test assertions currently verified.',
-            timestamp: '09:20 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-diagnostic',
@@ -1539,8 +1494,8 @@ export class CitySimulationEngine {
         profession: 'Root Cause & Troubleshooting Specialist',
         department: 'Diagnostic Core & Troubleshooting',
         color: '#EC4899',
-        aiModel: 'Gemini 2.0 Flash Thinking',
-        aiProvider: 'Google DeepMind',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#4285F4',
         clothingStyle: 'DIAGNOSTIC',
         skinColor: '#ECC0A0',
@@ -1562,22 +1517,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Telemetry diagnostics clean; zero unhandled exceptions.',
-        thoughtBubble: 'Diagnostics clean.',
         speechTimer: 4.0,
         avatarIcon: 'Radio',
         level: 9,
         skills: ['Traceback Deconstruction', 'Memory Profiling', 'Heuristic Repair', 'Log Inspection'],
         toolsInUse: ['TracebackAnalyzer', 'AutomatedPatchGenerator'],
         collaboratorIds: ['agent-qa', 'agent-engineer'],
-        chatHistory: [
-          {
-            id: 'init-diag',
-            sender: 'AGENT',
-            senderName: 'Bidheyak Bhattarai',
-            text: 'Dr. Chen here, powered by Gemini 2.0 Flash. Real-time telemetry, exception tracing, and automated heuristic repair operational.',
-            timestamp: '09:25 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-security',
@@ -1587,8 +1533,8 @@ export class CitySimulationEngine {
         profession: 'Security Engineer & Policy Auditor',
         department: 'Security Citadel & Policy Guardrails',
         color: '#EF4444',
-        aiModel: 'Llama 3.1 70B Instruct',
-        aiProvider: 'Meta AI',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#0668E1',
         clothingStyle: 'SECURITY',
         skinColor: '#D29E74',
@@ -1610,22 +1556,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Security guardrails active. Unauthorized filesystem access blocked.',
-        thoughtBubble: 'Security: 100% SECURE',
         speechTimer: 7.0,
         avatarIcon: 'Flame',
         level: 10,
         skills: ['Path Traversal Jail', 'Command Whitelisting', 'Secret Redaction', 'OWASP Vulnerability Audit'],
         toolsInUse: ['PathJailVerifier', 'SecretRedactionEngine'],
         collaboratorIds: ['agent-coordinator', 'agent-devops'],
-        chatHistory: [
-          {
-            id: 'init-sec',
-            sender: 'AGENT',
-            senderName: 'Safal Sharma',
-            text: 'Security Sentinel Voss active, powered by Llama 3.1 70B. Workspace jail boundaries, secret filtering, and command whitelist policies are strictly enforced.',
-            timestamp: '09:30 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-devops',
@@ -1635,8 +1572,8 @@ export class CitySimulationEngine {
         profession: 'DevOps & Cloud Infrastructure Engineer',
         department: 'Deployment & CI/CD Pipeline (Release Dock)',
         color: '#06B6D4',
-        aiModel: 'Claude 3 Opus',
-        aiProvider: 'Anthropic',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#D97706',
         clothingStyle: 'DEVOPS',
         skinColor: '#F3CFB6',
@@ -1658,22 +1595,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Container manifests verified; ready to deploy release artifacts.',
-        thoughtBubble: 'CI/CD pipeline ready.',
         speechTimer: 5.0,
         avatarIcon: 'Zap',
         level: 9,
         skills: ['Docker OCI Containers', 'CI/CD Pipelines', 'Cloud Run Provisioning', 'Health Monitoring'],
         toolsInUse: ['DockerBuilder', 'ArtifactPackager'],
         collaboratorIds: ['agent-security', 'agent-engineer'],
-        chatHistory: [
-          {
-            id: 'init-devops',
-            sender: 'AGENT',
-            senderName: 'Santosh Yadav',
-            text: 'Santosh Yadav here, powered by Claude 3 Opus! Managing Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
-            timestamp: '09:35 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-constructor',
@@ -1683,8 +1611,8 @@ export class CitySimulationEngine {
         profession: 'Civil Infrastructure & Construction Engineer',
         department: 'Civic Works & Heavy Construction Yard',
         color: '#EAB308',
-        aiModel: 'Mistral Large 2',
-        aiProvider: 'Mistral AI',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#F97316',
         clothingStyle: 'CONSTRUCTION',
         skinColor: '#C08A58',
@@ -1706,22 +1634,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Construction sites surveyed. Heavy machinery standing by.',
-        thoughtBubble: 'Cranes and scaffolding ready.',
         speechTimer: 5.0,
         avatarIcon: 'Building2',
         level: 9,
         skills: ['Structural Construction', 'Material Sourcing', 'Site Safety', 'Heavy Machinery Operation'],
         toolsInUse: ['StructuralEstimator', 'SiteProgressTracker'],
         collaboratorIds: ['agent-architect', 'agent-devops'],
-        chatHistory: [
-          {
-            id: 'init-con',
-            sender: 'AGENT',
-            senderName: 'Hemanta Bhatta',
-            text: 'Hemanta Bhatta on site, powered by Mistral Large! High-visibility vest on, hard hat ready. Press [F] to command construction and structural repairs.',
-            timestamp: '09:40 AM'
-          }
-        ]
+        chatHistory: []
       },
       {
         id: 'agent-doctor',
@@ -1731,8 +1650,8 @@ export class CitySimulationEngine {
         profession: 'Emergency Medicine & Healthcare Operations',
         department: 'Civic Medical Center (Hospital)',
         color: '#F43F5E',
-        aiModel: 'Gemini 1.5 Pro',
-        aiProvider: 'Google DeepMind',
+        aiModel: 'connecting…',   // replaced by the real model from /api/agents
+        aiProvider: 'Local',
         aiModelBadgeColor: '#4285F4',
         clothingStyle: 'DOCTOR',
         skinColor: '#F7D5C8',
@@ -1754,22 +1673,13 @@ export class CitySimulationEngine {
         availability: 'AVAILABLE',
         status: 'IDLE',
         currentThought: 'Medical wards operating at nominal readiness. Ambulances equipped.',
-        thoughtBubble: 'Emergency medical ready.',
         speechTimer: 5.5,
         avatarIcon: 'Heart',
         level: 10,
         skills: ['Emergency Medicine', 'Triage Protocol', 'Hospital Operations', 'Biohazard Containment'],
         toolsInUse: ['MedicalTelemetry', 'TriageDispatcher'],
         collaboratorIds: ['agent-security', 'agent-coordinator'],
-        chatHistory: [
-          {
-            id: 'init-doc',
-            sender: 'AGENT',
-            senderName: 'Anuj Neupane',
-            text: 'Greetings Commander. Anuj Neupane, Chief Medical Director, powered by Gemini 1.5 Pro. White coat on, bio-telemetry online. Citizen health index at 98%.',
-            timestamp: '09:45 AM'
-          }
-        ]
+        chatHistory: []
       }
     ];
 
@@ -1834,120 +1744,21 @@ export class CitySimulationEngine {
       ag.routineTimer = 16.0 + ((idx * 3.5) % 14.0);
       ag.speed = 2.4;
 
-      const initialTask = ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
-      initialTask.progress = 25 + ((idx * 8) % 40);
-      initialTask.status = 'WORKING';
-      ag.activeTask = initialTask;
-      ag.workProgress = initialTask.progress;
-      ag.status = 'WORKING';
-      ag.availability = 'BUSY';
-      ag.currentTask = initialTask.title;
-      ag.thoughtBubble = `Coding: ${initialTask.expectedDeliverable}`;
-      ag.speechTimer = 7.0 + (idx % 4);
+      // Start idle with no task or thought: real activity arrives from the backend (/api/agents)
+      ag.activeTask = null;
+      ag.workProgress = 0;
+      ag.status = 'IDLE';
+      ag.availability = 'AVAILABLE';
+      ag.currentTask = '';
+      ag.thoughtBubble = undefined;
 
-      // 3 Queued domain procedural tasks
-      ag.taskQueue = [
-        ProceduralSoftwareFactory.generateTask(ag.id, ag.name),
-        ProceduralSoftwareFactory.generateTask(ag.id, ag.name),
-        ProceduralSoftwareFactory.generateTask(ag.id, ag.name)
-      ];
+      ag.taskQueue = [];
     });
   }
 
   // --- Default Public Missions ---
   private initDefaultPublicMissions(): void {
-    this.publicMissions = [
-      {
-        id: 'mission-hospital',
-        title: 'Construct Modern Medical Trauma Center in Civic District',
-        description: 'Design, build, wire, and commission a high-capacity civic medical facility with emergency wards and ICU beds.',
-        category: 'CONSTRUCTION',
-        status: 'IN_PROGRESS',
-        progress: 35,
-        targetBuildingId: 'bld-hospital',
-        acceptanceCriteria: [
-          'Architectural schematics approved',
-          'Foundation and structural steel erected',
-          'Power grid & water lines connected',
-          'Medical safety inspection passed'
-        ],
-        deliverables: [
-          'hospital_architectural_blueprint.cad',
-          'structural_safety_certificate.pdf'
-        ],
-        blockers: [],
-        publishedAt: '09:00 AM',
-        participatingAgentIds: ['agent-architect', 'agent-constructor', 'agent-devops', 'agent-doctor', 'agent-security'],
-        subtasks: [
-          {
-            id: 'task-hosp-1',
-            title: 'Design Hospital Architectural Blueprint',
-            description: 'Draft structural layouts and emergency access points.',
-            expectedDeliverable: 'hospital_blueprints_v2.pdf',
-            priority: 'HIGH',
-            status: 'COMPLETED',
-            progress: 100,
-            assignedAgentId: 'agent-architect',
-            assignedAgentName: 'Prasanna Basyal',
-            source: 'PUBLIC_MISSION',
-            publicMissionId: 'mission-hospital',
-            requiredSkills: ['Structural Engineering'],
-            dependencies: [],
-            deliverableResult: 'Architectural schematics finalized and validated.',
-            createdAt: '09:00 AM',
-            completedAt: '09:15 AM'
-          },
-          {
-            id: 'task-hosp-2',
-            title: 'Erect Foundation & Structural Framework',
-            description: 'Coordinate cranes and steel girder construction on site.',
-            expectedDeliverable: 'foundation_structural_mesh',
-            priority: 'HIGH',
-            status: 'WORKING',
-            progress: 45,
-            assignedAgentId: 'agent-constructor',
-            assignedAgentName: 'Hemanta Bhatta',
-            source: 'PUBLIC_MISSION',
-            publicMissionId: 'mission-hospital',
-            requiredSkills: ['Structural Construction'],
-            dependencies: ['task-hosp-1'],
-            createdAt: '09:15 AM'
-          },
-          {
-            id: 'task-hosp-3',
-            title: 'Install High-Voltage Medical Power Grid',
-            description: 'Connect primary and auxiliary battery reserves to hospital ICU.',
-            expectedDeliverable: 'power_connection_receipt',
-            priority: 'MEDIUM',
-            status: 'PENDING',
-            progress: 0,
-            assignedAgentId: 'agent-devops',
-            assignedAgentName: 'Santosh Yadav',
-            source: 'PUBLIC_MISSION',
-            publicMissionId: 'mission-hospital',
-            requiredSkills: ['Cloud Run Provisioning'],
-            dependencies: ['task-hosp-2'],
-            createdAt: '09:15 AM'
-          },
-          {
-            id: 'task-hosp-4',
-            title: 'Commission Intensive Care Unit Equipment',
-            description: 'Verify bio-monitors, medical gas pressure, and triage ward readiness.',
-            expectedDeliverable: 'icu_readiness_report.json',
-            priority: 'HIGH',
-            status: 'PENDING',
-            progress: 0,
-            assignedAgentId: 'agent-doctor',
-            assignedAgentName: 'Anuj Neupane',
-            source: 'PUBLIC_MISSION',
-            publicMissionId: 'mission-hospital',
-            requiredSkills: ['Hospital Operations'],
-            dependencies: ['task-hosp-3'],
-            createdAt: '09:15 AM'
-          }
-        ]
-      }
-    ];
+    this.publicMissions = [];   // missions come only from the backend (/api/missions)
 
     this.activeMissionId = 'mission-hospital';
   }
@@ -2011,291 +1822,56 @@ export class CitySimulationEngine {
       }
     });
 
-    // 4. Update AI Agent Behavioral State Machine & Natural Human Routine Lifecycles
+    // 4. Citizens act out their REAL backend state (written into ag.live by the view from /api/agents).
+    //    Busy citizens go to their desk (or the test rig while verifying); idle ones wander between their
+    //    terrace and the plaza. Task progress and thoughts only ever come from the backend.
     this.agentCharacters.forEach(ag => {
       const loc = AGENT_LOCATIONS[ag.id];
       if (!loc) return;
 
-      // Decrement speech bubble timer
       if (ag.speechTimer !== undefined) {
         ag.speechTimer -= effectiveDelta;
-        if (ag.speechTimer <= 0) {
-          ag.thoughtBubble = undefined;
+        if (ag.speechTimer <= 0) ag.thoughtBubble = undefined;
+      }
+
+      const live = ag.live;
+      const busy = !!live && live.online && ['PLANNING', 'WORKING', 'TESTING', 'VERIFYING'].includes(live.status);
+      const verifying = busy && (live!.status === 'TESTING' || live!.status === 'VERIFYING');
+
+      if (busy) {
+        const spot = verifying ? loc.testRig : loc.desk;
+        ag.targetX = spot.x;
+        ag.targetZ = spot.z;
+        ag.routineTimer = 0;
+      } else {
+        ag.routineTimer = (ag.routineTimer ?? 0) - effectiveDelta;
+        if (ag.routineTimer <= 0) {
+          const options = [loc.desk, loc.terrace, ...SHARED_COMMUNAL_SPOTS];
+          const spot = options[Math.floor(Math.random() * options.length)];
+          ag.targetX = spot.x + (Math.random() - 0.5) * 1.5;
+          ag.targetZ = spot.z + (Math.random() - 0.5) * 1.5;
+          ag.routineTimer = 25 + Math.random() * 20;
         }
       }
 
-      // Initialize routine timers if undefined
-      if (ag.routineTimer === undefined) {
-        ag.routineTimer = 20.0;
-      }
-      ag.routineTimer -= effectiveDelta;
-
-      if (!ag.routinePhase) {
-        ag.routinePhase = 'DESK_WORK';
-      }
-
-      // Smooth Natural Human Walking to Destination
       const dx = ag.targetX - ag.x;
       const dz = ag.targetZ - ag.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-
-      if (dist > 0.35) {
-        const walkSpeed = ag.speed || 2.4;
-        const step = Math.min(dist, walkSpeed * effectiveDelta);
+      const moving = dist > 0.35;
+      if (moving) {
+        const step = Math.min(dist, (ag.speed || 2.4) * effectiveDelta);
         ag.x += (dx / dist) * step;
         ag.z += (dz / dist) * step;
         ag.angle = Math.atan2(dz, dx);
-        ag.status = 'TRAVELING';
-      } else {
-        ag.x = ag.targetX;
-        ag.z = ag.targetZ;
       }
 
-      // 5-Phase Natural Human Routine State Machine
-      switch (ag.routinePhase) {
-        case 'DESK_WORK': {
-          if (dist <= 0.4) {
-            ag.status = 'WORKING';
-            ag.availability = 'BUSY';
-
-            // Ensure active procedural software task
-            if (!ag.activeTask) {
-              ag.activeTask = ag.taskQueue.length > 0 
-                ? ag.taskQueue.shift()! 
-                : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
-              ag.workProgress = 0;
-              ag.currentTask = ag.activeTask.title;
-            }
-
-            // Coding progress from 0% to 75%
-            if (ag.workProgress < 75) {
-              ag.workProgress = Math.min(75, ag.workProgress + effectiveDelta * 4.8);
-              ag.activeTask.progress = Math.round(ag.workProgress);
-
-              if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
-                const codingThoughts = [
-                  `Coding: ${ag.activeTask.expectedDeliverable}`,
-                  `Synthesizing logic for ${ag.activeTask.title.slice(0, 24)}...`,
-                  `Refactoring architecture in ${ag.activeTask.expectedDeliverable}`,
-                  `Writing type-safe domain contracts for ${ag.name}...`
-                ];
-                ag.thoughtBubble = codingThoughts[Math.floor(Math.random() * codingThoughts.length)];
-                ag.speechTimer = 5.0;
-              }
-            }
-
-            // Transition to VERIFYING at nearby test station when coding milestone reached
-            if (ag.workProgress >= 75 || ag.routineTimer <= 0) {
-              ag.routinePhase = 'VERIFYING';
-              ag.routineTimer = 12.0 + Math.random() * 6.0;
-              ag.targetX = loc.testRig.x;
-              ag.targetZ = loc.testRig.z;
-              ag.currentDestinationName = loc.testRig.name;
-              ag.thoughtBubble = `Moving to test rig for ${ag.activeTask.expectedDeliverable}`;
-              ag.speechTimer = 4.5;
-            }
-          } else {
-            // Walking towards desk
-            ag.targetX = loc.desk.x;
-            ag.targetZ = loc.desk.z;
-            ag.currentDestinationName = loc.desk.name;
-          }
-          break;
-        }
-
-        case 'VERIFYING': {
-          if (dist <= 0.4) {
-            ag.status = 'VERIFYING';
-            ag.availability = 'BUSY';
-
-            if (ag.activeTask && ag.workProgress < 100) {
-              ag.workProgress = Math.min(100, ag.workProgress + effectiveDelta * 5.2);
-              ag.activeTask.progress = Math.round(ag.workProgress);
-
-              if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
-                const verifyThoughts = [
-                  `Running pytest suite on ${ag.activeTask.expectedDeliverable}...`,
-                  `Executing 20/20 test assertions: 0 regressions`,
-                  `Verifying schema invariant checks and zero leaks`,
-                  `Validating deliverable artifact on hardware test bench`
-                ];
-                ag.thoughtBubble = verifyThoughts[Math.floor(Math.random() * verifyThoughts.length)];
-                ag.speechTimer = 4.0;
-              }
-            }
-
-            // Task completion & transition to human social break
-            if (ag.workProgress >= 100 || ag.routineTimer <= 0) {
-              if (ag.activeTask) {
-                ag.activeTask.status = 'COMPLETED';
-                ag.activeTask.progress = 100;
-                const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                ag.activeTask.completedAt = timeStr;
-                ag.activeTask.deliverableResult = `Verified deliverable: ${ag.activeTask.expectedDeliverable} generated by ${ag.name} (100% assertions passed)`;
-
-                ag.taskHistory.unshift({
-                  id: ag.activeTask.id,
-                  title: ag.activeTask.title,
-                  completedAt: timeStr,
-                  deliverable: ag.activeTask.deliverableResult
-                });
-                if (ag.taskHistory.length > 15) ag.taskHistory.pop();
-
-                if (ag.activeTask.publicMissionId) {
-                  this.handleSubtaskCompleted(ag.activeTask.publicMissionId, ag.activeTask.id);
-                }
-              }
-
-              ag.thoughtBubble = `✓ Verified: ${ag.activeTask?.expectedDeliverable || 'Deliverable'}!`;
-              ag.speechTimer = 4.5;
-              ag.activeTask = null; // Cleared so new unique task is drawn after break
-
-              // Natural Human Break Selection
-              // 40% Plaza espresso kiosk
-              // 35% Colleague collaboration
-              // 25% Terrace thinking
-              const rand = Math.random();
-              if (rand < 0.40) {
-                ag.routinePhase = 'COFFEE_BREAK';
-                ag.routineTimer = 16.0 + Math.random() * 8.0;
-                const spot = SHARED_COMMUNAL_SPOTS[Math.floor(Math.random() * SHARED_COMMUNAL_SPOTS.length)];
-                ag.targetX = spot.x;
-                ag.targetZ = spot.z;
-                ag.currentDestinationName = spot.name;
-              } else if (rand < 0.75) {
-                ag.routinePhase = 'COLLABORATION';
-                ag.routineTimer = 18.0 + Math.random() * 8.0;
-                const colleagueId = loc.collaboratorId;
-                const colleagueLoc = AGENT_LOCATIONS[colleagueId] || loc;
-                const colleague = this.agentCharacters.find(a => a.id === colleagueId);
-                ag.targetX = colleagueLoc.terrace.x;
-                ag.targetZ = colleagueLoc.terrace.z;
-                ag.currentDestinationName = `${colleague?.name || 'Colleague'}'s Office Terrace`;
-              } else {
-                ag.routinePhase = 'TERRACE_THINKING';
-                ag.routineTimer = 14.0 + Math.random() * 8.0;
-                ag.targetX = loc.terrace.x;
-                ag.targetZ = loc.terrace.z;
-                ag.currentDestinationName = loc.terrace.name;
-              }
-            }
-          } else {
-            ag.targetX = loc.testRig.x;
-            ag.targetZ = loc.testRig.z;
-            ag.currentDestinationName = loc.testRig.name;
-          }
-          break;
-        }
-
-        case 'COFFEE_BREAK': {
-          ag.status = 'IDLE';
-          ag.availability = 'ON_CALL';
-          if (dist <= 0.4) {
-            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
-              const breakThoughts = [
-                `Grabbing an espresso at ${ag.currentDestinationName}...`,
-                `Relaxing at the plaza, unwinding after module sprint`,
-                `Enjoying the city sunshine before returning to workstation`,
-                `Sipping fresh espresso, ideating next software component`
-              ];
-              ag.thoughtBubble = breakThoughts[Math.floor(Math.random() * breakThoughts.length)];
-              ag.speechTimer = 5.0;
-            }
-          }
-
-          // When coffee break completes, head back to desk with a fresh procedural task!
-          if (ag.routineTimer <= 0) {
-            ag.routinePhase = 'DESK_WORK';
-            ag.routineTimer = 22.0 + Math.random() * 8.0;
-            ag.targetX = loc.desk.x;
-            ag.targetZ = loc.desk.z;
-            ag.currentDestinationName = loc.desk.name;
-            ag.activeTask = ag.taskQueue.length > 0 
-              ? ag.taskQueue.shift()! 
-              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
-            ag.workProgress = 0;
-            ag.currentTask = ag.activeTask.title;
-            while (ag.taskQueue.length < 3) {
-              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
-            }
-            ag.thoughtBubble = `Back to desk: starting ${ag.activeTask.expectedDeliverable}`;
-            ag.speechTimer = 5.0;
-          }
-          break;
-        }
-
-        case 'COLLABORATION': {
-          ag.status = 'EVALUATING';
-          ag.availability = 'ON_CALL';
-          if (dist <= 0.4) {
-            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
-              const collabThoughts = [
-                `Discussing API contracts with ${ag.currentDestinationName}...`,
-                `Pair-reviewing architectural diffs and schema invariants`,
-                `Aligning on error formats and high-throughput async queues`,
-                `Collaborative whiteboard discussion: zero circular dependencies`
-              ];
-              ag.thoughtBubble = collabThoughts[Math.floor(Math.random() * collabThoughts.length)];
-              ag.speechTimer = 5.0;
-            }
-          }
-
-          if (ag.routineTimer <= 0) {
-            ag.routinePhase = 'DESK_WORK';
-            ag.routineTimer = 22.0 + Math.random() * 8.0;
-            ag.targetX = loc.desk.x;
-            ag.targetZ = loc.desk.z;
-            ag.currentDestinationName = loc.desk.name;
-            ag.activeTask = ag.taskQueue.length > 0 
-              ? ag.taskQueue.shift()! 
-              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
-            ag.workProgress = 0;
-            ag.currentTask = ag.activeTask.title;
-            while (ag.taskQueue.length < 3) {
-              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
-            }
-            ag.thoughtBubble = `Returning to workstation: ${ag.activeTask.expectedDeliverable}`;
-            ag.speechTimer = 5.0;
-          }
-          break;
-        }
-
-        case 'TERRACE_THINKING': {
-          ag.status = 'EVALUATING';
-          ag.availability = 'ON_CALL';
-          if (dist <= 0.4) {
-            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
-              const terraceThoughts = [
-                `Reflecting on system architecture from ${loc.terrace.name}...`,
-                `Thinking through SQLite WAL checkpoints and lock isolation`,
-                `Taking in the city vista while mapping out next milestone`,
-                `Deep architectural reflection on terrace: solving bottlenecks`
-              ];
-              ag.thoughtBubble = terraceThoughts[Math.floor(Math.random() * terraceThoughts.length)];
-              ag.speechTimer = 5.0;
-            }
-          }
-
-          if (ag.routineTimer <= 0) {
-            ag.routinePhase = 'DESK_WORK';
-            ag.routineTimer = 22.0 + Math.random() * 8.0;
-            ag.targetX = loc.desk.x;
-            ag.targetZ = loc.desk.z;
-            ag.currentDestinationName = loc.desk.name;
-            ag.activeTask = ag.taskQueue.length > 0 
-              ? ag.taskQueue.shift()! 
-              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
-            ag.workProgress = 0;
-            ag.currentTask = ag.activeTask.title;
-            while (ag.taskQueue.length < 3) {
-              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
-            }
-            ag.thoughtBubble = `Back to workstation: ${ag.activeTask.expectedDeliverable}`;
-            ag.speechTimer = 5.0;
-          }
-          break;
-        }
-      }
+      if (moving) ag.status = 'TRAVELING';
+      else if (busy) ag.status = verifying ? 'VERIFYING' : 'WORKING';
+      else if (live && live.online && live.status === 'FAILED') ag.status = 'BLOCKED';
+      else ag.status = 'IDLE';
+      ag.availability = busy ? 'BUSY' : 'AVAILABLE';
+      ag.workProgress = busy ? live!.progress : 0;
+      ag.currentTask = live?.task || '';
     });
 
     this.recalculateMetrics();
@@ -2911,16 +2487,16 @@ export class CitySimulationEngine {
       const raw = localStorage.getItem('forge_metropolis_sim_v1');
       if (raw) {
         const data = JSON.parse(raw);
-        if (data.missions && Array.isArray(data.missions) && data.missions.length > 0) {
-          this.publicMissions = data.missions;
-        }
+        // missions come only from the backend (/api/missions); old locally simulated ones are not restored
         if (data.agentsHistory && Array.isArray(data.agentsHistory)) {
           data.agentsHistory.forEach((item: { id: string; history: any[]; chatHistory?: any[] }) => {
             const ag = this.agentCharacters.find(a => a.id === item.id);
             if (ag) {
-              if (Array.isArray(item.history)) ag.taskHistory = item.history;
+              // (task history now comes from /api/task-history; the old local list is not restored)
               if (Array.isArray(item.chatHistory) && item.chatHistory.length > 0) {
-                ag.chatHistory = item.chatHistory;
+                // keep what you typed, real model replies (they name the model) and real error notes
+                ag.chatHistory = item.chatHistory.filter((m: AgentChatMessage) =>
+                  m.sender === 'PLAYER' || String(m.senderName || '').includes('[') || String(m.id).startsWith('err-'));
               }
             }
           });

@@ -2,7 +2,8 @@ export type ZoneType = 'RESIDENTIAL' | 'COMMERCIAL' | 'INDUSTRIAL' | 'PUBLIC' | 
 export type BuildingType = 
   | 'HOUSE' | 'APARTMENT' | 'SKYSCRAPER' | 'OFFICE_TOWER' | 'MALL' 
   | 'FACTORY' | 'WAREHOUSE' | 'SILO' | 'HOSPITAL' | 'SCHOOL' 
-  | 'FIRE_STATION' | 'POWER_PLANT' | 'WATER_TOWER' | 'PARK_SPACE';
+  | 'FIRE_STATION' | 'POWER_PLANT' | 'WATER_TOWER' | 'PARK_SPACE'
+  | 'CONSTRUCTION';
 
 export type RoofStyle = 'FLAT' | 'HELIPAD' | 'ANTENNA' | 'PITCHED' | 'CHIMNEY' | 'SCAFFOLDING';
 
@@ -18,7 +19,7 @@ export type AgentRoleType =
   | 'ECONOMY' 
   | 'WELFARE';
 
-export type CameraMode = 'ORBIT' | 'TOP_DOWN' | 'STREET_LEVEL' | 'FOLLOW_VEHICLE' | 'FPV' | 'SHOULDER_CAM';
+export type CameraMode = 'ORBIT' | 'TOP_DOWN' | 'STREET_LEVEL' | 'FOLLOW_VEHICLE' | 'FPV' | 'SHOULDER_CAM' | 'TPV' | 'JET_CHASE' | 'JET_COCKPIT';
 export type OverlayMode = 'NONE' | 'TRAFFIC' | 'POWER' | 'WATER' | 'ZONING' | 'SAFETY' | 'AGENT_PATHS';
 
 export interface Building {
@@ -114,6 +115,9 @@ export interface AgentCharacter {
   workProgress: number; // 0 - 100%
   availability: 'AVAILABLE' | 'BUSY' | 'ON_CALL';
   status: 'IDLE' | 'EVALUATING' | 'ASSIGNED' | 'TRAVELING' | 'WORKING' | 'VERIFYING' | 'COMPLETED' | 'WAITING' | 'BLOCKED';
+  routinePhase?: 'DESK_WORK' | 'VERIFYING' | 'COFFEE_BREAK' | 'COLLABORATION' | 'TERRACE_THINKING';
+  routineTimer?: number;
+  currentDestinationName?: string;
   currentThought: string;
   thoughtBubble?: string;
   speechTimer?: number;
@@ -138,6 +142,12 @@ export interface AgentChatMessage {
   senderName: string;
   text: string;
   timestamp: string;
+  actionTaken?: string;
+  deliverableTitle?: string;
+  deliverableUrl?: string;
+  deliverablePath?: string;
+  deliverableType?: '3D_PRESENTATION' | 'WEBSITE' | 'CODE' | 'SYSTEM_REPORT';
+  artifactId?: string;
 }
 
 export interface PlayerState {
@@ -152,6 +162,10 @@ export interface PlayerState {
   isPointerLocked: boolean;
   nearbyAgentId: string | null;
   nearbyAgentDistance: number;
+  isPilotingJet?: boolean;
+  jetSpeed?: number;
+  jetAltitude?: number;
+  jetHeading?: number;
 }
 
 export interface UnitedProject {

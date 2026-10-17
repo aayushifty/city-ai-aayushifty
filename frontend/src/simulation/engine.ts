@@ -19,6 +19,598 @@ import {
   AgentChatMessage
 } from './types';
 
+export interface LocationWaypoint {
+  x: number;
+  z: number;
+  name: string;
+  buildingId?: string;
+}
+
+export interface AgentWorkplaceConfig {
+  desk: LocationWaypoint;
+  testRig: LocationWaypoint;
+  terrace: LocationWaypoint;
+  collaboratorId: string;
+}
+
+export const AGENT_LOCATIONS: Record<string, AgentWorkplaceConfig> = {
+  'agent-coordinator': {
+    desk: { x: 0, z: -21, name: 'Citadel Master Orchestration Desk', buildingId: 'bld-citadel' },
+    testRig: { x: 2.5, z: -22, name: 'Citadel DAG Cluster Control Rig', buildingId: 'bld-citadel' },
+    terrace: { x: -2.5, z: -19, name: 'Citadel Spire Sky Deck', buildingId: 'bld-citadel' },
+    collaboratorId: 'agent-architect'
+  },
+  'agent-analyst': {
+    desk: { x: 21, z: 0, name: 'Vision Lab PRD Formulation Terminal', buildingId: 'bld-vision-lab' },
+    testRig: { x: 22, z: 2.5, name: 'Vision Lab Contract Validation Station', buildingId: 'bld-vision-lab' },
+    terrace: { x: 19, z: -2.5, name: 'Vision Lab Design Terrace', buildingId: 'bld-vision-lab' },
+    collaboratorId: 'agent-coordinator'
+  },
+  'agent-architect': {
+    desk: { x: 21, z: -21, name: 'Blueprint Complex Schema CAD Workstation', buildingId: 'bld-blueprint' },
+    testRig: { x: 22.5, z: -23, name: 'Blueprint DDL Migration Testing Bench', buildingId: 'bld-blueprint' },
+    terrace: { x: 19.5, z: -19.5, name: 'Blueprint Observation Balcony', buildingId: 'bld-blueprint' },
+    collaboratorId: 'agent-engineer'
+  },
+  'agent-engineer': {
+    desk: { x: -21, z: 21, name: 'Foundry Code Fabrication Terminal', buildingId: 'bld-foundry' },
+    testRig: { x: -23, z: 22.5, name: 'Foundry Local Microservice Test Rig', buildingId: 'bld-foundry' },
+    terrace: { x: -19.5, z: 19.5, name: 'Foundry Courtyard Patio', buildingId: 'bld-foundry' },
+    collaboratorId: 'agent-qa'
+  },
+  'agent-qa': {
+    desk: { x: -21, z: -21, name: 'QA Bastion Automated Regression Desk', buildingId: 'bld-qa-bastion' },
+    testRig: { x: -22.5, z: -23, name: 'QA Bastion Fuzz Testing Rack', buildingId: 'bld-qa-bastion' },
+    terrace: { x: -19.5, z: -19.5, name: 'QA Bastion North Porch', buildingId: 'bld-qa-bastion' },
+    collaboratorId: 'agent-engineer'
+  },
+  'agent-diagnostic': {
+    desk: { x: -21, z: 0, name: 'Diagnostic Core Telemetry Console', buildingId: 'bld-diagnostic' },
+    testRig: { x: -23, z: -2.5, name: 'Diagnostic Kernel Tracing Bench', buildingId: 'bld-diagnostic' },
+    terrace: { x: -19, z: 2.5, name: 'Diagnostic West Observation Deck', buildingId: 'bld-diagnostic' },
+    collaboratorId: 'agent-security'
+  },
+  'agent-security': {
+    desk: { x: 0, z: 21, name: 'Security Citadel Policy Enforcement Station', buildingId: 'bld-security' },
+    testRig: { x: -2.5, z: 22, name: 'Security Sandbox Penetration Rig', buildingId: 'bld-security' },
+    terrace: { x: 2.5, z: 19, name: 'Security Citadel Watchtower Walkway', buildingId: 'bld-security' },
+    collaboratorId: 'agent-devops'
+  },
+  'agent-devops': {
+    desk: { x: 21, z: 21, name: 'Release Dock CI/CD Pipeline Cockpit', buildingId: 'bld-release-dock' },
+    testRig: { x: 23, z: 22.5, name: 'Release Dock Container Registry Rack', buildingId: 'bld-release-dock' },
+    terrace: { x: 19.5, z: 19.5, name: 'Release Dock Promenade', buildingId: 'bld-release-dock' },
+    collaboratorId: 'agent-coordinator'
+  },
+  'agent-constructor': {
+    desk: { x: 0, z: 49, name: 'Civic Works Site Engineering Desk', buildingId: 'bld-construction' },
+    testRig: { x: 2.5, z: 50, name: 'Civic Works Soil & Stress Rig', buildingId: 'bld-construction' },
+    terrace: { x: -2.5, z: 47, name: 'Civic Works Scaffolding Vista', buildingId: 'bld-construction' },
+    collaboratorId: 'agent-doctor'
+  },
+  'agent-doctor': {
+    desk: { x: -21, z: 49, name: 'Civic Medical Trauma Director Desk', buildingId: 'bld-hospital' },
+    testRig: { x: -23, z: 50.5, name: 'Civic Medical ICU Bio-Telemetry Station', buildingId: 'bld-hospital' },
+    terrace: { x: -19, z: 47.5, name: 'Civic Hospital Wellness Garden Terrace', buildingId: 'bld-hospital' },
+    collaboratorId: 'agent-constructor'
+  }
+};
+
+export const AGENT_WORKPLACES: Record<string, { x: number; z: number; name: string; buildingId: string }> = Object.fromEntries(
+  Object.entries(AGENT_LOCATIONS).map(([k, v]) => [k, { x: v.desk.x, z: v.desk.z, name: v.desk.name, buildingId: v.desk.buildingId || '' }])
+);
+
+export const SHARED_COMMUNAL_SPOTS: LocationWaypoint[] = [
+  { x: 2.5, z: 2.5, name: 'Central Plaza Espresso Kiosk' },
+  { x: -3.0, z: -3.0, name: 'Tech Courtyard Zen Garden & Fountain' },
+  { x: 0.0, z: -4.0, name: 'Innovation Forum Amphitheater' },
+  { x: 4.5, z: -2.0, name: 'Rooftop Skybridge Cafe' },
+  { x: -2.5, z: 4.0, name: 'Civic Commons Plaza Pergola' }
+];
+
+export const SOFTWARE_TASK_CATALOG: Record<string, { title: string; description: string; expectedDeliverable: string; skills: string[] }[]> = {
+  'agent-coordinator': [
+    {
+      title: 'Synthesize Multi-Agent DAG Orchestrator Pipeline',
+      description: 'Orchestrate async multi-agent dependency graphs with topological sorting and cycle detection.',
+      expectedDeliverable: 'dag_orchestrator.py',
+      skills: ['DAG Scheduling', 'Resource Allocation']
+    },
+    {
+      title: 'Validate Microservice State Machine Invariants',
+      description: 'Verify state transitions and prevent race conditions across concurrent worker threads.',
+      expectedDeliverable: 'state_machine_spec.json',
+      skills: ['Task Decomposition', 'Deadlock Resolution']
+    },
+    {
+      title: 'Implement Async Event Bus Dispatcher with Backpressure',
+      description: 'Construct high-throughput non-blocking event streaming layer for city-wide IPC.',
+      expectedDeliverable: 'event_dispatcher.py',
+      skills: ['Task Decomposition', 'DAG Scheduling']
+    },
+    {
+      title: 'Auto-balance Citizen Workload & Prevent Thread Starvation',
+      description: 'Dynamic load balancing across active agents and background thread workers.',
+      expectedDeliverable: 'workload_balancer.py',
+      skills: ['Resource Allocation', 'Deadlock Resolution']
+    }
+  ],
+  'agent-analyst': [
+    {
+      title: 'Draft OpenAPI 3.1 Contract for Autonomous Services',
+      description: 'Synthesize formal OpenAPI specifications with Pydantic request/response body schemas.',
+      expectedDeliverable: 'openapi_schema.yaml',
+      skills: ['Contract Verification', 'PRD Formulation']
+    },
+    {
+      title: 'Synthesize Acceptance Criteria & Gherkin Scenarios',
+      description: 'Generate Given/When/Then behavior-driven test scenarios for filesystem sandboxing.',
+      expectedDeliverable: 'features_acceptance.feature',
+      skills: ['Acceptance Testing', 'User Stories']
+    },
+    {
+      title: 'Formulate Micro-Frontend Interface Specifications',
+      description: 'Define type-safe contract interfaces between 3D WebGL runtime and React HUD state.',
+      expectedDeliverable: 'system_prd_v2.md',
+      skills: ['PRD Formulation', 'Contract Verification']
+    },
+    {
+      title: 'Audit Software Requirements Traceability Matrix',
+      description: 'Cross-reference functional requirements against integration test coverage.',
+      expectedDeliverable: 'requirements_matrix.json',
+      skills: ['User Stories', 'Acceptance Testing']
+    }
+  ],
+  'agent-architect': [
+    {
+      title: 'Model SQLite Relational Schema with Foreign Keys',
+      description: 'Design normalized SQLite schema with strict type constraints, indexes, and CASCADE relations.',
+      expectedDeliverable: 'schema_ddl.sql',
+      skills: ['Schema Normalization', 'Clean Architecture']
+    },
+    {
+      title: 'Refactor Domain Entities with Pydantic V2 Strict Types',
+      description: 'Enforce type validation and immutable value objects across domain boundary layers.',
+      expectedDeliverable: 'domain_models.py',
+      skills: ['Type Hints', 'Clean Architecture']
+    },
+    {
+      title: 'Architect High-Throughput Event-Driven PubSub Topology',
+      description: 'Decouple ingestion services from core simulation loop using non-blocking queues.',
+      expectedDeliverable: 'pubsub_topology.md',
+      skills: ['Structural Engineering', 'Clean Architecture']
+    },
+    {
+      title: 'Normalize City Simulation Database Query Execution Plans',
+      description: 'Optimize B-tree index coverage to eliminate full-table scans during 60 FPS state sync.',
+      expectedDeliverable: 'db_indexes.sql',
+      skills: ['Schema Normalization', 'Type Hints']
+    }
+  ],
+  'agent-engineer': [
+    {
+      title: 'Implement FastAPI Async REST Route Controllers',
+      description: 'Build robust asynchronous endpoints with input validation and zero silent failures.',
+      expectedDeliverable: 'api_routes.py',
+      skills: ['Python 3.13 / FastAPI', 'AsyncIO Concurrency']
+    },
+    {
+      title: 'Synthesize Three.js Custom PBR Cyber Shader Material',
+      description: 'Author GLSL vertex and fragment shaders for real-time cybernetic illumination.',
+      expectedDeliverable: 'CyberShader.glsl',
+      skills: ['TypeScript / React', 'AsyncIO Concurrency']
+    },
+    {
+      title: 'Develop High-Speed JSON-RPC Streaming Client',
+      description: 'Implement bidirectional WebSocket stream parser with binary frame compression.',
+      expectedDeliverable: 'stream_handler.py',
+      skills: ['Python 3.13 / FastAPI', 'SQLAlchemy / SQLite']
+    },
+    {
+      title: 'Implement Thread-Safe Concurrent Ring Buffer',
+      description: 'Create zero-allocation lockless circular buffer for high-frequency telemetry frames.',
+      expectedDeliverable: 'ring_buffer.py',
+      skills: ['AsyncIO Concurrency', 'Python 3.13 / FastAPI']
+    }
+  ],
+  'agent-qa': [
+    {
+      title: 'Construct Pytest Async Integration Test Suite',
+      description: 'Author 20/20 test cases with mock fixtures, network isolation, and assertion contracts.',
+      expectedDeliverable: 'test_integration_suite.py',
+      skills: ['Pytest Automation', 'Regression Verification']
+    },
+    {
+      title: 'Verify AST Syntax Trees & Type Completeness',
+      description: 'Static analysis parser ensuring zero any-types, no bare excepts, and 100% docstrings.',
+      expectedDeliverable: 'ast_type_check.py',
+      skills: ['Coverage Profiling', 'Mutation Testing']
+    },
+    {
+      title: 'Run Regression Coverage Suite on Core API Endpoints',
+      description: 'Execute statement and branch coverage report with 95%+ threshold enforcement.',
+      expectedDeliverable: 'coverage_report.json',
+      skills: ['Pytest Automation', 'Coverage Profiling']
+    },
+    {
+      title: 'Validate Boundary Condition Invariants & Edge Cases',
+      description: 'Test fuzzing on HTTP request payloads and malformed JSON telemetry inputs.',
+      expectedDeliverable: 'boundary_tests.py',
+      skills: ['Mutation Testing', 'Regression Verification']
+    }
+  ],
+  'agent-diagnostic': [
+    {
+      title: 'Analyze Async Deadlock in Task Scheduling Loop',
+      description: 'Trace mutex lock acquisition order and eliminate circular dependency deadlocks.',
+      expectedDeliverable: 'deadlock_fix_patch.py',
+      skills: ['Traceback Deconstruction', 'Heuristic Repair']
+    },
+    {
+      title: 'Profile Process Memory Allocation & Detect Heap Bloat',
+      description: 'Inspect tracemalloc heap snapshots and eliminate memory retention in event bus.',
+      expectedDeliverable: 'memory_profile_report.json',
+      skills: ['Memory Profiling', 'Log Inspection']
+    },
+    {
+      title: 'Implement Self-Healing Recovery Hook for Network Timeouts',
+      description: 'Automatic retry backoff with exponential jitter for upstream inference calls.',
+      expectedDeliverable: 'circuit_breaker.py',
+      skills: ['Heuristic Repair', 'Traceback Deconstruction']
+    },
+    {
+      title: 'Perform Root Cause Analysis on Unhandled Exceptions',
+      description: 'Deconstruct Python tracebacks, generate reproduction test cases, and commit fixes.',
+      expectedDeliverable: 'rca_report_v2.md',
+      skills: ['Log Inspection', 'Traceback Deconstruction']
+    }
+  ],
+  'agent-security': [
+    {
+      title: 'Audit Subprocess Shell Invocations & Escape Sequences',
+      description: 'Scan all command execution paths to prevent shell injection and parameter tampering.',
+      expectedDeliverable: 'security_audit.py',
+      skills: ['Path Traversal Jail', 'OWASP Vulnerability Audit']
+    },
+    {
+      title: 'Enforce Zero-Trust JWT Authentication Policies',
+      description: 'Validate RS256 token signatures, expiration claims, and role-based access controls.',
+      expectedDeliverable: 'jwt_authorizer.py',
+      skills: ['Command Whitelisting', 'Secret Redaction']
+    },
+    {
+      title: 'Verify Filesystem Path Jail Containment Sandbox',
+      description: 'Ensure all agent filesystem writes are strictly bounded within authorized workspace directories.',
+      expectedDeliverable: 'path_sandbox.py',
+      skills: ['Path Traversal Jail', 'Command Whitelisting']
+    },
+    {
+      title: 'Scan Dependency Graph for Known CVE Vulnerabilities',
+      description: 'Audit requirements.txt and package.json against vulnerability database.',
+      expectedDeliverable: 'cve_vulnerability_scan.json',
+      skills: ['OWASP Vulnerability Audit', 'Secret Redaction']
+    }
+  ],
+  'agent-devops': [
+    {
+      title: 'Author Multi-Stage Distroless OCI Dockerfile',
+      description: 'Package backend service into minimal non-root distroless container under 65MB.',
+      expectedDeliverable: 'Dockerfile.distroless',
+      skills: ['Docker OCI Containers', 'CI/CD Pipelines']
+    },
+    {
+      title: 'Configure Automated GitHub Actions CI Matrix Workflow',
+      description: 'Multi-platform test matrix (Ubuntu/Windows/macOS) with caching and automated linting.',
+      expectedDeliverable: 'ci_workflow.yaml',
+      skills: ['CI/CD Pipelines', 'Cloud Run Provisioning']
+    },
+    {
+      title: 'Implement Prometheus Metrics Exporter & Alerting',
+      description: 'Instrument request latency histograms, error rates, and memory gauges.',
+      expectedDeliverable: 'prometheus_exporter.py',
+      skills: ['Health Monitoring', 'Docker OCI Containers']
+    },
+    {
+      title: 'Tune Nginx Reverse Proxy with Brotli & HTTP/2',
+      description: 'Configure high-performance reverse proxy with SSL termination and keepalive pools.',
+      expectedDeliverable: 'nginx_production.conf',
+      skills: ['Cloud Run Provisioning', 'Health Monitoring']
+    }
+  ],
+  'agent-constructor': [
+    {
+      title: 'Optimize Vite Bundler Chunks & Tree-Shaking Splitting',
+      description: 'Split vendor dependencies and Three.js geometry buffers for sub-second load times.',
+      expectedDeliverable: 'vite.config.optimized.ts',
+      skills: ['Site Safety', 'Material Sourcing']
+    },
+    {
+      title: 'Generate Strict TypeScript Declaration Typings',
+      description: 'Export ambient type definitions for city simulation engine and 3D visualizers.',
+      expectedDeliverable: 'forge_ambient.d.ts',
+      skills: ['Structural Construction', 'Site Safety']
+    },
+    {
+      title: 'Benchmark WebGL Draw Calls & Buffer Merging',
+      description: 'Profile GPU draw calls and merge road/building geometries into instanced meshes.',
+      expectedDeliverable: 'draw_call_benchmark.json',
+      skills: ['Heavy Machinery Operation', 'Structural Construction']
+    },
+    {
+      title: 'Automate Monorepo Package Linking & Build Cache',
+      description: 'Configure TurboRepo build pipeline for instant incremental compilation.',
+      expectedDeliverable: 'turbo_pipeline.json',
+      skills: ['Material Sourcing', 'Heavy Machinery Operation']
+    }
+  ],
+  'agent-doctor': [
+    {
+      title: 'Monitor Host CPU & GPU Hardware Thermals Telemetry',
+      description: 'Collect live thermal and clock frequencies across CPU cores and NVIDIA RTX GPU.',
+      expectedDeliverable: 'hardware_vitals.py',
+      skills: ['Hospital Operations', 'Medical Telemetry']
+    },
+    {
+      title: 'Profile Async Event Loop Lag & Frame Jitter',
+      description: 'Measure execution delay in milliseconds to guarantee buttery 60 FPS performance.',
+      expectedDeliverable: 'event_loop_profiler.py',
+      skills: ['Triage Protocol', 'Biohazard Containment']
+    },
+    {
+      title: 'Compile Real-Time Resilience Health Dashboard',
+      description: 'Aggregate service uptime, database lock latencies, and circuit breaker status.',
+      expectedDeliverable: 'system_vitals_summary.json',
+      skills: ['Hospital Operations', 'Triage Protocol']
+    },
+    {
+      title: 'Verify SQLite WAL Lock Contention & Checkpoints',
+      description: 'Ensure WAL checkpoint frequency avoids write stalls and keeps concurrency high.',
+      expectedDeliverable: 'db_pool_diagnostics.py',
+      skills: ['Emergency Medicine', 'Medical Telemetry']
+    }
+  ]
+};
+
+export class ProceduralSoftwareFactory {
+  private static taskCounters: Record<string, number> = {};
+
+  private static verbs = [
+    'Implement', 'Refactor', 'Benchmark', 'Harden', 'Profile', 'Synthesize',
+    'Architect', 'Optimize', 'Integrate', 'Decouple', 'Audit', 'Calibrate',
+    'Verify', 'Deploy', 'Construct'
+  ];
+
+  private static roleBlueprints: Record<string, {
+    subsystems: string[];
+    invariants: string[];
+    deliverableBase: string;
+    ext: string;
+    skills: string[];
+  }> = {
+    'agent-coordinator': {
+      subsystems: [
+        'Multi-Agent Async DAG Orchestrator Pipeline',
+        'Dynamic Citizen Workload Balancing & Task Dispatcher',
+        'Asynchronous Distributed IPC Event Stream Bus',
+        'Cross-Department Mission Dependency State Machine',
+        'Deadlock Prevention & Mutex Arbitrator',
+        'Topological Pipeline Scheduler with Exponential Backoff'
+      ],
+      invariants: [
+        'enforcing zero cycle deadlocks and sub-millisecond dispatch',
+        'maintaining topological dependency integrity across workers',
+        'with automatic backpressure relief under heavy load',
+        'guaranteeing bounded latency and FIFO message delivery'
+      ],
+      deliverableBase: 'dag_orchestrator',
+      ext: 'py',
+      skills: ['DAG Scheduling', 'Resource Allocation', 'Task Decomposition']
+    },
+    'agent-analyst': {
+      subsystems: [
+        'OpenAPI 3.1 Contract Specification & Schemas',
+        'Behavior-Driven Gherkin Acceptance Test Matrix',
+        'Autonomous Service Requirements Traceability Graph',
+        'Micro-Frontend State Contract & Event Bus Schema',
+        'REST Endpoint Input/Output Pydantic Validation Models',
+        'Domain Boundary Feature Request Matrix & SLA Guidelines'
+      ],
+      invariants: [
+        'with strict Pydantic v2 schemas and zero untyped fields',
+        'covering 100% of user journey edge-cases and error paths',
+        'enforcing formal OpenAPI validation against spec standards',
+        'guaranteeing backward compatibility with legacy endpoints'
+      ],
+      deliverableBase: 'openapi_schema',
+      ext: 'yaml',
+      skills: ['PRD Formulation', 'Contract Verification', 'Acceptance Testing']
+    },
+    'agent-architect': {
+      subsystems: [
+        'Normalized SQLite Relational DDL Schema with Foreign Keys',
+        'Hexagonal Architecture Port-and-Adapter Interfaces',
+        'Domain Entity Value Objects & Strict Type Models',
+        'Optimized SQLite WAL Pragmas & Concurrency Tuning',
+        'Event-Sourcing Audit Log & Replay Event Bus',
+        'Clean Architecture Repository Layer & Data Transfer Objects'
+      ],
+      invariants: [
+        'enforcing strict foreign key CASCADE and indexed lookups',
+        'guaranteeing zero circular dependency cycles between packages',
+        'with sub-2ms query execution across 100k simulated rows',
+        'strictly decoupling domain entities from external framework code'
+      ],
+      deliverableBase: 'domain_schema',
+      ext: 'sql',
+      skills: ['Schema Normalization', 'Clean Architecture', 'Type Hints']
+    },
+    'agent-engineer': {
+      subsystems: [
+        'Production FastAPI Async REST Controller with SQLite WAL',
+        'High-Performance WebGL Shaders & Instanced Geometry Mesh',
+        'Interactive Three.js Particle Nebula & Horizon Visualizer',
+        'Non-Blocking Web Worker Multi-Thread Compute Pool',
+        'Robust Error-Handled Client-Side Virtual Memory Cache',
+        'Real-Time Server-Sent Events (SSE) Streaming Pipeline'
+      ],
+      invariants: [
+        'guaranteeing silky smooth 60 FPS under intensive draw calls',
+        'with complete defensive input sanitization and zero uncaught exceptions',
+        'achieving sub-5ms latency under concurrent load',
+        'strictly following Clean Architecture with clear interface boundaries'
+      ],
+      deliverableBase: 'api_controller',
+      ext: 'py',
+      skills: ['Python 3.13 / FastAPI', 'TypeScript / React', 'Async Concurrency']
+    },
+    'agent-qa': {
+      subsystems: [
+        '20/20 Pytest Automated Verification Suite with Fixtures',
+        'Chaos Latency & Fault Injection Regression Harness',
+        'Property-Based Fuzz Testing Harness for API Boundaries',
+        'End-to-End Headless Browser Integration Matrix',
+        'Automated Memory Leak & Retain Cycle Probing Rig',
+        'Negative Boundary & Malformed JSON Attack Test Suite'
+      ],
+      invariants: [
+        'with 100% green passing assertion report and zero regressions',
+        'verifying that all invalid inputs return structured HTTP 422 errors',
+        'detecting and flagging sub-millisecond memory leaks',
+        'ensuring deterministic repeatable test fixtures in isolated sandbox'
+      ],
+      deliverableBase: 'pytest_regression',
+      ext: 'py',
+      skills: ['Pytest Suites', 'Chaos Engineering', 'Regression Testing']
+    },
+    'agent-diagnostic': {
+      subsystems: [
+        'Deep Telemetry Diagnostic Probe & Call Stack Traceback',
+        'Kernel Syscall & Async Event Loop Latency Profiler',
+        'Host Hardware Thermal & High-Resolution RAM Heap Monitor',
+        'Deadlock & Thread Contention Diagnostic Sniffer',
+        'Network Socket Connection Pool & Keep-Alive Profiler',
+        'Tick Budget & Frame Jitter Telemetry Aggregator'
+      ],
+      invariants: [
+        'isolating the root cause within 2 simulation ticks',
+        'generating actionable telemetry flamegraphs and stack traces',
+        'pinpointing CPU cycle bottlenecks with zero telemetry overhead',
+        'capturing microsecond memory spikes before OOM thresholds'
+      ],
+      deliverableBase: 'telemetry_rca',
+      ext: 'json',
+      skills: ['Traceback Deconstruction', 'Root Cause Analysis', 'Performance Profiling']
+    },
+    'agent-security': {
+      subsystems: [
+        'Zero-Trust Filesystem Path Jail & Sandbox Guard',
+        'AST-Level Command Injection Sanitizer & Whitelist Shield',
+        'Cryptographic Token Rotation & Secret Key Vault',
+        'Rate-Limiting Token Bucket Defense & DDoS Shield',
+        'OWASP Top-10 API Security Policy Enforcer',
+        'Sandboxed Subprocess Execution Shield with Strict Capabilities'
+      ],
+      invariants: [
+        'blocking 100% of directory traversal and path escape attempts',
+        'stripping malicious shell injection primitives from commands',
+        'enforcing zero-trust mutual authentication across internal RPCs',
+        'guaranteeing audit logs cannot be tampered with or truncated'
+      ],
+      deliverableBase: 'security_jail_guard',
+      ext: 'py',
+      skills: ['Zero-Trust Architecture', 'Penetration Testing', 'Cryptographic Vaults']
+    },
+    'agent-devops': {
+      subsystems: [
+        'Multi-Stage Docker OCI Image with Non-Root User',
+        'GitHub Actions Matrix CI/CD Automated Workflow',
+        'Prometheus Metrics Exporter & System Telemetry Endpoint',
+        'Production Docker Compose Orchestrator with Healthchecks',
+        'Zero-Downtime Rolling Blue/Green Deployment Script',
+        'Automated Semantic Versioning & Artifact Bundler'
+      ],
+      invariants: [
+        'producing minimal hardened images under 50MB with zero CVEs',
+        'executing CI validation and artifact generation in sub-30s',
+        'with automatic health probes and instant rollback capabilities',
+        'guaranteeing deterministic repeatable multi-platform builds'
+      ],
+      deliverableBase: 'ci_pipeline',
+      ext: 'yaml',
+      skills: ['Docker OCI', 'CI/CD Pipelines', 'Cloud Run Provisioning']
+    },
+    'agent-constructor': {
+      subsystems: [
+        'Subterranean Geotechnical Piling & Foundation Grid',
+        'Structural Titanium Girder & Pillar CAD Schematics',
+        'Municipal Underground High-Voltage Power Conduit Grid',
+        'Reinforced Concrete Shear-Wall & Foundation Footings',
+        'Civic High-Capacity Aqueduct & Pressure Valve Grid',
+        'Heavy Crane Rigging & Prefabricated Superstructure Assembly'
+      ],
+      invariants: [
+        'certified for Category-5 seismic and high-wind structural loads',
+        'strictly complying with Municipal Building Code Chapter 104-B',
+        'tested under 500-ton static stress loading with zero deflection',
+        'with millimeter-accurate laser telemetry across all foundation pilings'
+      ],
+      deliverableBase: 'civic_structure',
+      ext: 'spec',
+      skills: ['Heavy Machinery Operation', 'Structural Construction', 'Site Safety']
+    },
+    'agent-doctor': {
+      subsystems: [
+        'Host CPU/GPU Thermal & Real-Time Bio-Vitals Telemetry Probe',
+        'Emergency Trauma Bay ICU Bed Allocation & Life Support Grid',
+        'Metropolis Environmental Air Quality & Aerosol Sniffer',
+        'Mobile Ambulance Fast-Response Dispatch Routing Algorithm',
+        'Autonomous Civic Medical Dispensary & Triage Protocol',
+        'Citizen Wellness & Cognitive Fatigue Monitoring System'
+      ],
+      invariants: [
+        'maintaining city health index above 96.5% under all conditions',
+        'triggering instant thermal alerts whenever GPU thermals exceed 72°C',
+        'guaranteeing sub-15 second medical response across all city zones',
+        'monitoring continuous biometric vitals for 3,450 citizens'
+      ],
+      deliverableBase: 'medical_vitals',
+      ext: 'json',
+      skills: ['Hospital Operations', 'Medical Telemetry', 'Triage Protocol']
+    }
+  };
+
+  public static generateTask(agId: string, agName: string, priority: AgentTask['priority'] = 'HIGH'): AgentTask {
+    const blueprint = this.roleBlueprints[agId] || this.roleBlueprints['agent-engineer'];
+    const count = (this.taskCounters[agId] = (this.taskCounters[agId] || 0) + 1);
+
+    const verb = this.verbs[Math.floor(Math.random() * this.verbs.length)];
+    const subsystem = blueprint.subsystems[Math.floor(Math.random() * blueprint.subsystems.length)];
+    const invariant = blueprint.invariants[Math.floor(Math.random() * blueprint.invariants.length)];
+    const rev = `${count.toString().padStart(3, '0')}`;
+    const hash = Math.random().toString(36).substring(2, 6);
+
+    const title = `${verb} ${subsystem}`;
+    const description = `${verb} ${subsystem.toLowerCase()} for the city platform, ${invariant}.`;
+    const deliverable = `${blueprint.deliverableBase}_v${rev}_${hash}.${blueprint.ext}`;
+
+    return {
+      id: `task-${agId}-${Date.now().toString(36)}-${hash}`,
+      title,
+      description,
+      expectedDeliverable: deliverable,
+      priority,
+      status: 'WORKING',
+      progress: 0,
+      assignedAgentId: agId,
+      assignedAgentName: agName,
+      source: 'INDIVIDUAL',
+      requiredSkills: blueprint.skills,
+      dependencies: [],
+      createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+  }
+}
+
 export class CitySimulationEngine {
   public buildings: Building[] = [];
   public roads: RoadSegment[] = [];
@@ -34,6 +626,7 @@ export class CitySimulationEngine {
   public publicMissions: PublicMission[] = [];
   public activeMissionId: string | null = null;
   public selectedAgentId: string | null = null;
+  public taskCounters: Record<string, number> = {};
 
   // First-person Player State
   public player: PlayerState = {
@@ -47,13 +640,21 @@ export class CitySimulationEngine {
     isGrounded: true,
     isPointerLocked: false,
     nearbyAgentId: null,
-    nearbyAgentDistance: 999
+    nearbyAgentDistance: 999,
+    isPilotingJet: false,
+    jetSpeed: 0,
+    jetAltitude: 0,
+    jetHeading: 0
   };
 
-  public simulationTime: number = 9.5; // 0.0 - 24.0 (Hour of day)
+  public simulationTime: number = 12.0; // 12.0 (High Noon Daylight - Always Bright)
   public simulationSpeed: number = 1.0;
   public tickCount: number = 0;
   public activeScenario: ScenarioType = 'BALANCED_METROPOLIS';
+
+  public generateAutonomousSoftwareTask(agId: string, agName: string): AgentTask {
+    return ProceduralSoftwareFactory.generateTask(agId, agName);
+  }
 
   constructor() {
     this.metrics = this.createDefaultMetrics();
@@ -457,8 +1058,40 @@ export class CitySimulationEngine {
       health: 100
     });
 
+    // Landmark 11: Civic Works & Heavy Construction Yard (Harlan Drake HQ)
+    this.buildings.push({
+      id: 'bld-construction',
+      name: 'Civic Works & Heavy Construction Yard',
+      signName: 'CIVIC WORKS',
+      department: 'Infrastructure Construction & Site Engineering',
+      zone: 'INDUSTRIAL',
+      type: 'CONSTRUCTION',
+      x: 0,
+      z: 56,
+      width: 13,
+      depth: 13,
+      height: 22,
+      floors: 3,
+      roofStyle: 'SCAFFOLDING',
+      facadeColor: '#EA580C',
+      color: '#EA580C',
+      roofColor: '#78350F',
+      accentColor: '#FACC15',
+      residents: 0,
+      maxResidents: 0,
+      workers: 110,
+      maxWorkers: 180,
+      powerDemand: 42,
+      powerSupplied: true,
+      waterDemand: 320,
+      waterSupplied: true,
+      wasteAccumulated: 16,
+      underConstruction: true,
+      health: 100
+    });
+
     // Add surrounding residential, commercial, and suburban housing blocks
-    let bCount = 11;
+    let bCount = 12;
     for (let r = 0; r < gridSize; r++) {
       for (let c = 0; c < gridSize; c++) {
         const bx = (c + 0.5) * spacing - offset;
@@ -940,7 +1573,7 @@ export class CitySimulationEngine {
         name: 'Harlan Drake',
         title: 'Civil Construction Lead',
         profession: 'Civil Infrastructure & Construction Engineer',
-        department: 'Civic Development & Construction Operations',
+        department: 'Civic Works & Heavy Construction Yard',
         color: '#EAB308',
         aiModel: 'Mistral Large 2',
         aiProvider: 'Mistral AI',
@@ -954,12 +1587,12 @@ export class CitySimulationEngine {
         targetZ: 15.0,
         speed: 3.1,
         angle: 0,
-        homeBuildingId: 'bld-hospital',
-        currentBuildingId: 'bld-hospital',
+        homeBuildingId: 'bld-construction',
+        currentBuildingId: 'bld-construction',
         currentTask: 'Managing structural engineering and building site progress',
         taskQueue: [],
         taskHistory: [
-          { id: 'hist-9', title: 'Foundation Survey for Civic Trauma Center', completedAt: '09:50 AM', deliverable: 'Site structural integrity certified.' }
+          { id: 'hist-9', title: 'Foundation Survey for Civic Construction Yard', completedAt: '09:50 AM', deliverable: 'Site structural integrity certified.' }
         ],
         workProgress: 100,
         availability: 'AVAILABLE',
@@ -1031,6 +1664,42 @@ export class CitySimulationEngine {
         ]
       }
     ];
+
+    // Initialize each agent with natural human lifecycle, domain workplace desk, and procedural tasks
+    this.agentCharacters.forEach((ag, idx) => {
+      const loc = AGENT_LOCATIONS[ag.id];
+      if (loc) {
+        ag.x = loc.desk.x;
+        ag.z = loc.desk.z;
+        ag.targetX = loc.desk.x;
+        ag.targetZ = loc.desk.z;
+        ag.homeBuildingId = loc.desk.buildingId || ag.homeBuildingId;
+        ag.currentBuildingId = loc.desk.buildingId || ag.homeBuildingId;
+        ag.currentDestinationName = loc.desk.name;
+      }
+      ag.routinePhase = 'DESK_WORK';
+      // Stagger timers naturally across the 10 citizens
+      ag.routineTimer = 16.0 + ((idx * 3.5) % 14.0);
+      ag.speed = 2.4;
+
+      const initialTask = ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
+      initialTask.progress = 25 + ((idx * 8) % 40);
+      initialTask.status = 'WORKING';
+      ag.activeTask = initialTask;
+      ag.workProgress = initialTask.progress;
+      ag.status = 'WORKING';
+      ag.availability = 'BUSY';
+      ag.currentTask = initialTask.title;
+      ag.thoughtBubble = `Coding: ${initialTask.expectedDeliverable}`;
+      ag.speechTimer = 7.0 + (idx % 4);
+
+      // 3 Queued domain procedural tasks
+      ag.taskQueue = [
+        ProceduralSoftwareFactory.generateTask(ag.id, ag.name),
+        ProceduralSoftwareFactory.generateTask(ag.id, ag.name),
+        ProceduralSoftwareFactory.generateTask(ag.id, ag.name)
+      ];
+    });
   }
 
   // --- Default Public Missions ---
@@ -1137,8 +1806,8 @@ export class CitySimulationEngine {
     const effectiveDelta = Math.min(deltaSeconds, 0.1) * this.simulationSpeed;
     this.tickCount++;
 
-    // Advance 24-hour simulation clock
-    this.simulationTime = (this.simulationTime + (effectiveDelta * 0.04)) % 24.0;
+    // Daytime High Noon Clock (Stays between 11:00 AM and 1:30 PM for permanent bright visibility)
+    this.simulationTime = 12.0 + (Math.sin(this.tickCount * 0.0003) * 1.5);
 
     // 1. Proximity Detection: Player <-> AI Citizens
     let closestDist = 999;
@@ -1206,9 +1875,12 @@ export class CitySimulationEngine {
       }
     });
 
-    // 4. Update AI Agent Behavioral State Machine & Work Lifecycle
+    // 4. Update AI Agent Behavioral State Machine & Natural Human Routine Lifecycles
     this.agentCharacters.forEach(ag => {
-      // Countdown speech timer
+      const loc = AGENT_LOCATIONS[ag.id];
+      if (!loc) return;
+
+      // Decrement speech bubble timer
       if (ag.speechTimer !== undefined) {
         ag.speechTimer -= effectiveDelta;
         if (ag.speechTimer <= 0) {
@@ -1216,91 +1888,277 @@ export class CitySimulationEngine {
         }
       }
 
-      // Check distance to current target destination
+      // Initialize routine timers if undefined
+      if (ag.routineTimer === undefined) {
+        ag.routineTimer = 20.0;
+      }
+      ag.routineTimer -= effectiveDelta;
+
+      if (!ag.routinePhase) {
+        ag.routinePhase = 'DESK_WORK';
+      }
+
+      // Smooth Natural Human Walking to Destination
       const dx = ag.targetX - ag.x;
       const dz = ag.targetZ - ag.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
-      if (dist > 0.8) {
-        // Traveling to assigned workplace or destination
-        const step = ag.speed * effectiveDelta;
+      if (dist > 0.35) {
+        const walkSpeed = ag.speed || 2.4;
+        const step = Math.min(dist, walkSpeed * effectiveDelta);
         ag.x += (dx / dist) * step;
         ag.z += (dz / dist) * step;
         ag.angle = Math.atan2(dz, dx);
-        if (ag.status !== 'WORKING' && ag.status !== 'VERIFYING') {
-          ag.status = 'TRAVELING';
-        }
+        ag.status = 'TRAVELING';
       } else {
-        // At target destination
-        if (ag.status === 'TRAVELING') {
-          ag.status = ag.activeTask ? 'WORKING' : 'IDLE';
-        }
+        ag.x = ag.targetX;
+        ag.z = ag.targetZ;
       }
 
-      // Active Task Progress Lifecycle
-      if (ag.activeTask && ag.activeTask.status !== 'COMPLETED' && ag.activeTask.status !== 'BLOCKED') {
-        ag.status = 'WORKING';
-        ag.availability = 'BUSY';
-        ag.workProgress = Math.min(100, ag.workProgress + effectiveDelta * 4.5);
-        ag.activeTask.progress = Math.round(ag.workProgress);
+      // 5-Phase Natural Human Routine State Machine
+      switch (ag.routinePhase) {
+        case 'DESK_WORK': {
+          if (dist <= 0.4) {
+            ag.status = 'WORKING';
+            ag.availability = 'BUSY';
 
-        if (ag.workProgress >= 85 && ag.activeTask.status !== 'VERIFYING') {
-          ag.activeTask.status = 'VERIFYING';
-          ag.status = 'VERIFYING';
-          ag.thoughtBubble = `Verifying ${ag.activeTask.title.slice(0, 24)}...`;
-          ag.speechTimer = 4.0;
-        }
+            // Ensure active procedural software task
+            if (!ag.activeTask) {
+              ag.activeTask = ag.taskQueue.length > 0 
+                ? ag.taskQueue.shift()! 
+                : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
+              ag.workProgress = 0;
+              ag.currentTask = ag.activeTask.title;
+            }
 
-        if (ag.workProgress >= 100) {
-          // Task Completed!
-          ag.activeTask.status = 'COMPLETED';
-          ag.activeTask.completedAt = new Date().toLocaleTimeString();
-          ag.activeTask.deliverableResult = `Verified deliverable: ${ag.activeTask.expectedDeliverable} generated by ${ag.name}`;
-          
-          ag.taskHistory.unshift({
-            id: ag.activeTask.id,
-            title: ag.activeTask.title,
-            completedAt: ag.activeTask.completedAt,
-            deliverable: ag.activeTask.deliverableResult
-          });
+            // Coding progress from 0% to 75%
+            if (ag.workProgress < 75) {
+              ag.workProgress = Math.min(75, ag.workProgress + effectiveDelta * 4.8);
+              ag.activeTask.progress = Math.round(ag.workProgress);
 
-          ag.thoughtBubble = `Task Complete: ${ag.activeTask.title.slice(0, 26)}!`;
-          ag.speechTimer = 6.0;
+              if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
+                const codingThoughts = [
+                  `Coding: ${ag.activeTask.expectedDeliverable}`,
+                  `Synthesizing logic for ${ag.activeTask.title.slice(0, 24)}...`,
+                  `Refactoring architecture in ${ag.activeTask.expectedDeliverable}`,
+                  `Writing type-safe domain contracts for ${ag.name}...`
+                ];
+                ag.thoughtBubble = codingThoughts[Math.floor(Math.random() * codingThoughts.length)];
+                ag.speechTimer = 5.0;
+              }
+            }
 
-          // If linked to a Public Mission, update public mission DAG
-          if (ag.activeTask.publicMissionId) {
-            this.handleSubtaskCompleted(ag.activeTask.publicMissionId, ag.activeTask.id);
-          }
-
-          // Pick next queued task or go idle
-          if (ag.taskQueue.length > 0) {
-            ag.activeTask = ag.taskQueue.shift() || null;
-            ag.workProgress = 0;
-            ag.status = 'ASSIGNED';
+            // Transition to VERIFYING at nearby test station when coding milestone reached
+            if (ag.workProgress >= 75 || ag.routineTimer <= 0) {
+              ag.routinePhase = 'VERIFYING';
+              ag.routineTimer = 12.0 + Math.random() * 6.0;
+              ag.targetX = loc.testRig.x;
+              ag.targetZ = loc.testRig.z;
+              ag.currentDestinationName = loc.testRig.name;
+              ag.thoughtBubble = `Moving to test rig for ${ag.activeTask.expectedDeliverable}`;
+              ag.speechTimer = 4.5;
+            }
           } else {
-            ag.activeTask = null;
-            ag.status = 'IDLE';
-            ag.availability = 'AVAILABLE';
-            ag.currentTask = 'Standing by for new task directives';
+            // Walking towards desk
+            ag.targetX = loc.desk.x;
+            ag.targetZ = loc.desk.z;
+            ag.currentDestinationName = loc.desk.name;
           }
+          break;
         }
-      } else if (!ag.activeTask && Math.random() < 0.003) {
-        // Autonomous stroll between departments and Innovation Plaza
-        const destinations = [
-          { x: 0, z: 0 },
-          { x: 0, z: -24 },
-          { x: 24, z: 0 },
-          { x: 24, z: -24 },
-          { x: -24, z: 24 },
-          { x: -24, z: -24 },
-          { x: -24, z: 0 },
-          { x: 0, z: 24 },
-          { x: 24, z: 24 },
-          { x: -24, z: 52 }
-        ];
-        const dest = destinations[Math.floor(Math.random() * destinations.length)];
-        ag.targetX = dest.x + (Math.random() * 4 - 2);
-        ag.targetZ = dest.z + (Math.random() * 4 - 2);
+
+        case 'VERIFYING': {
+          if (dist <= 0.4) {
+            ag.status = 'VERIFYING';
+            ag.availability = 'BUSY';
+
+            if (ag.activeTask && ag.workProgress < 100) {
+              ag.workProgress = Math.min(100, ag.workProgress + effectiveDelta * 5.2);
+              ag.activeTask.progress = Math.round(ag.workProgress);
+
+              if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
+                const verifyThoughts = [
+                  `Running pytest suite on ${ag.activeTask.expectedDeliverable}...`,
+                  `Executing 20/20 test assertions: 0 regressions`,
+                  `Verifying schema invariant checks and zero leaks`,
+                  `Validating deliverable artifact on hardware test bench`
+                ];
+                ag.thoughtBubble = verifyThoughts[Math.floor(Math.random() * verifyThoughts.length)];
+                ag.speechTimer = 4.0;
+              }
+            }
+
+            // Task completion & transition to human social break
+            if (ag.workProgress >= 100 || ag.routineTimer <= 0) {
+              if (ag.activeTask) {
+                ag.activeTask.status = 'COMPLETED';
+                ag.activeTask.progress = 100;
+                const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                ag.activeTask.completedAt = timeStr;
+                ag.activeTask.deliverableResult = `Verified deliverable: ${ag.activeTask.expectedDeliverable} generated by ${ag.name} (100% assertions passed)`;
+
+                ag.taskHistory.unshift({
+                  id: ag.activeTask.id,
+                  title: ag.activeTask.title,
+                  completedAt: timeStr,
+                  deliverable: ag.activeTask.deliverableResult
+                });
+                if (ag.taskHistory.length > 15) ag.taskHistory.pop();
+
+                if (ag.activeTask.publicMissionId) {
+                  this.handleSubtaskCompleted(ag.activeTask.publicMissionId, ag.activeTask.id);
+                }
+              }
+
+              ag.thoughtBubble = `✓ Verified: ${ag.activeTask?.expectedDeliverable || 'Deliverable'}!`;
+              ag.speechTimer = 4.5;
+              ag.activeTask = null; // Cleared so new unique task is drawn after break
+
+              // Natural Human Break Selection
+              // 40% Plaza espresso kiosk
+              // 35% Colleague collaboration
+              // 25% Terrace thinking
+              const rand = Math.random();
+              if (rand < 0.40) {
+                ag.routinePhase = 'COFFEE_BREAK';
+                ag.routineTimer = 16.0 + Math.random() * 8.0;
+                const spot = SHARED_COMMUNAL_SPOTS[Math.floor(Math.random() * SHARED_COMMUNAL_SPOTS.length)];
+                ag.targetX = spot.x;
+                ag.targetZ = spot.z;
+                ag.currentDestinationName = spot.name;
+              } else if (rand < 0.75) {
+                ag.routinePhase = 'COLLABORATION';
+                ag.routineTimer = 18.0 + Math.random() * 8.0;
+                const colleagueId = loc.collaboratorId;
+                const colleagueLoc = AGENT_LOCATIONS[colleagueId] || loc;
+                const colleague = this.agentCharacters.find(a => a.id === colleagueId);
+                ag.targetX = colleagueLoc.terrace.x;
+                ag.targetZ = colleagueLoc.terrace.z;
+                ag.currentDestinationName = `${colleague?.name || 'Colleague'}'s Office Terrace`;
+              } else {
+                ag.routinePhase = 'TERRACE_THINKING';
+                ag.routineTimer = 14.0 + Math.random() * 8.0;
+                ag.targetX = loc.terrace.x;
+                ag.targetZ = loc.terrace.z;
+                ag.currentDestinationName = loc.terrace.name;
+              }
+            }
+          } else {
+            ag.targetX = loc.testRig.x;
+            ag.targetZ = loc.testRig.z;
+            ag.currentDestinationName = loc.testRig.name;
+          }
+          break;
+        }
+
+        case 'COFFEE_BREAK': {
+          ag.status = 'IDLE';
+          ag.availability = 'ON_CALL';
+          if (dist <= 0.4) {
+            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
+              const breakThoughts = [
+                `Grabbing an espresso at ${ag.currentDestinationName}...`,
+                `Relaxing at the plaza, unwinding after module sprint`,
+                `Enjoying the city sunshine before returning to workstation`,
+                `Sipping fresh espresso, ideating next software component`
+              ];
+              ag.thoughtBubble = breakThoughts[Math.floor(Math.random() * breakThoughts.length)];
+              ag.speechTimer = 5.0;
+            }
+          }
+
+          // When coffee break completes, head back to desk with a fresh procedural task!
+          if (ag.routineTimer <= 0) {
+            ag.routinePhase = 'DESK_WORK';
+            ag.routineTimer = 22.0 + Math.random() * 8.0;
+            ag.targetX = loc.desk.x;
+            ag.targetZ = loc.desk.z;
+            ag.currentDestinationName = loc.desk.name;
+            ag.activeTask = ag.taskQueue.length > 0 
+              ? ag.taskQueue.shift()! 
+              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
+            ag.workProgress = 0;
+            ag.currentTask = ag.activeTask.title;
+            while (ag.taskQueue.length < 3) {
+              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
+            }
+            ag.thoughtBubble = `Back to desk: starting ${ag.activeTask.expectedDeliverable}`;
+            ag.speechTimer = 5.0;
+          }
+          break;
+        }
+
+        case 'COLLABORATION': {
+          ag.status = 'EVALUATING';
+          ag.availability = 'ON_CALL';
+          if (dist <= 0.4) {
+            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
+              const collabThoughts = [
+                `Discussing API contracts with ${ag.currentDestinationName}...`,
+                `Pair-reviewing architectural diffs and schema invariants`,
+                `Aligning on error formats and high-throughput async queues`,
+                `Collaborative whiteboard discussion: zero circular dependencies`
+              ];
+              ag.thoughtBubble = collabThoughts[Math.floor(Math.random() * collabThoughts.length)];
+              ag.speechTimer = 5.0;
+            }
+          }
+
+          if (ag.routineTimer <= 0) {
+            ag.routinePhase = 'DESK_WORK';
+            ag.routineTimer = 22.0 + Math.random() * 8.0;
+            ag.targetX = loc.desk.x;
+            ag.targetZ = loc.desk.z;
+            ag.currentDestinationName = loc.desk.name;
+            ag.activeTask = ag.taskQueue.length > 0 
+              ? ag.taskQueue.shift()! 
+              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
+            ag.workProgress = 0;
+            ag.currentTask = ag.activeTask.title;
+            while (ag.taskQueue.length < 3) {
+              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
+            }
+            ag.thoughtBubble = `Returning to workstation: ${ag.activeTask.expectedDeliverable}`;
+            ag.speechTimer = 5.0;
+          }
+          break;
+        }
+
+        case 'TERRACE_THINKING': {
+          ag.status = 'EVALUATING';
+          ag.availability = 'ON_CALL';
+          if (dist <= 0.4) {
+            if (!ag.thoughtBubble || ag.speechTimer === undefined || ag.speechTimer <= 0) {
+              const terraceThoughts = [
+                `Reflecting on system architecture from ${loc.terrace.name}...`,
+                `Thinking through SQLite WAL checkpoints and lock isolation`,
+                `Taking in the city vista while mapping out next milestone`,
+                `Deep architectural reflection on terrace: solving bottlenecks`
+              ];
+              ag.thoughtBubble = terraceThoughts[Math.floor(Math.random() * terraceThoughts.length)];
+              ag.speechTimer = 5.0;
+            }
+          }
+
+          if (ag.routineTimer <= 0) {
+            ag.routinePhase = 'DESK_WORK';
+            ag.routineTimer = 22.0 + Math.random() * 8.0;
+            ag.targetX = loc.desk.x;
+            ag.targetZ = loc.desk.z;
+            ag.currentDestinationName = loc.desk.name;
+            ag.activeTask = ag.taskQueue.length > 0 
+              ? ag.taskQueue.shift()! 
+              : ProceduralSoftwareFactory.generateTask(ag.id, ag.name);
+            ag.workProgress = 0;
+            ag.currentTask = ag.activeTask.title;
+            while (ag.taskQueue.length < 3) {
+              ag.taskQueue.push(ProceduralSoftwareFactory.generateTask(ag.id, ag.name));
+            }
+            ag.thoughtBubble = `Back to workstation: ${ag.activeTask.expectedDeliverable}`;
+            ag.speechTimer = 5.0;
+          }
+          break;
+        }
       }
     });
 
@@ -1350,12 +2208,15 @@ export class CitySimulationEngine {
       ag.thoughtBubble = `Directive received: "${task.title.slice(0, 24)}..."`;
       ag.speechTimer = 6.0;
 
-      // Head to home department
-      const home = this.buildings.find(b => b.id === ag.homeBuildingId);
-      if (home) {
-        ag.targetX = home.x;
-        ag.targetZ = home.z;
+      // Head to domain workstation desk
+      const loc = AGENT_LOCATIONS[ag.id];
+      if (loc) {
+        ag.targetX = loc.desk.x;
+        ag.targetZ = loc.desk.z;
+        ag.currentDestinationName = loc.desk.name;
       }
+      ag.routinePhase = 'DESK_WORK';
+      ag.routineTimer = 25.0;
       return { success: true, message: `Direct task assigned to ${ag.name}.`, task };
     }
   }
@@ -1466,12 +2327,15 @@ export class CitySimulationEngine {
     ag.thoughtBubble = `⚡ [F] Direct Work Order: "${task.title.slice(0, 22)}..."`;
     ag.speechTimer = 7.0;
 
-    // Head towards home or site
-    const home = this.buildings.find(b => b.id === ag.homeBuildingId);
-    if (home) {
-      ag.targetX = home.x + (Math.random() * 4 - 2);
-      ag.targetZ = home.z + (Math.random() * 4 - 2);
+    // Head towards domain workstation desk
+    const loc = AGENT_LOCATIONS[ag.id];
+    if (loc) {
+      ag.targetX = loc.desk.x;
+      ag.targetZ = loc.desk.z;
+      ag.currentDestinationName = loc.desk.name;
     }
+    ag.routinePhase = 'DESK_WORK';
+    ag.routineTimer = 25.0;
 
     if (!ag.chatHistory) ag.chatHistory = [];
     ag.chatHistory.push({
@@ -1519,14 +2383,29 @@ export class CitySimulationEngine {
     const lower = playerMessage.toLowerCase();
     let replyText = '';
 
-    if (lower.includes('work') || lower.includes('start') || lower.includes('make') || lower.includes('build') || lower.includes('code') || lower.includes('fix') || lower.includes('execute')) {
+    if (lower.includes('time') || lower.includes('clock') || lower.includes('what time')) {
+      const now = new Date();
+      replyText = `The current system time is ${now.toLocaleTimeString()} on ${now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Host environment clock is synchronized.`;
+    } else if (lower.includes('functioning') || lower.includes('city status') || lower.includes('city well') || lower.includes('functioning well') || lower.includes('how is the city')) {
+      replyText = `The city is functioning at high operational capacity! Metrics: Citizen Satisfaction: ${this.metrics.citizenSatisfaction.toFixed(1)}%, Power Grid: ${this.metrics.powerGridStatus}%, Water Grid: ${this.metrics.waterGridStatus}%, Traffic Congestion: ${this.metrics.trafficCongestion}%. Total population: ${this.metrics.population} citizens with ${this.incidents.length} active emergency incidents.`;
+    } else if (lower.includes('3d presentation') || (lower.includes('presentation') && lower.includes('3d'))) {
+      replyText = `Interactive 3D WebGL Presentation request acknowledged! I can synthesize a standalone Three.js presentation on your computer disk featuring rotating wireframe models, particle nebulae, orbital camera lerping, and frosted glass cards. Connecting to backend execution engine...`;
+    } else if (lower.includes('website') || lower.includes('web app') || lower.includes('webpage') || lower.includes('landing page')) {
+      replyText = `Modern Responsive Website request acknowledged! I will synthesize a complete responsive website on your computer filesystem with glassmorphic cards, live interactive calculators, and high-conversion UX. Connecting to backend execution engine...`;
+    } else if (lower.includes('work') || lower.includes('start') || lower.includes('make') || lower.includes('build') || lower.includes('code') || lower.includes('fix') || lower.includes('execute')) {
       const res = this.directWorkCommand(agentId);
       replyText = `Direct work order received, Commander! I have initiated "${res.task.title}". Operational state switched to WORKING. Target deliverable: ${res.task.expectedDeliverable}.`;
-    } else if (lower.includes('status') || lower.includes('doing') || lower.includes('progress') || lower.includes('objective')) {
+    } else if (lower.includes('status') || lower.includes('doing') || lower.includes('progress') || lower.includes('objective') || lower.includes('where are you') || lower.includes('what are you')) {
       if (ag.activeTask) {
-        replyText = `I am currently executing "${ag.activeTask.title}" (${ag.workProgress.toFixed(0)}% complete). Status: ${ag.status}. Expected deliverable: ${ag.activeTask.expectedDeliverable}. No active blockers.`;
+        replyText = `I am currently working on "${ag.activeTask.title}" (${ag.workProgress.toFixed(0)}% complete) at ${ag.currentDestinationName || ag.department}. Phase: ${ag.routinePhase || 'DESK_WORK'}. Deliverable: ${ag.activeTask.expectedDeliverable}. No active blockers.`;
+      } else if (ag.routinePhase === 'COFFEE_BREAK') {
+        replyText = `I just wrapped up my previous engineering deliverable and stepped over to ${ag.currentDestinationName || 'the plaza espresso kiosk'} for a short coffee break. I'll head back to my desk shortly to start the next module!`;
+      } else if (ag.routinePhase === 'COLLABORATION') {
+        replyText = `I'm over at ${ag.currentDestinationName || 'a colleague terrace'} syncing on API contracts and microservice interfaces. Returning to my workstation soon.`;
+      } else if (ag.routinePhase === 'TERRACE_THINKING') {
+        replyText = `I'm taking in the city air on ${ag.currentDestinationName || 'the observation terrace'}, thinking through database lock contention and async pipelines before my next coding sprint.`;
       } else {
-        replyText = `I am currently on standby at ${ag.department}. Availability is ${ag.availability}. All toolchains ready. You can press [F] or ask me to start work anytime!`;
+        replyText = `I am currently at ${ag.currentDestinationName || ag.department}. Availability is ${ag.availability}. All toolchains ready. You can press [F] or ask me to start work anytime!`;
       }
     } else if (lower.includes('skill') || lower.includes('tool') || lower.includes('can you') || lower.includes('what do you do')) {
       replyText = `My primary specialization is ${ag.profession}. My core competencies: ${ag.skills.join(', ')}. Active toolchain: ${ag.toolsInUse.join(', ')}.`;

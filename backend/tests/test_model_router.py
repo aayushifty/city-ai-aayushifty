@@ -17,7 +17,8 @@ async def test_mock_provider_deterministic_response():
 @pytest.mark.asyncio
 async def test_router_fallback_to_mock():
     router = ModelRouter()
-    # Request unavailable provider
+    # Request unavailable provider and verify fallback to mock
+    router.fallback_chain = ["unavailable_provider_1", "unavailable_provider_2", "mock"]
     req = ModelCompletionRequest(prompt="Test fallback")
     resp = await router.route_completion(req, preferred_provider="non_existent_provider")
     assert resp.provider_name == "mock"

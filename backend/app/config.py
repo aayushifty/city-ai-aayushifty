@@ -27,16 +27,29 @@ class ForgeConfig(BaseModel):
     MAX_COMMAND_TIMEOUT_SECONDS: int = 120
     
     # Model defaults
-    DEFAULT_PROVIDER: str = "mock"
+    DEFAULT_PROVIDER: str = "ollama"
     OPENAI_API_KEY: str | None = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
     GEMINI_API_KEY: str | None = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY"))
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    DEFAULT_OLLAMA_MODEL: str = "llama3.2:latest"
+    ROLE_MODEL_PREFERENCES: dict[str, str] = Field(default_factory=lambda: {
+        "coordinator": "llama3.2:latest",
+        "analyst": "llama3.2:latest",
+        "architect": "llama3.2:latest",
+        "engineer": "llama3.2:latest",
+        "qa": "llama3.2:latest",
+        "diagnostic": "llama3.2:latest",
+        "security": "llama3.2:latest",
+        "devops": "llama3.2:latest",
+        "constructor": "llama3.2:latest",
+        "doctor": "llama3.2:latest"
+    })
     
     # Execution & budget defaults
     MAX_TASK_RETRIES: int = 3
     DEFAULT_PROJECT_BUDGET_USD: float = 25.0
     DEFAULT_TASK_TIMEOUT_SECONDS: int = 300
-    MAX_CONCURRENT_TASKS: int = 3
+    MAX_CONCURRENT_TASKS: int = 2
 
     def ensure_directories(self) -> None:
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)

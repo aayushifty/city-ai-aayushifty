@@ -96,3 +96,33 @@ export interface ForgeTelemetryEvent {
   timestamp: string;
   payload: Record<string, any>;
 }
+
+export interface DeliverableArtifact {
+  id: string;
+  task_id: string;
+  agent_id: string;
+  agent_name: string;
+  title: string;
+  relative_path: string;
+  file_path: string;
+  file_size_bytes: number;
+  content: string;
+  verification_exit_code: number;
+  verification_summary: string;
+  created_at: string;
+}
+
+export interface ModelRegistrySnapshot {
+  ollama_online: boolean;
+  installed_models: {
+    name: string;
+    model: string;
+    size_bytes: number;
+    modified_at: string;
+    details: Record<string, any>;
+    is_online: boolean;
+  }[];
+  available_providers: string[];
+  active_default_provider: string;
+  concurrency_limit: number;
+}

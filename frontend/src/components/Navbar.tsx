@@ -52,17 +52,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Brand & Project Selector */}
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-gradient-to-tr from-blue-600 to-violet-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-            F
+          <div className="w-8 h-8 rounded bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+            C
           </div>
           <div>
             <div className="text-base font-bold tracking-wider text-slate-100 flex items-center gap-2">
-              FORGE AI
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/30 font-mono">
-                FACTORY
+              city_ai_aayushifty
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">
+                METROPOLIS
               </span>
             </div>
-            <div className="text-xs text-slate-500 font-mono">AUTONOMOUS ENGINEERING</div>
+            <div className="text-xs text-slate-500 font-mono">AUTONOMOUS 3D AI NATION</div>
           </div>
         </div>
 

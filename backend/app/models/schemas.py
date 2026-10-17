@@ -131,3 +131,72 @@ class BudgetStatus(BaseModel):
     consumed_usd: float
     total_tokens: int
     is_emergency_stopped: bool
+
+# --- Metropolis Autonomous AI Workforce Schemas ---
+
+class CitizenProfile(BaseModel):
+    id: str
+    name: str
+    title: str
+    profession: str
+    department: str
+    color: str
+    assigned_model: str
+    provider: str
+    capabilities: List[str] = Field(default_factory=list)
+    tools: List[str] = Field(default_factory=list)
+    status: str = "IDLE"  # IDLE, PLANNING, WORKING, TESTING, VERIFYING, BLOCKED, COMPLETED, FAILED
+    current_task: Optional[str] = None
+    active_task_id: Optional[str] = None
+    work_progress: float = 0.0
+    thought: Optional[str] = None
+    home_building_id: str = "bld-citadel"
+    workspace_dir: str = ""
+    task_queue: List[str] = Field(default_factory=list)
+    completed_deliverables: List[Dict[str, Any]] = Field(default_factory=list)
+
+class CitizenChatMessageRequest(BaseModel):
+    message: str
+    stream: bool = False
+
+class CitizenChatResponse(BaseModel):
+    message_id: str
+    agent_id: str
+    agent_name: str
+    reply: str
+    model_used: str
+    provider: str
+    timestamp: str
+    action_taken: Optional[str] = None
+    deliverable_title: Optional[str] = None
+    deliverable_url: Optional[str] = None
+    deliverable_path: Optional[str] = None
+    deliverable_type: Optional[str] = None
+    artifact_id: Optional[str] = None
+
+class CitizenTaskRequest(BaseModel):
+    title: str
+    description: str
+    expected_deliverable: str
+    priority: str = "HIGH"
+    workspace_name: Optional[str] = None
+    timeout_seconds: int = 240
+
+class PublicMissionCreateRequest(BaseModel):
+    title: str
+    description: str
+    category: str = "SOFTWARE"  # SOFTWARE, CONSTRUCTION, INFRASTRUCTURE, RESEARCH
+
+class DeliverableArtifact(BaseModel):
+    id: str
+    task_id: str
+    agent_id: str
+    agent_name: str
+    title: str
+    relative_path: str
+    file_path: str
+    file_size_bytes: int = 0
+    content: Optional[str] = None
+    verification_exit_code: int = 0
+    verification_summary: str = ""
+    created_at: str

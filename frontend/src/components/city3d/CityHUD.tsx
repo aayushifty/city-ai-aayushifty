@@ -22,7 +22,14 @@ import {
   History,
   Briefcase,
   Zap,
-  Sparkle
+  Sparkle,
+  ExternalLink,
+  Globe,
+  Monitor,
+  Plane,
+  Crown,
+  Terminal,
+  Activity
 } from 'lucide-react';
 import { 
   CityMetrics, 
@@ -34,6 +41,7 @@ import {
   PlayerState,
   AgentChatMessage
 } from '../../simulation/types';
+import { DeliverableArtifact } from '../../types';
 
 interface CityHUDProps {
   metrics: CityMetrics;
@@ -46,7 +54,10 @@ interface CityHUDProps {
   playerState: PlayerState;
   interactingAgent: AgentCharacter | null;
   showPublicMissionsModal: boolean;
+  activeArtifact?: DeliverableArtifact | null;
   onSelectCameraMode: (mode: CameraMode) => void;
+  onToggleJetFlight?: (piloting: boolean) => void;
+  onInteractWithAgent?: (agentId: string) => void;
   onCloseAgentInteraction: () => void;
   onOpenPublicMissions: () => void;
   onClosePublicMissions: () => void;
@@ -55,6 +66,10 @@ interface CityHUDProps {
   onSendChatMessage: (agentId: string, message: string) => void;
   onPublishPublicMission: (mission: { title: string; description: string; category: PublicMission['category'] }) => void;
   onRequestAgentStatus: (agentId: string) => string;
+  onViewArtifact?: (taskId: string) => void;
+  onCloseArtifact?: () => void;
+  onOpenDeliverableOnComputer?: (artifactId: string) => void;
+  onPreviewDeliverable?: (url: string, title: string, type: string) => void;
 }
 
 export const CityHUD: React.FC<CityHUDProps> = ({
@@ -69,6 +84,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   interactingAgent,
   showPublicMissionsModal,
   onSelectCameraMode,
+  onToggleJetFlight,
+  onInteractWithAgent,
   onCloseAgentInteraction,
   onOpenPublicMissions,
   onClosePublicMissions,
@@ -76,7 +93,12 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   onDirectWorkCommand,
   onSendChatMessage,
   onPublishPublicMission,
-  onRequestAgentStatus
+  onRequestAgentStatus,
+  activeArtifact,
+  onViewArtifact,
+  onCloseArtifact,
+  onOpenDeliverableOnComputer,
+  onPreviewDeliverable
 }) => {
   // Individual task form state
   const [taskTitle, setTaskTitle] = useState('');
@@ -103,20 +125,55 @@ export const CityHUD: React.FC<CityHUDProps> = ({
     }
   }, [interactingAgent?.chatHistory, activeAgentTab]);
 
-  // Keyboard shortcut [F] inside modal to trigger work command
+  // Global Exploration Keyboard Listeners: [E] 2-Way Comms, [F] Work Order
   React.useEffect(() => {
-    const onModalKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() === 'f' && interactingAgent) {
-        const target = e.target as HTMLElement;
-        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+    const onKeyShortcut = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      const k = e.key.toLowerCase();
+
+      // [E] Key: Open 2-Way Live Comms with nearest citizen
+      if (k === 'e' && !interactingAgent && !showPublicMissionsModal) {
+        e.preventDefault();
+        if (document.pointerLockElement) {
+          try {
+            document.exitPointerLock();
+          } catch (_) {}
+        }
+
+        let targetId = nearbyAgent?.id;
+        if (!targetId && agentCharacters.length > 0) {
+          let minD = 9999;
+          agentCharacters.forEach(ag => {
+            const d = Math.hypot(playerState.x - ag.x, playerState.z - ag.z);
+            if (d < minD) {
+              minD = d;
+              targetId = ag.id;
+            }
+          });
+        }
+        if (!targetId && agentCharacters.length > 0) {
+          targetId = agentCharacters[0].id;
+        }
+        if (targetId && onInteractWithAgent) {
+          onInteractWithAgent(targetId);
+        }
+      }
+
+      // [F] Key: Work Command
+      if (k === 'f') {
+        const ag = interactingAgent || nearbyAgent || (agentCharacters.length > 0 ? agentCharacters[0] : null);
+        if (ag) {
           e.preventDefault();
-          onDirectWorkCommand(interactingAgent.id);
+          onDirectWorkCommand(ag.id);
         }
       }
     };
-    window.addEventListener('keydown', onModalKey);
-    return () => window.removeEventListener('keydown', onModalKey);
-  }, [interactingAgent, onDirectWorkCommand]);
+
+    window.addEventListener('keydown', onKeyShortcut);
+    return () => window.removeEventListener('keydown', onKeyShortcut);
+  }, [interactingAgent, showPublicMissionsModal, nearbyAgent, agentCharacters, playerState, onInteractWithAgent, onDirectWorkCommand]);
 
   // Time format
   const hours = Math.floor(simulationTime);
@@ -180,7 +237,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl px-4 py-2 pointer-events-auto flex items-center gap-4 text-xs shadow-2xl">
           <div className="flex items-center gap-2 text-slate-100">
             <Compass size={15} className="text-blue-400 animate-spin-slow" />
-            <span className="font-bold tracking-wider">FORGE AI METROPOLIS</span>
+            <span className="font-bold tracking-wider text-emerald-400">CITY_AI_AAYUSHIFTY METROPOLIS</span>
           </div>
 
           <div className="h-4 w-px bg-slate-800" />
@@ -201,28 +258,84 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           </div>
         </div>
 
-        {/* Public Mission & Camera Buttons */}
+        {/* Public Mission & Camera & Private Jet Buttons */}
         <div className="flex items-center gap-2.5 pointer-events-auto">
+          {/* Supreme Governor Crest Pill */}
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border border-amber-500/60 text-amber-300 text-xs font-bold shadow-lg shadow-amber-950/40">
+            <Crown size={14} className="text-amber-400 fill-amber-400" />
+            <span className="tracking-wide">SUPREME GOVERNOR</span>
+          </div>
+
+          {/* Sovereign-X1 Private Jet Board / Land Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onToggleJetFlight) {
+                onToggleJetFlight(!playerState.isPilotingJet);
+              }
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 border shadow-lg ${
+              playerState.isPilotingJet
+                ? 'bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white border-rose-400 shadow-rose-900/50 animate-pulse'
+                : 'bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white border-cyan-400 shadow-cyan-950/50'
+            }`}
+            title="Board or Land the Sovereign-X1 Private Jet (Shortcut: G)"
+          >
+            <Plane size={14} className={playerState.isPilotingJet ? 'rotate-90' : ''} />
+            <span>{playerState.isPilotingJet ? '🛬 Land Jet [G]' : '✈️ Sovereign-X1 Jet [G]'}</span>
+          </button>
+
+          {/* 2-Way Live Comms [E] Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (document.pointerLockElement) {
+                try {
+                  document.exitPointerLock();
+                } catch (_) {}
+              }
+              const targetId = nearbyAgent?.id || (agentCharacters.length > 0 ? agentCharacters[0].id : 'agent-coordinator');
+              if (onInteractWithAgent) onInteractWithAgent(targetId);
+            }}
+            className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg shadow-emerald-950/50 flex items-center gap-2 border border-emerald-400 transition"
+            title="Open 2-Way Live Comms with Citizens (Shortcut: E)"
+          >
+            <MessageSquare size={14} className="text-emerald-200" />
+            <span>🎙️ Comms [E]</span>
+          </button>
+
           <button
             onClick={onOpenPublicMissions}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-blue-500/20 flex items-center gap-2 transition"
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-blue-500/20 flex items-center gap-2 transition"
           >
             <Sparkles size={14} className="text-amber-300" />
-            <span>[M] Public Missions ({publicMissions.length})</span>
+            <span>[M] Missions ({publicMissions.length})</span>
           </button>
 
           <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl p-1 flex items-center gap-1 text-[11px]">
             <button
               onClick={() => onSelectCameraMode('FPV')}
-              className={`px-2.5 py-1 rounded transition ${cameraMode === 'FPV' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
+                cameraMode === 'FPV' || cameraMode === 'JET_COCKPIT' 
+                  ? 'bg-blue-600 text-white font-bold' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="First-Person View (Shortcut: V)"
             >
-              1st Person
+              <Eye size={12} />
+              <span>1st Person [V]</span>
             </button>
             <button
-              onClick={() => onSelectCameraMode('SHOULDER_CAM')}
-              className={`px-2.5 py-1 rounded transition ${cameraMode === 'SHOULDER_CAM' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              onClick={() => onSelectCameraMode('TPV')}
+              className={`px-2.5 py-1 rounded transition flex items-center gap-1 ${
+                cameraMode === 'TPV' || cameraMode === 'SHOULDER_CAM' || cameraMode === 'JET_CHASE' 
+                  ? 'bg-blue-600 text-white font-bold' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Third-Person View (Shortcut: V)"
             >
-              3rd Person
+              <Users size={12} />
+              <span>3rd Person</span>
             </button>
             <button
               onClick={() => onSelectCameraMode('ORBIT')}
@@ -233,6 +346,79 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 1.5. SOVEREIGN-X1 PRIVATE JET AVIONICS FLIGHT HUD */}
+      {playerState.isPilotingJet && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 pointer-events-none flex flex-col items-center gap-2 z-30 animate-in fade-in zoom-in-95 duration-200">
+          {/* Main Flight Avionics Bar */}
+          <div className="bg-[#050D1A]/95 backdrop-blur-md border-2 border-cyan-400/90 rounded-2xl px-6 py-3 shadow-[0_0_40px_rgba(6,182,212,0.45)] flex items-center gap-6 text-xs text-cyan-300">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-inner">
+                <Plane size={18} className="animate-pulse" />
+              </div>
+              <div>
+                <div className="text-[9px] font-mono tracking-widest text-cyan-400 font-bold uppercase">SUPERSONIC STEALTH JET</div>
+                <div className="text-sm font-black text-white tracking-wide">SOVEREIGN-X1</div>
+              </div>
+            </div>
+
+            <div className="h-8 w-px bg-cyan-800/80" />
+
+            <div className="flex flex-col items-center min-w-[70px]">
+              <span className="text-[9px] uppercase tracking-wider text-cyan-400 font-bold">AIRSPEED</span>
+              <span className="text-base font-black text-white">
+                {playerState.jetSpeed ?? 0} <span className="text-[10px] text-cyan-400 font-bold">KM/H</span>
+              </span>
+            </div>
+
+            <div className="h-8 w-px bg-cyan-800/80" />
+
+            <div className="flex flex-col items-center min-w-[65px]">
+              <span className="text-[9px] uppercase tracking-wider text-cyan-400 font-bold">ALTITUDE</span>
+              <span className="text-base font-black text-white">
+                {playerState.jetAltitude ?? 0} <span className="text-[10px] text-cyan-400 font-bold">M</span>
+              </span>
+            </div>
+
+            <div className="h-8 w-px bg-cyan-800/80" />
+
+            <div className="flex flex-col items-center min-w-[65px]">
+              <span className="text-[9px] uppercase tracking-wider text-cyan-400 font-bold">HEADING</span>
+              <span className="text-base font-black text-white">
+                {(playerState.jetHeading ?? 0).toString().padStart(3, '0')}°
+              </span>
+            </div>
+
+            <div className="h-8 w-px bg-cyan-800/80" />
+
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] uppercase tracking-wider text-cyan-400 font-bold">THRUST DRIVE</span>
+              <span className={`text-[10px] font-black px-2.5 py-0.5 rounded border ${
+                (playerState.jetSpeed ?? 0) > 85 
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-400 animate-pulse' 
+                  : 'bg-cyan-500/20 text-cyan-300 border-cyan-400/50'
+              }`}>
+                {(playerState.jetSpeed ?? 0) > 85 ? '🚀 AFTERBURNER MAX' : '⚡ CRUISE CRITICAL'}
+              </span>
+            </div>
+          </div>
+
+          {/* Flight Controls Legend Bar */}
+          <div className="bg-slate-950/90 backdrop-blur border border-cyan-500/40 rounded-xl px-5 py-1.5 text-[11px] text-cyan-200/90 flex items-center gap-3 shadow-lg">
+            <span><kbd className="px-1.5 py-0.5 bg-cyan-950 border border-cyan-700 rounded font-bold text-cyan-300">W / S</kbd> Throttle / Airbrake</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-cyan-950 border border-cyan-700 rounded font-bold text-cyan-300">A / D</kbd> Aerodynamic Roll & Bank</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-cyan-950 border border-cyan-700 rounded font-bold text-cyan-300">SPACE</kbd> Pitch Climb</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-cyan-950 border border-cyan-700 rounded font-bold text-cyan-300">SHIFT</kbd> Pitch Dive</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-blue-950 border border-blue-600 rounded font-bold text-blue-300">V</kbd> Cockpit / Chase Cam</span>
+            <span>•</span>
+            <span><kbd className="px-1.5 py-0.5 bg-rose-950 border border-rose-600 rounded font-bold text-rose-300">G</kbd> Disembark / Land Jet</span>
+          </div>
+        </div>
+      )}
 
       {/* 2. CENTER RETICLE & PROXIMITY PROMPT */}
       <div className="flex-1 flex flex-col items-center justify-center">
@@ -249,13 +435,17 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
         {/* Proximity Interaction Prompt when approaching an agent */}
         {nearbyAgent && !interactingAgent && (
-          <div className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/60 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 animate-bounce border-2">
+          <div 
+            onClick={() => onInteractWithAgent ? onInteractWithAgent(nearbyAgent.id) : null}
+            className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/80 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 animate-bounce border-2 pointer-events-auto cursor-pointer hover:bg-slate-900/90 transition select-none"
+            title="Press E or click to open 2-Way Live Comms"
+          >
             <div className="flex items-center gap-2.5">
               <span className="w-6 h-6 rounded-lg bg-emerald-500 text-black font-black flex items-center justify-center text-xs shadow-md">
                 E
               </span>
               <span>
-                <strong>2-Way Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong>
+                <strong>2-Way Live Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong>
                 <span 
                   className="ml-2 px-2 py-0.5 rounded text-[10px] font-black uppercase border"
                   style={{
@@ -270,21 +460,29 @@ export const CityHUD: React.FC<CityHUDProps> = ({
               </span>
             </div>
             <div className="h-5 w-px bg-slate-700" />
-            <div className="flex items-center gap-2">
+            <div 
+              className="flex items-center gap-2 hover:opacity-80 transition"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDirectWorkCommand(nearbyAgent.id);
+              }}
+              title="Command this citizen to work immediately (Shortcut: F)"
+            >
               <span className="w-6 h-6 rounded-lg bg-amber-400 text-black font-black flex items-center justify-center text-xs shadow-md">
                 F
               </span>
-              <span className="text-amber-300 font-bold">
-                Make Them Work ([F] Direct Work Order)
+              <span className="text-amber-300 font-bold hover:underline">
+                Make Them Work ([F] Direct Order)
               </span>
             </div>
           </div>
         )}
 
         {/* Pointer Lock Help Banner when not locked */}
-        {!playerState.isPointerLocked && !interactingAgent && !showPublicMissionsModal && (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL') && (
-          <div className="mt-4 bg-slate-900/80 border border-slate-700/60 rounded-lg px-4 py-1.5 text-[11px] text-slate-300">
-            Click screen to lock cursor & explore with W/A/S/D • Space to jump • Shift to sprint
+        {!playerState.isPointerLocked && !interactingAgent && !showPublicMissionsModal && (
+          <div className="mt-4 bg-slate-900/90 border border-slate-700/80 rounded-xl px-5 py-2 text-[11px] text-slate-200 shadow-xl pointer-events-none flex items-center gap-2.5 backdrop-blur">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>Click screen to lock cursor • W/A/S/D to move • [V] 1st/3rd Person View • [E] 2-Way Comms • [G] Private Jet</span>
           </div>
         )}
       </div>
@@ -428,7 +626,53 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                             ? 'bg-blue-600 text-white rounded-tr-none shadow-md shadow-blue-600/20' 
                             : 'bg-slate-900 border border-slate-700/70 text-slate-200 rounded-tl-none shadow-md'
                         }`}>
-                          {msg.text}
+                          <div className="whitespace-pre-wrap">{msg.text}</div>
+
+                          {/* Computer Generated Deliverable Card (3D Presentation / Website / System Artifact) */}
+                          {(msg.deliverableUrl || msg.deliverablePath) && (
+                            <div className="mt-3 p-3 rounded-xl bg-gradient-to-br from-indigo-950/90 via-slate-900 to-blue-950/90 border border-cyan-500/50 shadow-xl shadow-cyan-950/40 text-left">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                                  {msg.deliverableType === '3D_PRESENTATION' ? <Sparkles size={16} /> : <Globe size={16} />}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-[9px] font-mono tracking-wider uppercase text-cyan-400 font-bold block">
+                                    {msg.deliverableType === '3D_PRESENTATION' ? '🪐 Interactive 3D WebGL Presentation' : '🌐 Generated Web Experience'}
+                                  </span>
+                                  <div className="text-xs font-bold text-white truncate">
+                                    {msg.deliverableTitle || 'Generated Deliverable'}
+                                  </div>
+                                </div>
+                              </div>
+                              {msg.deliverablePath && (
+                                <div className="text-[10px] font-mono text-slate-300 bg-black/50 px-2.5 py-1.5 rounded border border-slate-700/60 truncate mb-2.5 select-all">
+                                  📁 {msg.deliverablePath}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                {msg.deliverableUrl && onPreviewDeliverable && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onPreviewDeliverable(msg.deliverableUrl!, msg.deliverableTitle || 'Deliverable', msg.deliverableType || 'HTML')}
+                                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-lg text-[11px] transition shadow-md shadow-cyan-600/30 active:scale-95"
+                                  >
+                                    <Eye size={13} />
+                                    <span>Preview Here</span>
+                                  </button>
+                                )}
+                                {msg.artifactId && onOpenDeliverableOnComputer && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenDeliverableOnComputer(msg.artifactId!)}
+                                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-lg text-[11px] transition shadow-md shadow-indigo-600/30 active:scale-95"
+                                  >
+                                    <ExternalLink size={13} />
+                                    <span>Launch on Desktop</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -444,10 +688,62 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   <button
                     type="button"
-                    onClick={() => handleSendQuickPrompt('What is your current objective and deliverable?')}
-                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] text-slate-300 transition"
+                    onClick={() => handleSendQuickPrompt('What time is it right now on my computer?')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 rounded-lg text-[10px] text-cyan-300 transition flex items-center gap-1"
                   >
-                    💬 "Current objective?"
+                    🕒 "What time is it?"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Is the city functioning well right now?')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500/50 rounded-lg text-[10px] text-emerald-300 transition flex items-center gap-1"
+                  >
+                    🏙️ "City functioning well?"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Make an interactive 3D presentation on Autonomous AI Operating Systems')}
+                    className="px-2.5 py-1 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-700/50 hover:border-indigo-400 rounded-lg text-[10px] text-indigo-200 transition flex items-center gap-1 font-medium"
+                  >
+                    🪐 "Make 3D presentation"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Make a modern responsive website for Cybernetic City Systems')}
+                    className="px-2.5 py-1 bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-700/50 hover:border-cyan-400 rounded-lg text-[10px] text-cyan-200 transition flex items-center gap-1 font-medium"
+                  >
+                    🌐 "Make website"
+                  </button>
+                  {/* Jarvis Computer Access Quick Prompts */}
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Run full Jarvis computer system diagnostics')}
+                    className="px-2.5 py-1 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/50 hover:border-emerald-400 rounded-lg text-[10px] text-emerald-200 transition flex items-center gap-1 font-medium"
+                  >
+                    <Activity size={11} className="text-emerald-400" />
+                    <span>🖥️ "Jarvis Diagnostics"</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Execute powershell command: Get-Process | Select-Object -First 5 Id, ProcessName, CPU')}
+                    className="px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-600/50 hover:border-purple-400 rounded-lg text-[10px] text-purple-200 transition flex items-center gap-1 font-medium"
+                  >
+                    <Terminal size={11} className="text-purple-400" />
+                    <span>⚡ "Run: Get-Process"</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('Launch application: calc')}
+                    className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-600/50 hover:border-amber-400 rounded-lg text-[10px] text-amber-200 transition flex items-center gap-1 font-medium"
+                  >
+                    🚀 "Launch Calc"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendQuickPrompt('List files in current working directory')}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-[10px] text-slate-300 transition flex items-center gap-1"
+                  >
+                    📂 "List Directory"
                   </button>
                   <button
                     type="button"
@@ -462,14 +758,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                     className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-600/50 rounded-lg text-[10px] text-amber-300 font-bold flex items-center gap-1 transition"
                   >
                     <Zap size={11} className="fill-current" />
-                    ⚡ "Make them work now [F]"
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSendQuickPrompt('Pause current work and enter standby state')}
-                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-[10px] text-rose-300 transition"
-                  >
-                    🛑 "Pause work"
+                    ⚡ "Work now [F]"
                   </button>
                 </div>
 
@@ -524,6 +813,26 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                 <div className="space-y-1">
                   <div className="text-[10px] text-slate-500 uppercase">Suggested Task Templates:</div>
                   <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskTitle('Create Interactive 3D WebGL Presentation');
+                        setTaskDeliverable('presentation_3d.html');
+                      }}
+                      className="px-2 py-1 bg-indigo-950/40 hover:bg-indigo-900/60 rounded border border-indigo-700/50 text-[10px] text-indigo-300 font-medium"
+                    >
+                      🪐 + 3D Presentation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaskTitle('Build Responsive Enterprise Website');
+                        setTaskDeliverable('index.html');
+                      }}
+                      className="px-2 py-1 bg-cyan-950/40 hover:bg-cyan-900/60 rounded border border-cyan-700/50 text-[10px] text-cyan-300 font-medium"
+                    >
+                      🌐 + Website
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
@@ -589,6 +898,18 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                         <span className="text-slate-500">{item.completedAt}</span>
                       </div>
                       <div className="text-[10px] text-emerald-400">Result: {item.deliverable}</div>
+                      {onViewArtifact && (
+                        <div className="pt-1 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => onViewArtifact(item.id)}
+                            className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded text-[10px] font-semibold flex items-center gap-1.5 border border-emerald-500/40 transition"
+                          >
+                            <FileCode2 size={12} />
+                            <span>Inspect Deliverable</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -747,6 +1068,78 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4.5 DELIVERABLE ARTIFACT INSPECTOR MODAL */}
+      {activeArtifact && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center pointer-events-auto p-4">
+          <div className="bg-[#090E1A] border border-emerald-500/40 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden text-xs max-h-[85vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#060A13]">
+              <div className="flex items-center gap-2.5">
+                <FileCode2 size={20} className="text-emerald-400" />
+                <div>
+                  <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <span>{activeArtifact.title}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      VERIFIED DELIVERABLE
+                    </span>
+                  </h2>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    File: <span className="text-blue-300">{activeArtifact.relative_path || activeArtifact.file_path}</span> ({activeArtifact.file_size_bytes} bytes) • Agent: <span className="text-amber-300">{activeArtifact.agent_name}</span>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={onCloseArtifact} 
+                className="text-slate-500 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition"
+                aria-label="Close Artifact Inspector"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Verification Status Banner & Content */}
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              <div className="bg-slate-950/80 p-3 rounded-lg border border-slate-800 space-y-1">
+                <div className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1.5">
+                  <ShieldCheck size={13} className="text-emerald-400" />
+                  <span>Execution & Verification Evidence:</span>
+                </div>
+                <div className="text-xs text-emerald-400 font-mono">
+                  ✓ Exit Code: {activeArtifact.verification_exit_code} — {activeArtifact.verification_summary}
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Full Sandboxed Path: {activeArtifact.file_path}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                  <span>Artifact Content / Code Preview:</span>
+                  <span className="text-slate-500 font-mono">{activeArtifact.relative_path.split('.').pop()?.toUpperCase() || 'SOURCE'}</span>
+                </div>
+                <pre className="bg-[#040711] p-4 rounded-xl border border-slate-800 text-slate-200 font-mono text-[11px] overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-96 selection:bg-blue-600/40">
+                  {activeArtifact.content}
+                </pre>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-800 bg-[#060A13] flex items-center justify-between">
+              <div className="text-[10px] text-slate-500">
+                Created At: {activeArtifact.created_at} • Task ID: {activeArtifact.task_id}
+              </div>
+              <button
+                type="button"
+                onClick={onCloseArtifact}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition"
+              >
+                Close Inspector
+              </button>
             </div>
           </div>
         </div>

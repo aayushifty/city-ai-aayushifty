@@ -249,8 +249,24 @@ const SettingsApp: React.FC<{ settings: HudSettings; onChange: (s: HudSettings) 
     try { window.localStorage.setItem('cityai.timeOfDay', v); } catch { /* storage unavailable */ }
     window.dispatchEvent(new Event('cityai:timeofday'));
   };
+  const [graphics, setGraphics] = useState(() => { try { return window.localStorage.getItem('cityai.graphics') || 'medium'; } catch { return 'medium'; } });
+  const pickGraphics = (v: string) => {
+    setGraphics(v);
+    try { window.localStorage.setItem('cityai.graphics', v); } catch { /* storage unavailable */ }
+    window.dispatchEvent(new Event('cityai:graphics'));
+  };
   return (
     <div className="space-y-1">
+      <div className="p-2.5 rounded-xl bg-white/5">
+        <div className="text-[11.5px] text-slate-100 mb-1.5">Graphics</div>
+        <div className="grid grid-cols-3 gap-1">
+          {[['high', 'High'], ['medium', 'Medium'], ['low', 'Low']].map(([v, l]) => (
+            <button key={v} type="button" onClick={() => pickGraphics(v)}
+              className={`py-1.5 rounded-lg text-[10.5px] font-semibold border ${graphics === v ? 'border-amber-300/70 bg-amber-400/15 text-amber-100' : 'border-white/10 text-slate-300 hover:bg-white/5'}`}>{l}</button>
+          ))}
+        </div>
+        <div className="text-[9.5px] text-slate-500 mt-1">High adds ambient occlusion (heavier). Low turns post-processing off.</div>
+      </div>
       <div className="p-2.5 rounded-xl bg-white/5">
         <div className="text-[11.5px] text-slate-100 mb-1.5">Time of day</div>
         <div className="grid grid-cols-2 gap-1">

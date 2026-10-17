@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { Box } from './PlayerController';
 import { Building, Intersection, RoadSegment, Vehicle } from '../../simulation/types';
 import { BLOCK_INNER_HALF, DistrictZone, districtZones } from '../../simulation/districts';
@@ -14,6 +15,40 @@ import { BLOCK_INNER_HALF, DistrictZone, districtZones } from '../../simulation/
 
 const ROAD_W = 5.2;
 const MODEL_BASE = '/models/kenney';
+const PH_BASE = '/textures/polyhaven';
+
+// ------------------------------------------------------------------------------------------------
+// Photo-scanned PBR textures (Poly Haven, CC0)
+
+const texLoaderPBR = new THREE.TextureLoader();
+function loadPBR(name: string, mat: THREE.MeshStandardMaterial, normalScale = 1): void {
+  const load = (suffix: string, srgb: boolean) => texLoaderPBR.loadAsync(`${PH_BASE}/${name}_${suffix}_1k.jpg`).then(t => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    return t;
+  });
+  Promise.all([load('diff', true), load('nor_gl', false), load('rough', false)]).then(([map, normal, rough]) => {
+    mat.map = map;
+    mat.normalMap = normal;
+    mat.normalScale.set(normalScale, normalScale);
+    mat.roughnessMap = rough;
+    mat.roughness = 1;
+    mat.color.set(0xFFFFFF);
+    mat.needsUpdate = true;
+  }).catch(err => console.warn(`PBR texture ${name} not loaded; keeping the procedural one`, err));
+}
+
+let grassMat: THREE.MeshStandardMaterial | null = null;
+/** Shared lawn/hill material: photo-scanned grass (procedural texture until it loads). */
+export function getGrassMaterial(): THREE.MeshStandardMaterial {
+  if (!grassMat) {
+    grassMat = new THREE.MeshStandardMaterial({ map: noiseTexture('#3E6A2B', '#253F18', 256, 6000, 0.35), roughness: 0.97 });
+    grassMat.color.set(0xD8E8C8);   // the scanned grass is bright; keep lawns a natural mid-green
+    loadPBR('leafy_grass', grassMat, 0.8);
+  }
+  return grassMat;
+}
 
 // ------------------------------------------------------------------------------------------------
 // Atmosphere
@@ -24,6 +59,10 @@ export const nightGlow: { material: THREE.MeshStandardMaterial; max: number }[] 
 export interface Atmosphere {
   /** Moves sun/moon, sky, lights, fog and night glow to `hour` (0-24, local time). */
   setHour: (hour: number) => void;
+  /** 0 in daylight .. 1 at night (drives bloom). */
+  night: () => number;
+  /** Called after the lighting changed (also when the photographed sky finishes loading). */
+  onChange: (fn: () => void) => void;
   dispose: () => void;
 }
 
@@ -59,6 +98,18 @@ export function createAtmosphere(
   const pmrem = new THREE.PMREMGenerator(renderer);
   let env: THREE.Texture | null = null;
   let lastEnvHour = -99;
+
+  // Photographed cloudy sky (Poly Haven HDRI) for daytime; the sun light is aimed at the sun in the photo.
+  let hdr: { tex: THREE.Texture; env: THREE.Texture; sunDir: THREE.Vector3 } | null = null;
+  let usingHdr = false;
+  let lastHour = 12;
+  let lastNight = 0;
+  let onChange: (() => void) | null = null;
+  new HDRLoader().loadAsync(`${PH_BASE}/kloofendal_48d_partly_cloudy_puresky_2k.hdr`).then(tex => {
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    hdr = { tex, env: pmrem.fromEquirectangular(tex).texture, sunDir: hdrSunDirection(tex) };
+    setHour(lastHour);
+  }).catch(err => console.warn('HDR sky not loaded; using the procedural sky', err));
   scene.fog = new THREE.Fog(0xAFC6DE, 170, 620);
 
   ambient.intensity = 0.04;
@@ -68,6 +119,7 @@ export function createAtmosphere(
   sun.shadow.normalBias = 0.35;
 
   const setHour = (hour: number) => {
+    lastHour = hour;
     // sunrise 6:00, sunset 18:45; elevation peaks ~62 degrees at midday
     const dayFrac = (hour - 6) / 12.75;
     const elev = Math.sin(dayFrac * Math.PI) * (62 * Math.PI / 180);
@@ -77,6 +129,30 @@ export function createAtmosphere(
     const golden = d * Math.max(0, Math.min(1, 1 - Math.sin(elev) * 2.6));   // low sun
 
     for (const s of [sky, envSky]) s.material.uniforms.sunPosition.value.copy(sunDir);
+
+    // full daylight: switch to the photographed sky
+    const wantHdr = !!hdr && d > 0.6 && golden < 0.25;
+    if (wantHdr && hdr) {
+      usingHdr = true;
+      sky.visible = false;
+      scene.background = hdr.tex;
+      (scene as any).backgroundIntensity = 1.0;
+      (scene as any).environmentIntensity = 0.6;
+      scene.environment = hdr.env;
+      sun.position.copy(hdr.sunDir).multiplyScalar(200);
+      sun.color.set(0xFFF2E0);
+      sun.intensity = 3.6;
+      hemi.color.set(0xC6D8EE);
+      hemi.groundColor.set(0x5B4A38);
+      hemi.intensity = 0.34;
+      renderer.toneMappingExposure = 0.95;
+      (scene.fog as THREE.Fog).color.set(0xBCCFE2);
+      for (const g of nightGlow) g.material.emissiveIntensity = 0;
+      lastNight = 0;
+      onChange?.();
+      return;
+    }
+    if (usingHdr) { usingHdr = false; sky.visible = true; scene.background = null; lastEnvHour = -99; (scene as any).environmentIntensity = 0.38; }
 
     if (d > 0.02) {
       sun.position.copy(sunDir).multiplyScalar(200);
@@ -97,6 +173,7 @@ export function createAtmosphere(
     fog.color.copy(lerpColor(0x0C1222, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
 
     const night = 1 - d;
+    lastNight = night;
     for (const g of nightGlow) g.material.emissiveIntensity = g.max * night;
 
     // reflections follow the sky (re-render the small environment map only when the light changed)
@@ -110,7 +187,9 @@ export function createAtmosphere(
   };
 
   return {
-    setHour,
+    setHour: (h: number) => { setHour(h); onChange?.(); },
+    night: () => lastNight,
+    onChange: (fn: () => void) => { onChange = fn; },
     dispose: () => {
       scene.remove(sky);
       sky.geometry.dispose();
@@ -123,6 +202,30 @@ export function createAtmosphere(
       nightGlow.length = 0;
     },
   };
+}
+
+/** Direction of the brightest texel (the sun) in an equirectangular HDR texture. */
+function hdrSunDirection(tex: THREE.Texture): THREE.Vector3 {
+  const img = tex.image as { data: Uint16Array | Float32Array; width: number; height: number };
+  const half = img.data instanceof Uint16Array;
+  let best = -1, bx = 0, by = 0;
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x += 2) {
+      const i = (y * img.width + x) * 4;
+      const r = half ? THREE.DataUtils.fromHalfFloat(img.data[i] as number) : img.data[i];
+      const g = half ? THREE.DataUtils.fromHalfFloat(img.data[i + 1] as number) : img.data[i + 1];
+      const l = r + g;
+      if (l > best) { best = l; bx = x; by = y; }
+    }
+  }
+  const u = (bx + 0.5) / img.width;
+  let v = (by + 0.5) / img.height;
+  if (tex.flipY) v = 1 - v;
+  const theta = (u - 0.5) * Math.PI * 2;
+  let phi = (0.5 - v) * Math.PI;
+  if (phi < 0) phi = -phi;                       // the sun is always above the horizon in a sky photo
+  phi = Math.max(phi, THREE.MathUtils.degToRad(22));   // keep shadows a sensible length
+  return new THREE.Vector3(Math.cos(phi) * Math.cos(theta), Math.sin(phi), Math.cos(phi) * Math.sin(theta)).normalize();
 }
 
 /** Hour of day for a time-of-day setting ('live' follows this computer's clock). */
@@ -163,6 +266,7 @@ export function getAsphaltMaterial(): THREE.MeshStandardMaterial {
   if (!asphaltMat) {
     const map = noiseTexture('#2B2F36', '#9AA3AF', 256, 5200, 0.22);
     asphaltMat = new THREE.MeshStandardMaterial({ map, color: 0xFFFFFF, roughness: 0.92, metalness: 0.0 });
+    loadPBR('clean_asphalt', asphaltMat, 0.6);
   }
   return asphaltMat;
 }
@@ -257,7 +361,14 @@ export function buildStreetDetail(scene: THREE.Scene, roads: RoadSegment[], inte
     added.push(m);
   };
   lotMesh(concrete, noiseTexture('#8C857B', '#4A453E', 256, 3200, 0.18));
-  lotMesh(grass, noiseTexture('#3E6A2B', '#253F18', 256, 6000, 0.35));
+  if (grass.length) {
+    for (const g of grass) tileUVs(g, BLOCK_INNER_HALF * 2 + 1.4, BLOCK_INNER_HALF * 2 + 1.4, 8);
+    const m = new THREE.Mesh(mergeGeometries(grass), getGrassMaterial());
+    m.receiveShadow = true;
+    grass.forEach(g => g.dispose());
+    scene.add(m);
+    added.push(m);
+  }
   return added;
 }
 
@@ -667,6 +778,9 @@ function districtSign(z: DistrictZone): THREE.Group {
 // Cars
 
 const CAR_SCALE = 1.7;
+const LIGHT_GEO = new THREE.PlaneGeometry(0.22, 0.1);
+const headMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, emissive: 0xFFF3D0, emissiveIntensity: 0, side: THREE.DoubleSide });
+const tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xFF2A1A, emissiveIntensity: 0, side: THREE.DoubleSide });
 const CAR_MODELS: Record<string, string[]> = {
   CAR: ['sedan', 'sedan-sports', 'taxi', 'suv', 'suv-luxury', 'van', 'hatchback-sports', 'sedan', 'taxi', 'police'],
   BUS: ['delivery', 'truck', 'garbage-truck', 'truck-flat'],
@@ -679,17 +793,24 @@ const CAR_MODELS: Record<string, string[]> = {
 export async function loadCarFactory(): Promise<(v: Vehicle, index: number) => THREE.Group> {
   const names = [...new Set(Object.values(CAR_MODELS).flat())];
   const merged = new Map<string, THREE.Mesh>();
+  // (re)register after every atmosphere rebuild: its dispose clears the night-glow list
+  if (!nightGlow.some(g => g.material === headMat)) nightGlow.push({ material: headMat, max: 6 }, { material: tailMat, max: 4 });
   await Promise.all(names.map(async n => {
     const model = await loadModel(`cars/${n}.glb`);
     const geos = model.parts.map(p => p.geometry.clone());
     const geo = mergeGeometries(geos.every(g => g.index) ? geos : geos.map(g => (g.index ? g.toNonIndexed() : g)));
     geos.forEach(g => g.dispose());
     if (!geo) return;
-    const mat = model.parts[0].material as THREE.MeshStandardMaterial;
-    if (mat.isMeshStandardMaterial) mat.envMapIntensity = 0.9;   // a little showroom shine on the paint
-    const mesh = new THREE.Mesh(geo, mat);
+    const src = model.parts[0].material as THREE.MeshStandardMaterial;
+    // clear-coat car paint: glossy reflections like real lacquer
+    const paint = new THREE.MeshPhysicalMaterial({
+      map: src.map, roughness: 0.42, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.2,
+    });
+    const mesh = new THREE.Mesh(geo, paint);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    geo.computeBoundingBox();
+    mesh.userData.box = geo.boundingBox!.clone();
     merged.set(n, mesh);
   }));
   return (v, index) => {
@@ -699,6 +820,17 @@ export async function loadCarFactory(): Promise<(v: Vehicle, index: number) => T
     const body = template.clone();          // shares geometry and material
     body.scale.setScalar(CAR_SCALE);
     body.rotation.y = Math.PI / 2;          // model faces +Z, the vehicle group drives along +X
+    // head/tail lights (emissive, switched on at night by the atmosphere)
+    const box = template.userData.box as THREE.Box3;
+    for (const sx of [-0.45, 0.45]) {
+      const head = new THREE.Mesh(LIGHT_GEO, headMat);
+      head.position.set(sx * (box.max.x - box.min.x) * 0.8, 0.45, box.max.z + 0.01);
+      body.add(head);
+      const tail = new THREE.Mesh(LIGHT_GEO, tailMat);
+      tail.position.set(sx * (box.max.x - box.min.x) * 0.8, 0.5, box.min.z - 0.01);
+      tail.rotation.y = Math.PI;
+      body.add(tail);
+    }
     car.add(body);
     return car;
   };

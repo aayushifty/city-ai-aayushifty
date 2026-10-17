@@ -4,7 +4,7 @@ import { absoluteLink } from '../../../api/client';
 import { LiveMission, PANEL, RUNNING_TASK_STATUSES, statusStyle, useLiveData } from './useCityLiveData';
 
 /** Objective list (top right): real missions from /api/missions with their actual subtask states. */
-export const MissionTracker: React.FC<{ onOpenMissions: () => void }> = ({ onOpenMissions }) => {
+export const MissionTracker: React.FC<{ onOpenMissions: () => void; embedded?: boolean }> = ({ onOpenMissions, embedded }) => {
   const live = useLiveData();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -13,7 +13,7 @@ export const MissionTracker: React.FC<{ onOpenMissions: () => void }> = ({ onOpe
   const shown = [...active.slice(0, 2), ...(active.length < 2 ? finished : [])];
 
   return (
-    <div className={`${PANEL} pointer-events-auto w-[272px] overflow-hidden`}>
+    <div className={embedded ? 'font-sans' : `${PANEL} pointer-events-auto w-[272px] overflow-hidden`}>
       <div className="flex items-center justify-between px-3 py-2">
         <button type="button" onClick={onOpenMissions} className="flex items-center gap-2 text-[11px] font-extrabold tracking-[0.14em] text-amber-300 uppercase hover:text-amber-200" title="Open the mission board [M]">
           <Flag size={13} /> Missions

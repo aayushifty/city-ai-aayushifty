@@ -15,8 +15,10 @@ import {
 import { WorkplaceArchitect } from './WorkplaceArchitect';
 import { createHumanoid, animateHumanoid, ClothingStyle } from './HumanoidBuilder';
 import { buildBoxes, rayToBoxes, stepMovement, TPV_MAX_DIST, TPV_MIN_DIST, WALK_SPEED } from './PlayerController';
-import { buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
+import { buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, getGrassMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
 import { spawnPedestrians } from './CityLife';
+import { createPostFX, readQuality } from './PostFX';
+import { buildBackdrop } from './Backdrop';
 import { batchStatic } from './StaticBatcher';
 
 interface CitySceneProps {
@@ -486,7 +488,13 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     // Physical sky + sun with a real day/night cycle (follows this computer's clock unless the phone's
     // Settings pick a fixed time of day)
+    // Cinematic post-processing (quality from the phone's Settings: high / medium / low)
+    const postfx = createPostFX(renderer, scene, camera, width, height);
+    const onQuality = () => postfx.setQuality(readQuality());
+    window.addEventListener('cityai:graphics', onQuality);
+
     const atmosphere = createAtmosphere(scene, renderer, sun, ambient, hemi);
+    atmosphere.onChange(() => postfx.setNight(atmosphere.night()));
     const readTimeSetting = () => { try { return window.localStorage.getItem('cityai.timeOfDay') || 'live'; } catch { return 'live'; } };
     let timeSetting = readTimeSetting();
     atmosphere.setHour(hourFor(timeSetting));
@@ -494,14 +502,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
     window.addEventListener('cityai:timeofday', onTimeSetting);
     const clockTimer = window.setInterval(() => { if (timeSetting === 'live') atmosphere.setHour(hourFor('live')); }, 60_000);
 
-    // Ground outside the city blocks (blocks get concrete lots in buildStreetDetail)
-    const groundGeo = new THREE.PlaneGeometry(600, 600);
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0x5E6B4C, roughness: 1, metalness: 0 });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    // Landscape: flat under the city, rolling grass hills beyond it, a hazy skyline in the distance
+    const backdrop = buildBackdrop(scene, getGrassMaterial());
 
     // Build Roads & Sidewalks in Clean Daytime Asphalt
     const sidewalkGroup = new THREE.Group();
@@ -1166,7 +1168,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       // frame (moving people and cars still update their shadows 30 times a second).
       shadowFrame = (shadowFrame + 1) % 2;
       renderer.shadowMap.needsUpdate = shadowFrame === 0;
-      renderer.render(scene, camera);
+      postfx.render();
     };
     let shadowFrame = 0;
     renderer.shadowMap.autoUpdate = false;
@@ -1180,6 +1182,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
+      postfx.setSize(w, h);
     };
     window.addEventListener('resize', handleResize);
 
@@ -1202,6 +1205,9 @@ export const CityScene: React.FC<CitySceneProps> = ({
       window.removeEventListener('cityai:timeofday', onTimeSetting);
       window.clearInterval(clockTimer);
       life.dispose();
+      backdrop.dispose();
+      window.removeEventListener('cityai:graphics', onQuality);
+      postfx.dispose();
       atmosphere.dispose();
       agentMeshMap.current.clear();
       agentThoughtMeshMap.current.clear();

@@ -82,23 +82,24 @@ export function useHudNotifications(live: CityLiveData) {
   return { toasts, history, dismiss };
 }
 
-export const NOTICE_META: Record<HudNoticeKind, { Icon: typeof CheckCircle2; color: string; bar: string }> = {
-  verified: { Icon: CheckCircle2, color: 'text-emerald-300', bar: 'bg-emerald-400' },
-  failed: { Icon: XCircle, color: 'text-red-300', bar: 'bg-red-400' },
-  blocked: { Icon: Ban, color: 'text-orange-300', bar: 'bg-orange-400' },
-  started: { Icon: PlayCircle, color: 'text-sky-300', bar: 'bg-sky-400' },
-  approval: { Icon: ShieldAlert, color: 'text-amber-300', bar: 'bg-amber-400' },
-  mission: { Icon: Flag, color: 'text-amber-300', bar: 'bg-amber-400' },
+export const NOTICE_META: Record<HudNoticeKind, { Icon: typeof CheckCircle2; color: string; bar: string; glow: string }> = {
+  verified: { Icon: CheckCircle2, color: 'text-emerald-300', bar: 'bg-emerald-400', glow: 'from-emerald-400' },
+  failed: { Icon: XCircle, color: 'text-red-300', bar: 'bg-red-400', glow: 'from-red-400' },
+  blocked: { Icon: Ban, color: 'text-orange-300', bar: 'bg-orange-400', glow: 'from-orange-400' },
+  started: { Icon: PlayCircle, color: 'text-sky-300', bar: 'bg-sky-400', glow: 'from-sky-400' },
+  approval: { Icon: ShieldAlert, color: 'text-amber-300', bar: 'bg-amber-400', glow: 'from-amber-400' },
+  mission: { Icon: Flag, color: 'text-amber-300', bar: 'bg-amber-400', glow: 'from-amber-400' },
 };
 
 export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compact?: boolean }> = ({ n, onDismiss, compact }) => {
   const meta = NOTICE_META[n.kind];
   return (
-    <div className={`${compact ? 'bg-white/5 rounded-xl' : PANEL} relative overflow-hidden flex gap-2.5 p-2.5 pl-3 pointer-events-auto hud-toast-in`}>
+    <div className={`${compact ? 'bg-white/5 rounded-xl' : 'font-sans bg-gradient-to-r from-black/85 via-black/65 to-black/25 border border-white/10 rounded-md shadow-[0_6px_20px_rgba(0,0,0,.5)]'} relative overflow-hidden flex gap-2.5 p-2.5 pl-3.5 pointer-events-auto hud-toast-in`}>
       <span className={`absolute left-0 top-0 bottom-0 w-1 ${meta.bar}`} />
+      {!compact && <span className={`absolute left-0 top-0 bottom-0 w-24 opacity-25 bg-gradient-to-r ${meta.glow} to-transparent`} />}
       <meta.Icon size={16} className={`${meta.color} shrink-0 mt-0.5`} />
       <div className="min-w-0 flex-1">
-        <div className={`text-[11px] font-bold ${meta.color}`}>{n.title}</div>
+        <div className={`text-[12px] font-extrabold uppercase tracking-wide ${meta.color}`}>{n.title}</div>
         <div className="text-[11px] text-slate-200 leading-snug line-clamp-2">{n.body}</div>
         {n.url && (
           <a href={absoluteLink(n.url)} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200">
@@ -115,7 +116,7 @@ export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compac
 };
 
 export const NotificationFeed: React.FC<{ toasts: HudNotice[]; onDismiss: (id: string) => void }> = ({ toasts, onDismiss }) => (
-  <div className="flex flex-col-reverse gap-2 w-[min(300px,calc(100vw-32px))]">
+  <div className="flex flex-col-reverse gap-2 w-[min(340px,calc(100vw-32px))]">
     {toasts.map(n => <NoticeCard key={n.id} n={n} onDismiss={() => onDismiss(n.id)} />)}
   </div>
 );

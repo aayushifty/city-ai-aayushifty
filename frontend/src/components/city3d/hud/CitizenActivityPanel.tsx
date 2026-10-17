@@ -6,7 +6,7 @@ import { BUSY_CITIZEN_STATUSES, LiveCitizen, PANEL, statusStyle, useLiveData } f
  * Who is doing what, from /api/agents. Collapsed it lists only citizens with work in progress;
  * expanded it lists all 15. Clicking a citizen opens 2-way comms with them.
  */
-export const CitizenActivityPanel: React.FC<{ onSelectCitizen: (id: string) => void }> = ({ onSelectCitizen }) => {
+export const CitizenActivityPanel: React.FC<{ onSelectCitizen: (id: string) => void; embedded?: boolean }> = ({ onSelectCitizen, embedded }) => {
   const live = useLiveData();
   const [showAll, setShowAll] = useState(false);
   const [hidden, setHidden] = useState(false);
@@ -16,7 +16,7 @@ export const CitizenActivityPanel: React.FC<{ onSelectCitizen: (id: string) => v
   const list = (showAll ? [...live.citizens] : busy).sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
 
   return (
-    <div className={`${PANEL} pointer-events-auto w-[248px] overflow-hidden`}>
+    <div className={embedded ? 'font-sans' : `${PANEL} pointer-events-auto w-[248px] overflow-hidden`}>
       <div className="flex items-center justify-between px-3 py-2">
         <button type="button" onClick={() => setHidden(h => !h)} className="flex items-center gap-2 text-[11px] font-extrabold tracking-[0.14em] uppercase text-cyan-300 hover:text-cyan-200">
           <Users size={13} /> Citizens

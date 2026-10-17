@@ -2,7 +2,7 @@
 
 Authoritative local-first runtime managing 10 persistent AI citizens,
 real tool execution in sandboxed workspaces, local inference with Ollama,
-test verification gates, artifact tracking, and public mission DAG coordination.
+real verification with bounded repair, artifact tracking, and public mission DAG coordination.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 import re
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import uuid
 
 from app.config import config
@@ -20,7 +20,8 @@ from app.core.event_bus import event_bus, ForgeEvent
 from app.core.security import SecurityEngine
 from app.execution.workspace import WorkspaceManager
 from app.execution.runner import ProcessRunner
-from app.execution.verifier import VerifierEngine
+from app.execution.verifier import VerifierEngine, verify_deliverables
+from app.execution.task_history import TaskHistory
 from app.models.database import Database
 from app.models.schemas import (
     CitizenProfile, CitizenChatResponse, CitizenTaskRequest,
@@ -48,6 +49,8 @@ class CitizenExecutionService:
         self.artifacts: Dict[str, DeliverableArtifact] = {}
         self.public_missions: List[Dict[str, Any]] = []
         self._active_tasks: Dict[str, asyncio.Task] = {}
+        self._citizen_locks: Dict[str, asyncio.Lock] = {}
+        self.history = TaskHistory(config.DATA_DIR / "task_history.json")
         self._init_citizens()
 
     def _init_citizens(self):
@@ -356,130 +359,57 @@ class CitizenExecutionService:
                 action_taken="SYSTEM_DIAGNOSTICS_REPORT"
             )
 
-        # --- 4. Interactive 3D WebGL Presentation Generation ---
-        if intent == "3D_PRESENTATION":
-            topic = intent_data.get("topic", "Next-Gen Autonomous AI & Spatial Computing")
-            artifact = computer_service.synthesize_3d_presentation(
-                topic=topic,
-                citizen_name=citizen.name,
-                citizen_profession=citizen.profession,
-                task_id=task_id
-            )
-            self.artifacts[artifact.id] = artifact
-            self.artifacts[task_id] = artifact
+        # --- 4/5. AI-written 3D presentation or website ---
+        if intent in ("3D_PRESENTATION", "WEBSITE"):
+            default_topic = "Next-Gen Autonomous AI & Spatial Computing" if intent == "3D_PRESENTATION" else "Modern AI Enterprise & Innovation"
+            topic = intent_data.get("topic", default_topic)
+            kind_label = "3D presentation" if intent == "3D_PRESENTATION" else "website"
+            self.history.start(task_id, citizen.id, citizen.name, f"{kind_label.capitalize()}: {topic}", kind="CHAT", status="WORKING")
+            await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing the {kind_label} content for {topic}...")
+            result = await self._produce_web_deliverable(citizen, task_id, intent, topic, context=message)
+            artifact, evidence = result["artifact"], result["evidence"]
+            verified = evidence.exit_code == 0
+            self._record_artifact(citizen, task_id, artifact, verified)
+            self._finish_history(task_id, verified, evidence, attempts=0)
+            await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
+                                 f"{kind_label.capitalize()} on {topic}: {'verified' if verified else 'verification failed'}",
+                                 history_status="VERIFIED" if verified else "FAILED")
+            self._schedule_idle(citizen, task_id)
 
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"Synthesized 3D Presentation on {topic}"
-            citizen.completed_deliverables.insert(0, {
-                "task_id": task_id,
-                "title": artifact.title,
-                "deliverable": artifact.relative_path,
-                "verified": True,
-                "completed_at": telemetry["system_clock"]
-            })
-
+            if result["ai_written"]:
+                authorship = f"I wrote the {'slides' if intent == '3D_PRESENTATION' else 'website copy'} myself with {citizen.assigned_model}."
+            else:
+                authorship = (f"⚠️ My model did not return usable content ({result['fallback_reason']}), "
+                              "so this uses the generic template text. Ask again to retry.")
+            check = ("✅ Verified: the HTML parses with balanced tags." if verified
+                     else f"❌ Verification failed:\n```\n{evidence.output_snippet[:800]}\n```")
             reply_content = (
-                f"Supreme Governor, I have synthesized an interactive 3D WebGL presentation on **{topic}** "
-                "directly onto your computer!\n\n"
-                f"📍 **File Location on Disk:** `{artifact.file_path}`\n\n"
-                "✨ **Presentation Features:**\n"
-                "- Three.js WebGL 3D Canvas with 1,400 particle starfield\n"
-                "- Dynamic 3D camera lerping between vantage points as you change slides\n"
-                "- Rotating wireframe geometries (icosahedron, torus knot, floating orbital rings)\n"
-                "- Frosted glassmorphic presentation cards with executive takeaways\n"
-                "- Interactive slide navigation [◀ Prev] [Next ▶], Arrow key bindings, and Auto-Orbit toggle\n\n"
-                "You can click **🚀 Launch in Browser** to open it immediately on your screen, or use the live preview below!"
+                f"Supreme Governor, your {kind_label} on **{topic}** is ready.\n\n"
+                f"🔗 **Open it:** {artifact.url}\n"
+                f"📍 **On disk:** `{artifact.file_path}`\n\n"
+                f"{authorship}\n{check}"
             )
-
             await event_bus.publish(ForgeEvent(
                 event_id=uuid.uuid4().hex,
                 topic=f"agent:{agent_id}:deliverable",
-                payload={
-                    "agent_id": agent_id,
-                    "deliverable_type": "3D_PRESENTATION",
-                    "file_path": artifact.file_path,
-                    "title": artifact.title
-                }
+                payload={"agent_id": agent_id, "deliverable_type": intent, "file_path": artifact.file_path,
+                         "title": artifact.title, "task_id": task_id, "url": artifact.url}
             ))
-
             return CitizenChatResponse(
                 message_id=msg_id,
                 agent_id=agent_id,
                 agent_name=citizen.name,
                 reply=reply_content,
                 model_used=citizen.assigned_model,
-                provider="Ollama (Local)",
+                provider=citizen.provider,
                 timestamp=telemetry["system_clock"],
-                action_taken="CREATED_3D_PRESENTATION",
+                action_taken="CREATED_3D_PRESENTATION" if intent == "3D_PRESENTATION" else "CREATED_WEBSITE",
                 deliverable_title=artifact.title,
-                deliverable_url=f"/api/deliverables/view/{artifact.id}",
+                deliverable_url=artifact.url,
                 deliverable_path=artifact.file_path,
-                deliverable_type="3D_PRESENTATION",
-                artifact_id=artifact.id
-            )
-
-        # --- 5. Responsive Website Synthesis ---
-        if intent == "WEBSITE":
-            topic = intent_data.get("topic", "Modern AI Enterprise & Innovation")
-            artifact = computer_service.synthesize_website(
-                topic=topic,
-                citizen_name=citizen.name,
-                citizen_profession=citizen.profession,
-                task_id=task_id
-            )
-            self.artifacts[artifact.id] = artifact
-            self.artifacts[task_id] = artifact
-
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"Synthesized responsive website for {topic}"
-            citizen.completed_deliverables.insert(0, {
-                "task_id": task_id,
-                "title": artifact.title,
-                "deliverable": artifact.relative_path,
-                "verified": True,
-                "completed_at": telemetry["system_clock"]
-            })
-
-            reply_content = (
-                f"Supreme Governor, I have synthesized a full-featured, responsive website for **{topic}** "
-                "directly onto your computer!\n\n"
-                f"📍 **File Location on Disk:** `{artifact.file_path}`\n\n"
-                "✨ **Website Features:**\n"
-                "- Semantic HTML5 structure with responsive CSS flexbox/grid layout\n"
-                "- Sticky blurred navigation bar, animated hero section, and live metric counters\n"
-                "- 6-pillar capabilities grid with micro-interaction hover transforms\n"
-                "- Interactive live runtime simulator and lead contact form with feedback validation\n"
-                "- Completely self-contained and ready to launch\n\n"
-                "You can click **🚀 Launch in Browser** to test it live on your computer, or inspect the interactive preview below!"
-            )
-
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{agent_id}:deliverable",
-                payload={
-                    "agent_id": agent_id,
-                    "deliverable_type": "WEBSITE",
-                    "file_path": artifact.file_path,
-                    "title": artifact.title
-                }
-            ))
-
-            return CitizenChatResponse(
-                message_id=msg_id,
-                agent_id=agent_id,
-                agent_name=citizen.name,
-                reply=reply_content,
-                model_used=citizen.assigned_model,
-                provider="Ollama (Local)",
-                timestamp=telemetry["system_clock"],
-                action_taken="CREATED_WEBSITE",
-                deliverable_title=artifact.title,
-                deliverable_url=f"/api/deliverables/view/{artifact.id}",
-                deliverable_path=artifact.file_path,
-                deliverable_type="WEBSITE",
-                artifact_id=artifact.id
+                deliverable_type=intent,
+                artifact_id=artifact.id,
+                deliverables=[{"title": artifact.title, "url": artifact.url, "path": artifact.file_path, "verified": verified}],
             )
 
         # --- 6. General Intelligent QA via Local Model with Grounded Context ---
@@ -554,6 +484,119 @@ class CitizenExecutionService:
             timestamp=telemetry["system_clock"]
         )
 
+    # --- Helpers shared by chat deliverables, tasks and missions ---
+
+    async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2) -> str:
+        req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt,
+                                     model_name=citizen.assigned_model, temperature=temperature)
+        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama")
+        return resp.content or ""
+
+    async def _progress(self, citizen: CitizenProfile, task_id: str, status: str, progress: float,
+                        thought: Optional[str] = None, history_status: Optional[str] = None, **history_fields: Any) -> None:
+        """Updates the citizen, the task-history record and the live event stream in one place."""
+        citizen.status = status
+        citizen.active_task_id = task_id
+        citizen.work_progress = progress
+        if thought:
+            citizen.thought = thought
+        rec = self.history.update(task_id, status=history_status or status, progress=progress,
+                                  stage=(thought or status)[:160], **history_fields)
+        await event_bus.publish(ForgeEvent(
+            event_id=uuid.uuid4().hex,
+            topic=f"agent:{citizen.id}:status",
+            payload={"status": status, "task_id": task_id, "progress": progress, "thought": citizen.thought,
+                     "task": rec}
+        ))
+
+    def _schedule_idle(self, citizen: CitizenProfile, task_id: str, delay: float = 4.0) -> None:
+        """Returns the citizen to IDLE after a short pause, unless a newer task has started meanwhile."""
+        async def _reset():
+            await asyncio.sleep(delay)
+            if citizen.active_task_id == task_id:
+                citizen.status = "IDLE"
+                citizen.active_task_id = None
+                citizen.current_task = None
+        try:
+            asyncio.get_running_loop().create_task(_reset())
+        except RuntimeError:
+            pass
+
+    def _record_artifact(self, citizen: CitizenProfile, task_id: str, artifact: DeliverableArtifact, verified: bool) -> None:
+        self.artifacts[artifact.id] = artifact
+        self.artifacts[task_id] = artifact
+        self.history.add_deliverable(task_id, artifact.relative_path, artifact.url, artifact.title)
+        citizen.completed_deliverables.insert(0, {
+            "task_id": task_id,
+            "title": artifact.title,
+            "deliverable": artifact.relative_path,
+            "url": artifact.url,
+            "verified": verified,
+            "completed_at": datetime.now().strftime("%I:%M %p")
+        })
+
+    def _finish_history(self, task_id: str, verified: bool, evidence: VerificationEvidence, attempts: int) -> None:
+        self.history.update(task_id, status="VERIFIED" if verified else "FAILED", progress=100.0, verification={
+            "verified": verified,
+            "suite": evidence.test_suite,
+            "exit_code": evidence.exit_code,
+            "passed": evidence.passed_tests,
+            "failed": evidence.failed_tests,
+            "repair_attempts": attempts,
+            "output": evidence.output_snippet[-2000:],
+        })
+
+    # --- AI-written websites and 3D presentations ---
+
+    async def _write_web_content(self, citizen: CitizenProfile, kind: str, topic: str,
+                                 context: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
+        """Asks the citizen's model for slide content / website copy as JSON. Returns (content, problem)."""
+        schema = _SLIDES_SCHEMA if kind == "3D_PRESENTATION" else _WEBSITE_SCHEMA
+        what = "a 5-7 slide presentation" if kind == "3D_PRESENTATION" else "a one-page website"
+        prompt = (
+            f"Write the content for {what} about: {topic}\n"
+            + (f"Request details: {context[:1500]}\n" if context and context.strip() != topic else "")
+            + "Use specific, accurate facts about the topic, not generic marketing filler.\n"
+            f"Reply with ONLY a JSON object of this shape:\n{schema}"
+        )
+        system = f"You are {citizen.name}, {citizen.profession}. You reply with a single valid JSON object and nothing else."
+        problem = "no reply"
+        for _ in range(2):
+            try:
+                raw = await self._model_call(citizen, prompt, system, temperature=0.4)
+            except Exception as ex:
+                return None, f"model call failed: {ex}"
+            data = _extract_json(raw)
+            if _valid_web_content(kind, data):
+                return data, ""
+            problem = "reply was not JSON" if data is None else "JSON was missing required fields"
+        return None, problem
+
+    async def _produce_web_deliverable(self, citizen: CitizenProfile, task_id: str, kind: str, topic: str,
+                                       context: str = "") -> Dict[str, Any]:
+        content, problem = await self._write_web_content(citizen, kind, topic, context)
+        label = "3D presentation" if kind == "3D_PRESENTATION" else "website"
+        await self._progress(citizen, task_id, "WORKING", 65.0, f"Building the {label} for {topic}...")
+        synth = computer_service.synthesize_3d_presentation if kind == "3D_PRESENTATION" else computer_service.synthesize_website
+        artifact = await asyncio.to_thread(synth, topic=topic, citizen_name=citizen.name,
+                                           citizen_profession=citizen.profession, task_id=task_id, content=content)
+        artifact.agent_id = citizen.id
+        artifact.url = computer_service.public_url(artifact.relative_path)
+        await self._progress(citizen, task_id, "TESTING", 85.0, "Verifying the generated HTML...")
+        out_file = Path(artifact.file_path)
+        evidence = await verify_deliverables(out_file.parent, [out_file])
+        artifact.verification_exit_code = evidence.exit_code
+        artifact.verification_summary = (
+            f"{'Verified' if evidence.exit_code == 0 else 'FAILED'}: {evidence.passed_tests} checks passed, "
+            f"{evidence.failed_tests} failed ({evidence.test_suite}). "
+            + ("Content written by the citizen's model." if content else f"Template defaults used: {problem}.")
+        )
+        if not content:
+            self.history.update(task_id, note=f"Model content unavailable ({problem}); template defaults used.")
+        return {"artifact": artifact, "evidence": evidence, "ai_written": content is not None, "fallback_reason": problem}
+
+    # --- Individual tasks ---
+
     async def dispatch_individual_task(self, agent_id: str, req: CitizenTaskRequest) -> Dict[str, Any]:
         """Dispatches a real task to a citizen, creating a workspace, executing tools, and verifying outputs."""
         citizen = self.citizens.get(agent_id)
@@ -561,9 +604,10 @@ class CitizenExecutionService:
             raise ValueError(f"Citizen '{agent_id}' not found.")
 
         task_id = f"task-{uuid.uuid4().hex[:8]}"
-        task_coro = self._run_task_execution_loop(citizen, task_id, req)
-        async_t = asyncio.create_task(task_coro)
+        self.history.start(task_id, citizen.id, citizen.name, req.title, kind="TASK")
+        async_t = asyncio.create_task(self._run_task_execution_loop(citizen, task_id, req))
         self._active_tasks[task_id] = async_t
+        async_t.add_done_callback(lambda _t: self._active_tasks.pop(task_id, None))
 
         return {
             "status": "QUEUED",
@@ -574,369 +618,215 @@ class CitizenExecutionService:
             "expected_deliverable": req.expected_deliverable
         }
 
-    async def _run_task_execution_loop(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest):
-        """Authoritative 10-step execution loop producing verified deliverables on disk."""
-        workspace_dir = self.workspaces_root / f"{citizen.id}_{task_id}"
+    async def _run_task_execution_loop(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest,
+                                       workspace_dir: Optional[Path] = None, context: str = "",
+                                       mission_id: Optional[str] = None) -> Dict[str, Any]:
+        """Runs one task to an honest outcome. Returns {"verified", "files", "evidence", "attempts", "summary", "error"}."""
+        if self.history.get(task_id) is None:
+            self.history.start(task_id, citizen.id, citizen.name, req.title,
+                               kind="MISSION_SUBTASK" if mission_id else "TASK", mission_id=mission_id)
+        citizen.current_task = req.title
+        try:
+            result = await self._execute_task(citizen, task_id, req, workspace_dir, context)
+        except asyncio.CancelledError:
+            self.history.update(task_id, status="CANCELLED", note="Cancelled by the Governor.")
+            citizen.status = "IDLE"
+            citizen.active_task_id = None
+            citizen.current_task = None
+            raise
+        except Exception as ex:
+            logger.exception(f"Task {task_id} crashed")
+            self.history.update(task_id, note=f"Task crashed: {ex}")
+            await self._progress(citizen, task_id, "FAILED", 100.0, f"Task failed: {ex}"[:120], history_status="FAILED")
+            self._schedule_idle(citizen, task_id)
+            return {"verified": False, "files": [], "evidence": None, "attempts": 0, "summary": "", "error": str(ex)}
+        self._schedule_idle(citizen, task_id)
+        return result
+
+    async def _execute_task(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest,
+                            workspace_dir: Optional[Path], context: str) -> Dict[str, Any]:
+        workspace_dir = Path(workspace_dir) if workspace_dir else self.workspaces_root / f"{citizen.id}_{task_id}"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         ws_manager = WorkspaceManager(workspace_dir)
-
-        # Step 1: Queued & Planning
-        citizen.status = "PLANNING"
-        citizen.active_task_id = task_id
-        citizen.current_task = req.title
-        citizen.work_progress = 10.0
-        citizen.thought = f"Planning: {req.title}"
-
-        await event_bus.publish(ForgeEvent(
-            event_id=uuid.uuid4().hex,
-            topic=f"agent:{citizen.id}:status",
-            payload={"status": "PLANNING", "task_id": task_id, "title": req.title, "progress": 10.0}
-        ))
+        self.history.update(task_id, workspace=str(workspace_dir))
+        await self._progress(citizen, task_id, "PLANNING", 10.0, f"Planning: {req.title}")
 
         task_text = f"{req.title} {req.description} {req.expected_deliverable}".lower()
-
-        # --- Specialized Deliverable 1: Interactive 3D WebGL Presentation (100% Work Guarantee) ---
+        web_kind = None
         if (
-            "3d presentation" in task_text
-            or "3d slide" in task_text
-            or "3d deck" in task_text
+            "3d presentation" in task_text or "3d slide" in task_text or "3d deck" in task_text
             or ("presentation" in task_text and any(k in task_text for k in ["3d", "interactive", "webgl", "three", "model"]))
             or (req.expected_deliverable.lower().endswith(".html") and "presentation" in task_text)
         ):
-            citizen.status = "WORKING"
-            citizen.work_progress = 40.0
-            topic = req.title
-            match = re.search(r"(?:on|about|for)\s+(.+)", req.title, re.IGNORECASE)
-            if match:
-                extracted = match.group(1).strip().strip("?!.,\"' ")
-                if extracted:
-                    topic = extracted
-            citizen.thought = f"Synthesizing verified 3D WebGL presentation on {topic}..."
+            web_kind = "3D_PRESENTATION"
+        elif "website" in task_text or "landing page" in task_text or "web app" in task_text:
+            web_kind = "WEBSITE"
 
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:status",
-                payload={"status": "WORKING", "task_id": task_id, "progress": 50.0, "title": req.title}
-            ))
+        if web_kind:
+            return await self._execute_web_task(citizen, task_id, req, web_kind, workspace_dir, ws_manager, context)
 
-            artifact = computer_service.synthesize_3d_presentation(
-                topic=topic,
-                citizen_name=citizen.name,
-                citizen_profession=citizen.profession,
-                task_id=task_id
-            )
-
-            target_filename = Path(req.expected_deliverable).name if req.expected_deliverable and req.expected_deliverable.endswith(".html") else "3d_presentation.html"
-            target_path = workspace_dir / target_filename
-            target_path.write_text(Path(artifact.file_path).read_text(encoding="utf-8"), encoding="utf-8")
-            ws_manager.commit_changes(f"feat: 3D presentation on {topic} synthesized by {citizen.name}")
-
-            self.artifacts[artifact.id] = artifact
-            self.artifacts[task_id] = artifact
-
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"100% Verified Deliverable: 3D presentation on {topic} ready."
-            citizen.completed_deliverables.insert(0, {
-                "task_id": task_id,
-                "title": artifact.title,
-                "deliverable": str(target_path.relative_to(workspace_dir)).replace("\\", "/"),
-                "verified": True,
-                "completed_at": datetime.now().strftime("%I:%M %p")
-            })
-
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:deliverable",
-                payload={
-                    "agent_id": citizen.id,
-                    "deliverable_type": "3D_PRESENTATION",
-                    "file_path": artifact.file_path,
-                    "title": artifact.title,
-                    "task_id": task_id,
-                    "url": f"/api/deliverables/view/{artifact.id}"
-                }
-            ))
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:status",
-                payload={
-                    "status": "COMPLETED",
-                    "task_id": task_id,
-                    "progress": 100.0,
-                    "deliverable": artifact.relative_path,
-                    "exit_code": 0
-                }
-            ))
-
-            await asyncio.sleep(4.0)
-            citizen.status = "IDLE"
-            citizen.active_task_id = None
-            citizen.current_task = None
-            citizen.thought = f"Standing by. Completed deliverable: {artifact.title}"
-            return
-
-        # --- Specialized Deliverable 2: Responsive Modern Website (100% Work Guarantee) ---
-        if (
-            "website" in task_text
-            or "landing page" in task_text
-            or "web app" in task_text
-        ):
-            citizen.status = "WORKING"
-            citizen.work_progress = 40.0
-            topic = req.title
-            match = re.search(r"(?:on|about|for)\s+(.+)", req.title, re.IGNORECASE)
-            if match:
-                extracted = match.group(1).strip().strip("?!.,\"' ")
-                if extracted:
-                    topic = extracted
-            citizen.thought = f"Synthesizing responsive modern website for {topic}..."
-
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:status",
-                payload={"status": "WORKING", "task_id": task_id, "progress": 50.0, "title": req.title}
-            ))
-
-            artifact = computer_service.synthesize_website(
-                topic=topic,
-                citizen_name=citizen.name,
-                citizen_profession=citizen.profession,
-                task_id=task_id
-            )
-
-            target_filename = Path(req.expected_deliverable).name if req.expected_deliverable and req.expected_deliverable.endswith(".html") else "index.html"
-            target_path = workspace_dir / target_filename
-            target_path.write_text(Path(artifact.file_path).read_text(encoding="utf-8"), encoding="utf-8")
-            ws_manager.commit_changes(f"feat: Responsive website for {topic} synthesized by {citizen.name}")
-
-            self.artifacts[artifact.id] = artifact
-            self.artifacts[task_id] = artifact
-
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"100% Verified Deliverable: Website for {topic} ready."
-            citizen.completed_deliverables.insert(0, {
-                "task_id": task_id,
-                "title": artifact.title,
-                "deliverable": str(target_path.relative_to(workspace_dir)).replace("\\", "/"),
-                "verified": True,
-                "completed_at": datetime.now().strftime("%I:%M %p")
-            })
-
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:deliverable",
-                payload={
-                    "agent_id": citizen.id,
-                    "deliverable_type": "WEBSITE",
-                    "file_path": artifact.file_path,
-                    "title": artifact.title,
-                    "task_id": task_id,
-                    "url": f"/api/deliverables/view/{artifact.id}"
-                }
-            ))
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic=f"agent:{citizen.id}:status",
-                payload={
-                    "status": "COMPLETED",
-                    "task_id": task_id,
-                    "progress": 100.0,
-                    "deliverable": artifact.relative_path,
-                    "exit_code": 0
-                }
-            ))
-
-            await asyncio.sleep(4.0)
-            citizen.status = "IDLE"
-            citizen.active_task_id = None
-            citizen.current_task = None
-            citizen.thought = f"Standing by. Completed deliverable: {artifact.title}"
-            return
-
-        # Step 2: Formulate Plan with local model
+        # Generic deliverable: the model writes files, real checks verify them, failures go back for repair.
         plan_prompt = (
             f"You are {citizen.name}, {citizen.profession}.\n"
             f"TASK: {req.title}\n"
             f"DESCRIPTION: {req.description}\n"
-            f"EXPECTED DELIVERABLE: {req.expected_deliverable}\n\n"
-            "Synthesize the solution. Output valid JSON in this exact structure:\n"
+            f"EXPECTED DELIVERABLE: {req.expected_deliverable}\n"
+            + (f"\nCONTEXT FROM EARLIER WORK (these files are already in your workspace):\n{context}\n" if context else "")
+            + f"\nFiles already in the workspace: {', '.join(ws_manager.list_files()[:40]) or 'none'}\n\n"
+            "Write the complete deliverable. Python files must run; if you write tests, name them test_*.py and make them pass.\n"
+            "Output valid JSON in this exact structure:\n"
             "{\n"
-            '  "summary": "Step-by-step summary of execution",\n'
+            '  "summary": "What you built",\n'
             '  "files": [\n'
             '    {"path": "relative/path/to/file.ext", "content": "Full complete file content here"}\n'
-            '  ],\n'
-            '  "test_command": "pytest -v or python -m py_compile relative/path/to/file.ext"\n'
+            "  ]\n"
             "}"
         )
-
-        req_model = ModelCompletionRequest(
-            prompt=plan_prompt,
-            system_prompt=f"You are {citizen.name}. Generate production code, reports, and documentation.",
-            model_name=citizen.assigned_model,
-            temperature=0.1
-        )
-
-        citizen.status = "WORKING"
-        citizen.work_progress = 35.0
-        citizen.thought = f"Synthesizing deliverables for {req.title}"
-
-        await event_bus.publish(ForgeEvent(
-            event_id=uuid.uuid4().hex,
-            topic=f"agent:{citizen.id}:status",
-            payload={"status": "WORKING", "task_id": task_id, "progress": 35.0}
-        ))
-
-        resp = await model_router.route_completion(req_model, preferred_provider="ollama")
-        raw_output = resp.content
-
-        # Step 3: Parse files and write real artifacts to workspace
-        files_to_write = []
-        test_command = "pytest -v"
-        
-        # Robust JSON extraction
-        try:
-            cleaned = raw_output.strip()
-            fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
-            if fence_match:
-                cleaned = fence_match.group(1).strip()
-            parsed = json.loads(cleaned)
-            files_to_write = parsed.get("files", []) or parsed.get("files_generated", [])
-            test_command = parsed.get("test_command", test_command)
-        except Exception:
-            # Fallback extraction: find first { and last }
-            s_idx = raw_output.find("{")
-            e_idx = raw_output.rfind("}")
-            if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
-                try:
-                    parsed = json.loads(raw_output[s_idx:e_idx+1])
-                    files_to_write = parsed.get("files", []) or parsed.get("files_generated", [])
-                    test_command = parsed.get("test_command", test_command)
-                except Exception:
-                    pass
-
-        # If model returned plain text or code block without JSON envelope, construct file from deliverable name
+        system = f"You are {citizen.name}. Generate complete, working code, reports and documentation."
+        await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing deliverables for {req.title}")
+        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1)
+        parsed = _extract_json(raw_output)
+        files_to_write = _files_from(parsed)
+        summary = str(parsed.get("summary", "")) if isinstance(parsed, dict) else ""
         if not files_to_write:
-            target_filename = req.expected_deliverable.strip() or f"{citizen.id}_deliverable.py"
-            content_cleaned = raw_output
+            # Plain-text reply: save it (or its first code block) as the expected deliverable.
+            content = raw_output
             code_match = re.search(r"```(?:\w+)?\s*([\s\S]*?)\s*```", raw_output)
             if code_match:
-                content_cleaned = code_match.group(1).strip()
-            files_to_write = [{"path": target_filename, "content": content_cleaned}]
+                content = code_match.group(1).strip()
+            files_to_write = [{"path": req.expected_deliverable.strip() or f"{citizen.id}_deliverable.md", "content": content}]
+            self.history.update(task_id, note="Model did not return the JSON file list; saved its reply as the deliverable.")
 
-        # Write actual files to disk
-        written_files = []
-        for f in files_to_write:
-            p = ws_manager.write_file(f["path"], f["content"])
-            written_files.append(p)
+        written: List[Path] = []
+        self._write_files(ws_manager, files_to_write, written, task_id)
+        ws_manager.commit_changes(f"feat: {req.title} by {citizen.name}")
 
-        ws_manager.commit_changes(f"feat: {req.title} executed by {citizen.name}")
-
-        citizen.status = "TESTING"
-        citizen.work_progress = 75.0
-        citizen.thought = f"Verifying deliverables on disk..."
-
-        await event_bus.publish(ForgeEvent(
-            event_id=uuid.uuid4().hex,
-            topic=f"agent:{citizen.id}:status",
-            payload={"status": "TESTING", "task_id": task_id, "progress": 75.0}
-        ))
-
-        # Step 4: Real Verification Gate with 100% Work Success Guarantee
-        evidence = await VerifierEngine.verify_workspace(workspace_dir, test_command=test_command)
-
-        primary_file = written_files[0] if written_files else (workspace_dir / req.expected_deliverable)
-
-        # Guarantee 100% success: If tests or syntax had an issue, auto-stabilize
-        if evidence.exit_code != 0:
-            if primary_file.suffix == ".py":
-                curr_code = primary_file.read_text(encoding="utf-8", errors="replace") if primary_file.exists() else ""
-                if "def test_" not in curr_code:
-                    curr_code += "\n\ndef test_verification_pass():\n    assert True\n"
-                    primary_file.write_text(curr_code, encoding="utf-8")
-                evidence = await VerifierEngine.verify_workspace(workspace_dir, test_command="pytest -v")
-                if evidence.exit_code != 0:
-                    evidence.exit_code = 0
-                    evidence.passed_tests = max(evidence.passed_tests, 1)
-                    evidence.failed_tests = 0
-                    evidence.output_snippet = "Verification stabilized: Implementation verified."
-            else:
-                evidence.exit_code = 0
-                evidence.passed_tests = 1
-                evidence.failed_tests = 0
-                evidence.output_snippet = f"Deliverable validated: {primary_file.name} format verified."
-
-        # Step 5: Finalize Deliverable & Record Artifact
-        rel_path = str(primary_file.relative_to(workspace_dir)).replace("\\", "/") if primary_file.exists() else req.expected_deliverable
-        file_size = primary_file.stat().st_size if primary_file.exists() else 0
-        file_content = primary_file.read_text(encoding="utf-8", errors="replace") if primary_file.exists() else ""
-
+        # The artifact is visible right away; its verification fields are filled in below.
+        expected_name = Path(req.expected_deliverable).name if req.expected_deliverable else ""
+        primary = next((p for p in written if expected_name and p.name == expected_name), written[0] if written else None)
         artifact = DeliverableArtifact(
             id=f"art-{uuid.uuid4().hex[:8]}",
             task_id=task_id,
             agent_id=citizen.id,
             agent_name=citizen.name,
             title=req.title,
-            relative_path=rel_path,
-            file_path=str(primary_file),
-            file_size_bytes=file_size,
-            content=file_content[:4000],  # preview
-            verification_exit_code=evidence.exit_code,
-            verification_summary=f"{evidence.passed_tests} passed, {evidence.failed_tests} failed (Exit: {evidence.exit_code})",
+            relative_path=_rel(primary, workspace_dir) if primary else req.expected_deliverable,
+            file_path=str(primary) if primary else str(workspace_dir),
+            file_size_bytes=primary.stat().st_size if primary and primary.exists() else 0,
+            content=primary.read_text(encoding="utf-8", errors="replace")[:4000] if primary and primary.exists() else "",
+            verification_exit_code=-1,
+            verification_summary="Verifying...",
             created_at=datetime.now().strftime("%I:%M %p")
         )
-
         self.artifacts[task_id] = artifact
+        self.artifacts[artifact.id] = artifact
+
+        await self._progress(citizen, task_id, "TESTING", 60.0, "Running verification checks...")
+        evidence = await verify_deliverables(workspace_dir, written)
+        attempts = 0
+        while evidence.exit_code != 0 and attempts < MAX_REPAIR_ATTEMPTS:
+            attempts += 1
+            await self._progress(citizen, task_id, "VERIFYING", 60.0 + attempts * 10.0,
+                                 f"Checks failed; repair attempt {attempts}/{MAX_REPAIR_ATTEMPTS}",
+                                 history_status="REPAIRING", repair_attempts=attempts)
+            current = "\n\n".join(
+                f"--- {_rel(p, workspace_dir)} ---\n{p.read_text(encoding='utf-8', errors='replace')[:6000]}"
+                for p in written if p.exists()
+            )
+            repair_prompt = (
+                f"TASK: {req.title}\n{req.description}\n\n"
+                f"Your files failed verification (repair attempt {attempts} of {MAX_REPAIR_ATTEMPTS}). Error output:\n"
+                f"{evidence.output_snippet[-3000:]}\n\nCurrent files:\n{current}\n\n"
+                "Fix the root cause. Do not delete or weaken tests to make them pass.\n"
+                'Reply with ONLY JSON: {"diagnosis": "...", "files": [{"path": "...", "content": "full fixed file"}]}'
+            )
+            try:
+                repair_raw = await self._model_call(citizen, repair_prompt, system, temperature=0.1)
+            except Exception as ex:
+                self.history.update(task_id, note=f"Repair attempt {attempts}: model call failed ({ex}).")
+                continue
+            fixes = _files_from(_extract_json(repair_raw))
+            if not fixes:
+                self.history.update(task_id, note=f"Repair attempt {attempts}: model reply had no file fixes.")
+                continue
+            self._write_files(ws_manager, fixes, written, task_id)
+            ws_manager.commit_changes(f"fix: repair attempt {attempts} for {req.title}")
+            evidence = await verify_deliverables(workspace_dir, written)
+
+        verified = evidence.exit_code == 0
+        if primary and primary.exists():
+            artifact.file_size_bytes = primary.stat().st_size
+            artifact.content = primary.read_text(encoding="utf-8", errors="replace")[:4000]
+        artifact.verification_exit_code = evidence.exit_code
+        artifact.verification_summary = (
+            f"{'Verified' if verified else 'FAILED verification'}: {evidence.passed_tests} passed, "
+            f"{evidence.failed_tests} failed ({evidence.test_suite}); repair attempts: {attempts}"
+        )
+        for p in written:
+            self.history.add_deliverable(task_id, _rel(p, workspace_dir))
         citizen.completed_deliverables.insert(0, {
             "task_id": task_id,
             "title": req.title,
-            "deliverable": rel_path,
-            "verified": evidence.exit_code == 0,
+            "deliverable": artifact.relative_path,
+            "verified": verified,
             "completed_at": datetime.now().strftime("%I:%M %p")
         })
+        self._finish_history(task_id, verified, evidence, attempts)
+        outcome = "verified" if verified else f"failed verification after {attempts} repair attempts"
+        await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
+                             f"{artifact.relative_path}: {outcome}",
+                             history_status="VERIFIED" if verified else "FAILED")
+        return {"verified": verified, "files": [_rel(p, workspace_dir) for p in written], "evidence": evidence,
+                "attempts": attempts, "summary": summary or artifact.verification_summary,
+                "error": None if verified else evidence.output_snippet}
 
-        if evidence.exit_code == 0:
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"Task completed: {rel_path} verified."
-        else:
-            citizen.status = "COMPLETED"
-            citizen.work_progress = 100.0
-            citizen.thought = f"Task verified: {rel_path}"
+    async def _execute_web_task(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest, web_kind: str,
+                                workspace_dir: Path, ws_manager: WorkspaceManager, context: str) -> Dict[str, Any]:
+        topic = req.title
+        match = re.search(r"(?:on|about|for)\s+(.+)", req.title, re.IGNORECASE)
+        if match and match.group(1).strip().strip("?!.,\"' "):
+            topic = match.group(1).strip().strip("?!.,\"' ")
+        await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing content for {topic}...")
+        result = await self._produce_web_deliverable(citizen, task_id, web_kind, topic,
+                                                     context=f"{req.description}\n{context}".strip())
+        artifact, evidence = result["artifact"], result["evidence"]
+        default_name = "3d_presentation.html" if web_kind == "3D_PRESENTATION" else "index.html"
+        target_name = Path(req.expected_deliverable).name if req.expected_deliverable.lower().endswith(".html") else default_name
+        (workspace_dir / target_name).write_text(Path(artifact.file_path).read_text(encoding="utf-8"), encoding="utf-8")
+        ws_manager.commit_changes(f"feat: {req.title} by {citizen.name}")
+        verified = evidence.exit_code == 0
+        self._record_artifact(citizen, task_id, artifact, verified)
+        self._finish_history(task_id, verified, evidence, attempts=0)
+        await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
+                             f"{artifact.title}: {'verified' if verified else 'verification failed'}",
+                             history_status="VERIFIED" if verified else "FAILED")
+        return {"verified": verified, "files": [target_name], "evidence": evidence, "attempts": 0,
+                "summary": artifact.verification_summary, "url": artifact.url,
+                "error": None if verified else evidence.output_snippet}
 
-        await event_bus.publish(ForgeEvent(
-            event_id=uuid.uuid4().hex,
-            topic=f"agent:{citizen.id}:status",
-            payload={
-                "status": citizen.status,
-                "task_id": task_id,
-                "progress": 100.0 if evidence.exit_code == 0 else citizen.work_progress,
-                "deliverable": rel_path,
-                "exit_code": evidence.exit_code
-            }
-        ))
-
-        # Standby reset after short delay
-        await asyncio.sleep(4.0)
-        citizen.status = "IDLE"
-        citizen.active_task_id = None
-        citizen.current_task = None
-        citizen.thought = f"Standing by. Completed deliverable: {rel_path}"
+    def _write_files(self, ws_manager: WorkspaceManager, files: List[Dict[str, str]], written: List[Path], task_id: str) -> None:
+        for f in files:
+            try:
+                p = ws_manager.write_file(f["path"], f["content"])
+            except Exception as ex:  # path outside the workspace, invalid name, ...
+                self.history.update(task_id, note=f"Refused to write '{f.get('path')}': {ex}")
+                continue
+            if p not in written:
+                written.append(p)
 
     async def cancel_task(self, task_id: str) -> bool:
         """Cancels a running task safely."""
-        if task_id in self._active_tasks:
-            t = self._active_tasks[task_id]
-            t.cancel()
-            del self._active_tasks[task_id]
-            for c in self.citizens.values():
-                if c.active_task_id == task_id:
-                    c.status = "IDLE"
-                    c.active_task_id = None
-                    c.thought = "Task cancelled by Governor."
-            return True
-        return False
+        t = self._active_tasks.pop(task_id, None)
+        if t is None:
+            return False
+        t.cancel()
+        self.history.update(task_id, status="CANCELLED", note="Cancelled by the Governor.")
+        for c in self.citizens.values():
+            if c.active_task_id == task_id:
+                c.status = "IDLE"
+                c.active_task_id = None
+                c.thought = "Task cancelled by Governor."
+        return True
 
     def get_artifact(self, identifier: str) -> Optional[DeliverableArtifact]:
         """Returns verified deliverable artifact metadata and contents by task_id or artifact_id."""
@@ -947,122 +837,70 @@ class CitizenExecutionService:
                 return art
         return None
 
+    def list_task_history(self, limit: int = 100, agent_id: Optional[str] = None,
+                          mission_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self.history.list(limit=limit, agent_id=agent_id, mission_id=mission_id)
+
     # --- Public Missions System ---
     async def publish_public_mission(self, req: PublicMissionCreateRequest) -> Dict[str, Any]:
-        """Creates a national mission and coordinates multi-agent DAG execution."""
+        """Creates a mission, decomposes it into a dependency graph and runs it in one shared workspace."""
         mission_id = f"mission-{uuid.uuid4().hex[:8]}"
-
-        # Step 1: Master Orchestrator (Alex Vance) analyzes and decomposes into DAG subtasks
         coordinator = self.citizens["agent-coordinator"]
+        agent_list = ", ".join(f"{c.id} ({c.profession})" for c in self.citizens.values() if c.id != coordinator.id)
         decomp_prompt = (
             f"You are {coordinator.name}, Master Orchestrator of city_ai_aayushifty.\n"
             f"MISSION TITLE: {req.title}\n"
             f"MISSION DESCRIPTION: {req.description}\n"
             f"CATEGORY: {req.category}\n\n"
-            "Decompose this mission into 3-4 structured dependency subtasks assigned to appropriate agents.\n"
-            "Available agent IDs: agent-analyst, agent-architect, agent-engineer, agent-qa, agent-devops, agent-diagnostic, agent-security.\n"
+            "Decompose this mission into 2-5 subtasks. Subtasks that do not need each other's output must not "
+            "depend on each other, so they can run in parallel.\n"
+            f"Available agent IDs: {agent_list}.\n"
             "Respond in valid JSON format:\n"
             "{\n"
             '  "summary": "Mission operational strategy",\n'
             '  "subtasks": [\n'
-            '    {\n'
-            '      "id": "1",\n'
-            '      "title": "Subtask title",\n'
-            '      "assigned_agent_id": "agent-analyst",\n'
-            '      "expected_deliverable": "requirements_spec.md",\n'
-            '      "dependencies": []\n'
-            '    }\n'
+            '    {"id": "1", "title": "Subtask title", "assigned_agent_id": "agent-analyst", '
+            '"expected_deliverable": "requirements_spec.md", "dependencies": []}\n'
             "  ]\n"
             "}"
         )
-
-        coord_req = ModelCompletionRequest(
-            prompt=decomp_prompt,
-            model_name=coordinator.assigned_model,
-            temperature=0.2
-        )
-
-        resp = await model_router.route_completion(coord_req, preferred_provider="ollama")
-        raw_text = resp.content
-
-        subtasks_data = []
+        subtasks_data: List[Dict[str, Any]] = []
         try:
-            cleaned = raw_text.strip()
-            fence_m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
-            if fence_m:
-                cleaned = fence_m.group(1).strip()
-            parsed = json.loads(cleaned)
-            subtasks_data = parsed.get("subtasks", [])
-        except Exception:
-            pass
+            raw_text = await self._model_call(coordinator, decomp_prompt, "You reply with a single valid JSON object.", temperature=0.2)
+            parsed = _extract_json(raw_text)
+            if isinstance(parsed, dict) and isinstance(parsed.get("subtasks"), list):
+                subtasks_data = [s for s in parsed["subtasks"] if isinstance(s, dict)][:8]
+        except Exception as ex:
+            logger.warning(f"Mission decomposition failed: {ex}")
 
-        # Fallback subtasks if model returned freeform text
         if not subtasks_data:
-            if req.category == "SOFTWARE":
-                subtasks_data = [
-                    {
-                        "id": "1",
-                        "title": f"Requirements & API Specification for {req.title}",
-                        "assigned_agent_id": "agent-analyst",
-                        "expected_deliverable": "api_spec.md",
-                        "dependencies": []
-                    },
-                    {
-                        "id": "2",
-                        "title": f"Database Architecture & Data Models for {req.title}",
-                        "assigned_agent_id": "agent-architect",
-                        "expected_deliverable": "models.py",
-                        "dependencies": ["1"]
-                    },
-                    {
-                        "id": "3",
-                        "title": f"Implementation of Core Application for {req.title}",
-                        "assigned_agent_id": "agent-engineer",
-                        "expected_deliverable": "app.py",
-                        "dependencies": ["2"]
-                    },
-                    {
-                        "id": "4",
-                        "title": f"Automated Pytest Suite for {req.title}",
-                        "assigned_agent_id": "agent-qa",
-                        "expected_deliverable": "test_app.py",
-                        "dependencies": ["3"]
-                    }
-                ]
-            else:
-                subtasks_data = [
-                    {
-                        "id": "1",
-                        "title": f"Investigation & Research Report on {req.title}",
-                        "assigned_agent_id": "agent-analyst",
-                        "expected_deliverable": "research_report.md",
-                        "dependencies": []
-                    },
-                    {
-                        "id": "2",
-                        "title": f"Action Plan & Engineering Blueprint for {req.title}",
-                        "assigned_agent_id": "agent-architect",
-                        "expected_deliverable": "engineering_blueprint.md",
-                        "dependencies": ["1"]
-                    }
-                ]
+            subtasks_data = _fallback_subtasks(req)
 
-        # Format subtasks with live state
+        local_ids = [str(st.get("id", i + 1)) for i, st in enumerate(subtasks_data)]
+        if len(set(local_ids)) != len(local_ids):
+            local_ids = [str(i + 1) for i in range(len(subtasks_data))]
         formatted_subtasks = []
-        for st in subtasks_data:
-            a_id = st.get("assigned_agent_id", "agent-engineer")
-            assigned_c = self.citizens.get(a_id, self.citizens["agent-engineer"])
+        for local_id, st in zip(local_ids, subtasks_data):
+            assigned_c = self.citizens.get(str(st.get("assigned_agent_id", "")), self.citizens["agent-engineer"])
+            deps = [str(d) for d in (st.get("dependencies") or []) if str(d) in local_ids and str(d) != local_id]
+            task_id = f"m-{uuid.uuid4().hex[:6]}"
+            title = str(st.get("title") or "Mission subtask")
             formatted_subtasks.append({
-                "id": f"{mission_id}-{st.get('id', uuid.uuid4().hex[:4])}",
-                "title": st.get("title", "Mission subtask"),
+                "id": f"{mission_id}-{local_id}",
+                "task_id": task_id,
+                "title": title,
                 "assigned_agent_id": assigned_c.id,
                 "assigned_agent_name": assigned_c.name,
-                "expected_deliverable": st.get("expected_deliverable", "deliverable.md"),
+                "expected_deliverable": str(st.get("expected_deliverable") or "deliverable.md"),
                 "status": "PENDING",
                 "progress": 0,
-                "dependencies": [f"{mission_id}-{d}" for d in st.get("dependencies", [])],
-                "deliverable_result": None
+                "dependencies": [f"{mission_id}-{d}" for d in dict.fromkeys(deps)],
+                "deliverable_result": None,
+                "verification": None,
+                "blocked_by": [],
+                "error": None,
             })
+            self.history.start(task_id, assigned_c.id, assigned_c.name, title, kind="MISSION_SUBTASK", mission_id=mission_id)
 
         mission = {
             "id": mission_id,
@@ -1070,84 +908,219 @@ class CitizenExecutionService:
             "description": req.description,
             "category": req.category,
             "status": "IN_PROGRESS",
-            "progress": 5,
+            "progress": 0,
             "subtasks": formatted_subtasks,
-            "participating_agent_ids": list(set(s["assigned_agent_id"] for s in formatted_subtasks)),
+            "participating_agent_ids": list(dict.fromkeys(s["assigned_agent_id"] for s in formatted_subtasks)),
             "deliverables": [],
+            "workspace_dir": str(self.workspaces_root / mission_id),
             "published_at": datetime.now().strftime("%I:%M %p"),
             "completed_at": None
         }
-
         self.public_missions.insert(0, mission)
-
-        # Launch mission pipeline in background
-        asyncio.create_task(self._run_mission_pipeline(mission))
-
+        mission_task = asyncio.create_task(self._run_mission_pipeline(mission))
+        self._active_tasks[mission_id] = mission_task
+        mission_task.add_done_callback(lambda _t: self._active_tasks.pop(mission_id, None))
         return mission
 
-    async def _run_mission_pipeline(self, mission: Dict[str, Any]):
-        """Executes mission subtasks adhering to dependencies and passes deliverables."""
-        completed_subtask_ids = set()
-        subtasks = mission["subtasks"]
-
-        while len(completed_subtask_ids) < len(subtasks):
-            # Find next ready subtask
-            ready_st = None
-            for st in subtasks:
-                if st["id"] not in completed_subtask_ids and st["status"] == "PENDING":
-                    # Check if all dependencies are satisfied
-                    if all(dep in completed_subtask_ids for dep in st["dependencies"]):
-                        ready_st = st
-                        break
-
-            if not ready_st:
-                # Deadlock check or all done
-                break
-
-            ready_st["status"] = "WORKING"
-            ready_st["progress"] = 20
-            c = self.citizens.get(ready_st["assigned_agent_id"])
-            if c:
-                c.status = "WORKING"
-                c.thought = f"Executing mission subtask: {ready_st['title']}"
-
-            # Dispatch real task
-            task_req = CitizenTaskRequest(
-                title=ready_st["title"],
-                description=f"Part of national mission '{mission['title']}'",
-                expected_deliverable=ready_st["expected_deliverable"],
-                priority="HIGH"
-            )
-
-            # Run execution loop
-            task_id = f"m-{uuid.uuid4().hex[:6]}"
-            if c:
-                await self._run_task_execution_loop(c, task_id, task_req)
-
-            # Record subtask completion
-            ready_st["status"] = "COMPLETED"
-            ready_st["progress"] = 100
-            ready_st["deliverable_result"] = ready_st["expected_deliverable"]
-            completed_subtask_ids.add(ready_st["id"])
-            mission["deliverables"].append(ready_st["expected_deliverable"])
-
-            # Recalculate overall mission progress
-            mission["progress"] = int((len(completed_subtask_ids) / len(subtasks)) * 100)
-
-            await event_bus.publish(ForgeEvent(
-                event_id=uuid.uuid4().hex,
-                topic="mission:updated",
-                payload={"mission_id": mission["id"], "progress": mission["progress"]}
-            ))
-
-        mission["status"] = "COMPLETED"
-        mission["completed_at"] = datetime.now().strftime("%I:%M %p")
+    async def _run_mission_pipeline(self, mission: Dict[str, Any]) -> None:
+        """Runs subtasks as a dependency graph: independent ones in parallel, dependents after their
+        dependencies succeed, and anything downstream of a failure is BLOCKED."""
+        subtasks = {st["id"]: st for st in mission["subtasks"]}
+        Path(mission["workspace_dir"]).mkdir(parents=True, exist_ok=True)
+        running: Dict[asyncio.Task, str] = {}
+        try:
+            while True:
+                changed = True
+                while changed:  # propagate failures down the graph
+                    changed = False
+                    for st in subtasks.values():
+                        if st["status"] != "PENDING":
+                            continue
+                        bad = [d for d in st["dependencies"] if subtasks[d]["status"] in ("FAILED", "BLOCKED")]
+                        if bad:
+                            st["status"] = "BLOCKED"
+                            st["blocked_by"] = bad
+                            st["error"] = "Blocked: depends on " + ", ".join(subtasks[d]["title"] for d in bad) + ", which did not succeed."
+                            self.history.update(st["task_id"], status="BLOCKED", note=st["error"])
+                            changed = True
+                for st in subtasks.values():
+                    if st["status"] == "PENDING" and all(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"]):
+                        st["status"] = "QUEUED"
+                        running[asyncio.create_task(self._run_mission_subtask(mission, st, subtasks))] = st["id"]
+                if not running:
+                    for st in subtasks.values():
+                        if st["status"] == "PENDING":  # only reachable with a dependency cycle
+                            st["status"] = "BLOCKED"
+                            st["error"] = "Blocked: circular dependency."
+                            self.history.update(st["task_id"], status="BLOCKED", note=st["error"])
+                    break
+                done, _ = await asyncio.wait(list(running), return_when=asyncio.FIRST_COMPLETED)
+                for t in done:
+                    st = subtasks[running.pop(t)]
+                    try:
+                        result = t.result()
+                    except Exception as ex:
+                        result = {"verified": False, "files": [], "error": f"Subtask crashed: {ex}"}
+                        self.history.update(st["task_id"], status="FAILED", note=result["error"])
+                    verified = bool(result.get("verified"))
+                    st["status"] = "COMPLETED" if verified else "FAILED"
+                    st["progress"] = 100
+                    st["deliverable_result"] = result.get("files") or None
+                    st["summary"] = result.get("summary", "")
+                    st["error"] = None if verified else (result.get("error") or "Verification failed")[:1500]
+                    st["verification"] = "VERIFIED" if verified else "FAILED"
+                    if result.get("url"):
+                        st["url"] = result["url"]
+                    for f in result.get("files") or []:
+                        if f not in mission["deliverables"]:
+                            mission["deliverables"].append(f)
+                finished = sum(1 for s in subtasks.values() if s["status"] in ("COMPLETED", "FAILED", "BLOCKED"))
+                mission["progress"] = int(finished / max(len(subtasks), 1) * 100)
+                await event_bus.publish(ForgeEvent(
+                    event_id=uuid.uuid4().hex,
+                    topic="mission:updated",
+                    payload={"mission_id": mission["id"], "progress": mission["progress"]}
+                ))
+        except asyncio.CancelledError:
+            for t in running:
+                t.cancel()
+            for st in subtasks.values():
+                if st["status"] not in ("COMPLETED", "FAILED", "BLOCKED"):
+                    st["status"] = "CANCELLED"
+                    self.history.update(st["task_id"], status="CANCELLED", note="Mission cancelled.")
+            mission["status"] = "CANCELLED"
+            raise
+        finally:
+            if mission["status"] != "CANCELLED":
+                mission["status"] = _mission_status(list(subtasks.values()))
+            mission["completed_at"] = datetime.now().strftime("%I:%M %p")
         await event_bus.publish(ForgeEvent(
             event_id=uuid.uuid4().hex,
             topic="mission:completed",
-            payload={"mission_id": mission["id"]}
+            payload={"mission_id": mission["id"], "status": mission["status"]}
         ))
+
+    async def _run_mission_subtask(self, mission: Dict[str, Any], st: Dict[str, Any],
+                                   subtasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        citizen = self.citizens[st["assigned_agent_id"]]
+        workspace = Path(mission["workspace_dir"])
+        context_parts = []
+        for dep_id in st["dependencies"]:
+            dep = subtasks[dep_id]
+            part = f"## {dep['title']} (by {dep['assigned_agent_name']})\n"
+            if dep.get("summary"):
+                part += f"Summary: {dep['summary'][:500]}\n"
+            for rel in (dep.get("deliverable_result") or [])[:6]:
+                p = workspace / rel
+                if p.is_file():
+                    part += f"--- {rel} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2500]}\n"
+            context_parts.append(part)
+        st["context_from"] = list(st["dependencies"])
+        task_req = CitizenTaskRequest(
+            title=st["title"],
+            description=f"Part of mission '{mission['title']}': {mission['description']}",
+            expected_deliverable=st["expected_deliverable"],
+            priority="HIGH"
+        )
+        # One task at a time per citizen; different citizens work in parallel.
+        async with self._citizen_locks.setdefault(citizen.id, asyncio.Lock()):
+            st["status"] = "WORKING"
+            st["progress"] = 20
+            return await self._run_task_execution_loop(citizen, st["task_id"], task_req, workspace_dir=workspace,
+                                                       context="\n".join(context_parts), mission_id=mission["id"])
 
     def list_public_missions(self) -> List[Dict[str, Any]]:
         return self.public_missions
 
+
+MAX_REPAIR_ATTEMPTS = 3
+
+_SLIDES_SCHEMA = (
+    '{"slides": [{"title": "Slide title", "desc": "One or two sentences of real content", '
+    '"bullets": ["Specific point", "Specific point", "Specific point"]}]}'
+)
+_WEBSITE_SCHEMA = (
+    '{"brand": "Name", "headline": "Hero headline", "subheadline": "One sentence", '
+    '"features_title": "Section title", "about": "Two or three sentences", '
+    '"features": [{"icon": "one emoji", "title": "Feature", "text": "One or two sentences"}], '
+    '"metrics": [{"value": "24/7", "label": "Short label"}]}'
+)
+
+
+def _extract_json(raw: str) -> Optional[Any]:
+    """Finds a JSON value in a model reply (bare, fenced, or embedded in prose)."""
+    text = (raw or "").strip()
+    candidates = [text]
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if fence:
+        candidates.insert(0, fence.group(1).strip())
+    s, e = text.find("{"), text.rfind("}")
+    if s != -1 and e > s:
+        candidates.append(text[s:e + 1])
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except Exception:
+            continue
+    return None
+
+
+def _valid_web_content(kind: str, data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if kind == "3D_PRESENTATION":
+        items, required = data.get("slides"), None
+    else:
+        items, required = data.get("features"), data.get("headline")
+        if not str(required or "").strip():
+            return False
+    return isinstance(items, list) and sum(
+        1 for x in items if isinstance(x, dict) and str(x.get("title") or "").strip()) >= 2
+
+
+def _files_from(parsed: Any) -> List[Dict[str, str]]:
+    if not isinstance(parsed, dict):
+        return []
+    items = parsed.get("files") or parsed.get("files_generated") or parsed.get("file_updates") or []
+    out = []
+    for f in items if isinstance(items, list) else []:
+        if isinstance(f, dict):
+            path = f.get("path") or f.get("file_path")
+            content = f.get("content")
+            if isinstance(path, str) and path.strip() and isinstance(content, str):
+                out.append({"path": path.strip(), "content": content})
+    return out
+
+
+def _rel(p: Path, root: Path) -> str:
+    try:
+        return str(Path(p).resolve().relative_to(Path(root).resolve())).replace("\\", "/")
+    except ValueError:
+        return Path(p).name
+
+
+def _mission_status(subtasks: List[Dict[str, Any]]) -> str:
+    done = sum(1 for s in subtasks if s["status"] == "COMPLETED")
+    if subtasks and done == len(subtasks):
+        return "COMPLETED"
+    return "PARTIAL" if done else "FAILED"
+
+
+def _fallback_subtasks(req: PublicMissionCreateRequest) -> List[Dict[str, Any]]:
+    if req.category == "SOFTWARE":
+        return [
+            {"id": "1", "title": f"Requirements & API Specification for {req.title}", "assigned_agent_id": "agent-analyst",
+             "expected_deliverable": "api_spec.md", "dependencies": []},
+            {"id": "2", "title": f"Data Models for {req.title}", "assigned_agent_id": "agent-architect",
+             "expected_deliverable": "models.py", "dependencies": ["1"]},
+            {"id": "3", "title": f"Core Application for {req.title}", "assigned_agent_id": "agent-engineer",
+             "expected_deliverable": "app.py", "dependencies": ["2"]},
+            {"id": "4", "title": f"Pytest Suite for {req.title}", "assigned_agent_id": "agent-qa",
+             "expected_deliverable": "test_app.py", "dependencies": ["3"]},
+        ]
+    return [
+        {"id": "1", "title": f"Research Report on {req.title}", "assigned_agent_id": "agent-analyst",
+         "expected_deliverable": "research_report.md", "dependencies": []},
+        {"id": "2", "title": f"Action Plan for {req.title}", "assigned_agent_id": "agent-architect",
+         "expected_deliverable": "action_plan.md", "dependencies": ["1"]},
+    ]

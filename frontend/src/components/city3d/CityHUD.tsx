@@ -45,6 +45,7 @@ import { DeliverableArtifact } from '../../types';
 import { absoluteLink } from '../../api/client';
 import { HostApprovalPanel } from './HostApprovalPanel';
 import { ModelPicker } from './ModelPicker';
+import { TaskHistoryPanel } from './TaskHistoryPanel';
 
 interface CityHUDProps {
   metrics: CityMetrics;
@@ -317,6 +318,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
             <Sparkles size={14} className="text-amber-300" />
             <span>[M] Missions ({publicMissions.length})</span>
           </button>
+
+          <TaskHistoryPanel />
 
           <div className="bg-[#070B14]/90 backdrop-blur border border-slate-800 rounded-xl p-1 flex items-center gap-1 text-[11px]">
             <button
@@ -1065,7 +1068,10 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                         </div>
                       </div>
                       <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
-                        m.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        m.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                        m.status === 'FAILED' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                        m.status === 'PARTIAL' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                        'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                       }`}>
                         {m.status} ({m.progress}%)
                       </span>
@@ -1091,7 +1097,9 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                             </div>
                             <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
                               st.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' :
-                              st.status === 'WORKING' ? 'bg-amber-500/20 text-amber-400 animate-pulse' : 'bg-slate-800 text-slate-400'
+                              st.status === 'WORKING' ? 'bg-amber-500/20 text-amber-400 animate-pulse' :
+                              st.status === 'FAILED' ? 'bg-red-500/20 text-red-400' :
+                              st.status === 'BLOCKED' ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-800 text-slate-400'
                             }`}>
                               {st.status} ({st.progress}%)
                             </span>

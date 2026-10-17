@@ -25,6 +25,32 @@ export interface HostApproval {
 }
 
 /** Turns a backend-relative link (/api/..., /deliverables/...) into a full URL you can open or share. */
+export interface TaskRecord {
+  task_id: string;
+  agent_id: string;
+  agent_name: string;
+  title: string;
+  kind: 'TASK' | 'CHAT' | 'MISSION_SUBTASK';
+  mission_id: string | null;
+  status: 'QUEUED' | 'PLANNING' | 'WORKING' | 'TESTING' | 'VERIFYING' | 'REPAIRING' | 'VERIFIED' | 'FAILED' | 'BLOCKED' | 'CANCELLED';
+  progress: number;
+  stage: string;
+  deliverables: { path: string; url: string | null; title: string | null }[];
+  verification: {
+    verified: boolean;
+    suite: string;
+    exit_code: number;
+    passed: number;
+    failed: number;
+    repair_attempts: number;
+    output: string;
+  } | null;
+  notes: string[];
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 export function absoluteLink(url: string): string {
   if (/^https?:\/\//i.test(url)) return url;
   if (url.startsWith('/deliverables/')) return `http://127.0.0.1:8000${url}`;
@@ -145,6 +171,12 @@ export const api = {
     const res = await fetch(`${API_BASE}/host-approvals`);
     if (!res.ok) throw new Error('Failed to list approvals');
     return res.json();
+  },
+
+  async getTaskHistory(limit: number = 100): Promise<TaskRecord[]> {
+    const res = await fetch(`${API_BASE}/task-history?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to load task history');
+    return (await res.json()).tasks;
   },
 
   async decideHostApproval(id: string, approved: boolean): Promise<void> {

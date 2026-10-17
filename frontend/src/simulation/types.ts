@@ -61,7 +61,7 @@ export interface AgentTask {
   description: string;
   expectedDeliverable: string;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  status: 'PENDING' | 'ASSIGNED' | 'TRAVELING' | 'WORKING' | 'VERIFYING' | 'COMPLETED' | 'BLOCKED' | 'REJECTED';
+  status: 'PENDING' | 'ASSIGNED' | 'TRAVELING' | 'WORKING' | 'VERIFYING' | 'COMPLETED' | 'BLOCKED' | 'REJECTED' | 'FAILED';
   progress: number; // 0 to 100
   assignedAgentId: string;
   assignedAgentName: string;
@@ -80,7 +80,7 @@ export interface PublicMission {
   title: string;
   description: string;
   category: 'CONSTRUCTION' | 'SOFTWARE' | 'RESEARCH' | 'INFRASTRUCTURE' | 'SECURITY';
-  status: 'PROPOSED' | 'IN_PROGRESS' | 'PAUSED' | 'VERIFYING' | 'COMPLETED' | 'CANCELLED';
+  status: 'PROPOSED' | 'IN_PROGRESS' | 'PAUSED' | 'VERIFYING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
   progress: number; // 0 to 100
   subtasks: AgentTask[];
   participatingAgentIds: string[];

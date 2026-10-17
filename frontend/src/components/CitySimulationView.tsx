@@ -25,6 +25,8 @@ function mapBackendStatus(backendStatus: string): AgentCharacter['status'] {
     case 'working': return 'WORKING';
     case 'testing': return 'VERIFYING';
     case 'completed': return 'COMPLETED';
+    case 'verifying':
+    case 'repairing': return 'VERIFYING';
     case 'failed':
     case 'blocked': return 'BLOCKED';
     default: return 'IDLE';
@@ -40,7 +42,10 @@ function mapTaskStatus(taskStatus: string): AgentTask['status'] {
     case 'working': return 'WORKING';
     case 'testing': return 'VERIFYING';
     case 'completed': return 'COMPLETED';
-    case 'failed':
+    case 'verified': return 'COMPLETED';
+    case 'verifying':
+    case 'repairing': return 'VERIFYING';
+    case 'failed': return 'FAILED';
     case 'blocked': return 'BLOCKED';
     default: return 'ASSIGNED';
   }

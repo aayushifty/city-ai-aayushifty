@@ -168,6 +168,13 @@ def list_public_missions():
 
 # --- 5. Cancellation & Task Management ---
 
+@router.get("/task-history")
+def get_task_history(limit: int = Query(100, ge=1, le=500), agent_id: Optional[str] = None,
+                     mission_id: Optional[str] = None):
+    """Every citizen task (chat deliverables, assigned tasks, mission subtasks), newest first, with live
+    status/progress, deliverable links and the verification result."""
+    return {"tasks": agent_service.list_task_history(limit=limit, agent_id=agent_id, mission_id=mission_id)}
+
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):
     """Safely cancels an active task execution."""

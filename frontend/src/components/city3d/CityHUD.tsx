@@ -55,6 +55,9 @@ import { CitizenActivityPanel } from './hud/CitizenActivityPanel';
 import { StatusCluster } from './hud/StatusCluster';
 import { NotificationFeed, useHudNotifications } from './hud/Notifications';
 import { DEFAULT_HUD_SETTINGS, HudSettings, PhoneMenu } from './hud/PhoneMenu';
+import { CitizenInspectCard, InteractionPrompt } from './hud/CitizenInteraction';
+import { FpsCounter } from './hud/FpsCounter';
+import { districtAt, districtZones } from '../../simulation/districts';
 
 interface CityHUDProps {
   metrics: CityMetrics;
@@ -173,17 +176,33 @@ export const CityHUD: React.FC<CityHUDProps> = ({
         setPhoneOpen(o => !o);
       } else if (k === 'h' && !e.repeat) {
         setPanelsHidden(h => !h);
+      } else if (k === 'q' && !e.repeat && !modalOpenRef.current) {
+        const ag = nearbyRef.current;
+        setInspectId(cur => (cur ? null : ag ? ag.id : null));
+      } else if (k === 't' && !e.repeat && !modalOpenRef.current && nearbyRef.current) {
+        if (document.pointerLockElement) document.exitPointerLock();
+        setActiveAgentTab('ASSIGN');
+        if (onInteractWithAgent) onInteractWithAgent(nearbyRef.current.id);
       } else if (e.key === 'Escape') {
         setPhoneOpen(false);
+        setInspectId(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Where you are: the nearest named workplace (from the same layout the 3D scene is built from)
+  // The five work districts (same blocks the 3D scene tints and signs)
+  const zones = React.useMemo(
+    () => districtZones(buildings, roads.flatMap(r => [{ x: r.start[0], z: r.start[1] }, { x: r.end[0], z: r.end[1] }])),
+    [buildings, roads],
+  );
+
+  // Where you are: district + nearest named workplace (from the same layout the 3D scene is built from)
   const px = Math.round(playerState.x / 2), pz = Math.round(playerState.z / 2);
   const locationName = React.useMemo(() => {
+    const zone = districtAt(px * 2, pz * 2, zones);
+    if (zone) return zone.name;
     let best: Building | null = null;
     let bestD = Infinity;
     for (const b of buildings) {
@@ -193,13 +212,22 @@ export const CityHUD: React.FC<CityHUDProps> = ({
     }
     if (!best) return 'City streets';
     return bestD < 22 ? shortName(best.name) : `Near ${shortName(best.name)}`;
-  }, [buildings, px, pz]);
+  }, [buildings, px, pz, zones]);
 
   const openCitizen = (id: string) => {
     if (document.pointerLockElement) document.exitPointerLock();
     if (onInteractWithAgent) onInteractWithAgent(id);
   };
+  // Citizen interactions: talk (E), assign a task (T), work order (F), inspect (Q)
+  const [inspectId, setInspectId] = useState<string | null>(null);
+  const inspectAgent = agentCharacters.find(a => a.id === inspectId) || null;
+  const talkTo = (id: string) => { setActiveAgentTab('PROFILE'); openCitizen(id); };
+  const assignTo = (id: string) => { setActiveAgentTab('ASSIGN'); openCitizen(id); };
+  const nearbyRef = React.useRef<typeof nearbyAgent>(undefined);
+  nearbyRef.current = nearbyAgent;
   const modalOpen = !!interactingAgent || showPublicMissionsModal || !!activeArtifact;
+  const modalOpenRef = React.useRef(modalOpen);
+  modalOpenRef.current = modalOpen;
   const showPanels = !panelsHidden && !modalOpen;
 
   // Auto-scroll chat to bottom
@@ -329,6 +357,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           <span className="hidden md:flex items-center gap-1 text-[11px] text-amber-200 font-semibold">
             <Crown size={12} className="text-amber-300 fill-amber-300" /> Governor
           </span>
+          {hudSettings.fps && <><span className="h-4 w-px bg-white/15" /><FpsCounter /></>}
         </div>
 
         <div className="pointer-events-auto flex items-center gap-1.5 flex-wrap justify-end">
@@ -407,7 +436,18 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           <CitizenActivityPanel onSelectCitizen={openCitizen} />
         </div>
       )}
-      {showPanels && hudSettings.missions && !playerState.isPilotingJet && (
+      {inspectAgent && !modalOpen && (
+        <div className="absolute right-3 sm:right-4 top-[64px] z-30">
+          <CitizenInspectCard
+            agent={inspectAgent}
+            onClose={() => setInspectId(null)}
+            onTalk={() => { setInspectId(null); talkTo(inspectAgent.id); }}
+            onAssign={() => { setInspectId(null); assignTo(inspectAgent.id); }}
+            onWork={() => onDirectWorkCommand(inspectAgent.id)}
+          />
+        </div>
+      )}
+      {showPanels && hudSettings.missions && !playerState.isPilotingJet && !inspectAgent && (
         <div className="absolute right-3 sm:right-4 top-[64px] z-20 hidden md:block hud-fade-in">
           <MissionTracker onOpenMissions={onOpenPublicMissions} />
         </div>
@@ -499,49 +539,15 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           <div className="absolute h-6 w-0.5 bg-white/30" />
         </div>
 
-        {/* Proximity Interaction Prompt when approaching an agent */}
-        {nearbyAgent && !interactingAgent && (
-          <div 
-            onClick={() => onInteractWithAgent ? onInteractWithAgent(nearbyAgent.id) : null}
-            className="mt-8 bg-[#070B14]/95 backdrop-blur-md border border-emerald-500/80 rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 text-xs text-slate-100 border-2 pointer-events-auto cursor-pointer hover:bg-slate-900/90 transition select-none"
-            title="Press E or click to open 2-Way Live Comms"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="w-6 h-6 rounded-lg bg-emerald-500 text-black font-black flex items-center justify-center text-xs shadow-md">
-                E
-              </span>
-              <span>
-                <strong>2-Way Live Comms</strong> with <strong className="text-emerald-400">{nearbyAgent.name}</strong>
-                <span 
-                  className="ml-2 px-2 py-0.5 rounded text-[10px] font-black uppercase border"
-                  style={{
-                    backgroundColor: `${nearbyAgent.aiModelBadgeColor}20`,
-                    borderColor: nearbyAgent.aiModelBadgeColor,
-                    color: nearbyAgent.aiModelBadgeColor
-                  }}
-                >
-                  {nearbyAgent.aiProvider} • {nearbyAgent.aiModel}
-                </span>
-                <span className="text-slate-400 ml-1.5 font-medium">({nearbyAgent.profession})</span>
-              </span>
-            </div>
-            <div className="h-5 w-px bg-slate-700" />
-            <div 
-              className="flex items-center gap-2 hover:opacity-80 transition"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDirectWorkCommand(nearbyAgent.id);
-              }}
-              title="Command this citizen to work immediately (Shortcut: F)"
-            >
-              <span className="w-6 h-6 rounded-lg bg-amber-400 text-black font-black flex items-center justify-center text-xs shadow-md">
-                F
-              </span>
-              <span className="text-amber-300 font-bold hover:underline">
-                Make Them Work ([F] Direct Order)
-              </span>
-            </div>
-          </div>
+        {/* Proximity prompt: what you can do with the citizen next to you (live status from the backend) */}
+        {nearbyAgent && !interactingAgent && !showPublicMissionsModal && (
+          <InteractionPrompt
+            agent={nearbyAgent}
+            onTalk={() => talkTo(nearbyAgent.id)}
+            onAssign={() => assignTo(nearbyAgent.id)}
+            onWork={() => onDirectWorkCommand(nearbyAgent.id)}
+            onInspect={() => setInspectId(id => (id === nearbyAgent.id ? null : nearbyAgent.id))}
+          />
         )}
 
         {/* Pointer Lock Help Banner when not locked */}
@@ -1266,13 +1272,14 @@ export const CityHUD: React.FC<CityHUDProps> = ({
             onSelectCitizen={openCitizen}
             locationName={locationName}
             openSignal={mapSignal}
+            zones={zones}
           />
         )}
       </div>
 
       {!modalOpen && !phoneOpen && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-full bg-slate-950/45 backdrop-blur border border-white/10 text-[10px] text-slate-300 font-sans pointer-events-none">
-          {[['WASD', 'move'], ['E', 'talk'], ['F', 'work order'], ['M', 'missions'], ['N', 'map'], ['P', 'phone'], ['V', 'camera'], ['H', panelsHidden ? 'show HUD' : 'hide HUD']].map(([k, l]) => (
+          {[['WASD', 'move'], ['Shift', 'run'], ['Wheel', 'zoom'], ['E', 'talk'], ['T', 'assign'], ['Q', 'inspect'], ['M', 'missions'], ['N', 'map'], ['P', 'phone'], ['V', 'camera'], ['H', panelsHidden ? 'show HUD' : 'hide HUD']].map(([k, l]) => (
             <span key={k} className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-white/10 text-slate-100 font-bold">{k}</kbd>{l}</span>
           ))}
         </div>

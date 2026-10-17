@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Procedural, rigged human figures for the citizens and the Governor.
@@ -22,18 +23,18 @@ export interface HumanoidOptions {
 }
 
 export interface HumanoidRig {
-  body: THREE.Group;
-  pelvis: THREE.Group;
-  spine: THREE.Group;
+  body: THREE.Object3D;
+  pelvis: THREE.Object3D;
+  spine: THREE.Object3D;
   chest: THREE.Object3D;
-  neck: THREE.Group;
-  head: THREE.Group;
+  neck: THREE.Object3D;
+  head: THREE.Object3D;
   jaw: THREE.Object3D;
   eyes: THREE.Object3D[];
-  hipL: THREE.Group; kneeL: THREE.Group; ankleL: THREE.Group;
-  hipR: THREE.Group; kneeR: THREE.Group; ankleR: THREE.Group;
-  shoulderL: THREE.Group; elbowL: THREE.Group;
-  shoulderR: THREE.Group; elbowR: THREE.Group;
+  hipL: THREE.Object3D; kneeL: THREE.Object3D; ankleL: THREE.Object3D;
+  hipR: THREE.Object3D; kneeR: THREE.Object3D; ankleR: THREE.Object3D;
+  shoulderL: THREE.Object3D; elbowL: THREE.Object3D;
+  shoulderR: THREE.Object3D; elbowR: THREE.Object3D;
   // blend weights (smoothed every frame)
   walk: number; talk: number; work: number;
   phase: number;
@@ -168,11 +169,11 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   const irisM = new THREE.MeshStandardMaterial({ color: ['#3B2A1A', '#1F3A5F', '#2F4F2F', '#4B3621'][h % 4], roughness: 0.2 });
 
   const root = new THREE.Group();
-  const body = new THREE.Group();
+  const body = new THREE.Bone();
   root.add(body);
 
   // ---------------- pelvis & legs ----------------
-  const pelvis = new THREE.Group();
+  const pelvis = new THREE.Bone();
   pelvis.position.y = 0.92;
   body.add(pelvis);
   const hips = mesh(sphere(0.16, 20, 14), bottomM, 0, 0.03, 0);
@@ -180,16 +181,16 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   pelvis.add(hips);
 
   const makeLeg = (side: 1 | -1) => {
-    const hip = new THREE.Group();
+    const hip = new THREE.Bone();
     hip.position.set(0.095 * side * hipW, 0, 0);
     pelvis.add(hip);
     hip.add(mesh(limb(`thigh${build}`, 0.078 * build, 0.060 * build, 0.42), bottomM));
-    const knee = new THREE.Group();
+    const knee = new THREE.Bone();
     knee.position.y = -0.42;
     hip.add(knee);
     knee.add(mesh(sphere(0.06), bottomM));
     knee.add(mesh(limb(`shin${build}`, 0.058 * build, 0.044, 0.42), bottomM));
-    const ankle = new THREE.Group();
+    const ankle = new THREE.Bone();
     ankle.position.y = -0.42;
     knee.add(ankle);
     const shoe = mesh(sphere(0.062, 16, 10), shoeM, 0, -0.035, 0.045);
@@ -203,13 +204,15 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   const legR = makeLeg(1);
 
   // ---------------- spine, torso ----------------
-  const spine = new THREE.Group();
+  const spine = new THREE.Bone();
   spine.position.y = 0.98 - 0.92;
   pelvis.add(spine);
   const torsoG = geo('torso', () => new THREE.LatheGeometry(TORSO_PROFILE, 28));
   const chest = mesh(torsoG, topM, 0, -0.03, 0);
   chest.scale.set(shoulderW * build, 1, 0.62 * build);
-  spine.add(chest);
+  const chestBone = new THREE.Bone();   // breathing scales this bone
+  spine.add(chestBone);
+  chestBone.add(chest);
   const belt = mesh(geo('belt', () => new THREE.TorusGeometry(0.145, 0.014, 6, 24)), mat('#1C1917', 0.5, 0.2), 0, -0.02, 0, false);
   belt.rotation.x = Math.PI / 2;
   belt.scale.set(hipW * build, 0.65 * build, 1);
@@ -261,7 +264,7 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
 
   // ---------------- arms ----------------
   const makeArm = (side: 1 | -1) => {
-    const shoulder = new THREE.Group();
+    const shoulder = new THREE.Bone();
     shoulder.position.set(0.205 * side * shoulderW * build, 0.425, 0);
     spine.add(shoulder);
     const deltoid = mesh(sphere(0.058), sleeveM, 0, -0.01, 0);
@@ -274,7 +277,7 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
       const bare = mesh(limb('upperBare', 0.046, 0.043, 0.16), skin, 0, -0.14, 0);
       shoulder.add(bare);
     }
-    const elbow = new THREE.Group();
+    const elbow = new THREE.Bone();
     elbow.position.y = -0.30;
     shoulder.add(elbow);
     elbow.add(mesh(sphere(0.044), fit.shortSleeves ? skin : sleeveM));
@@ -296,11 +299,11 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   armR.shoulder.rotation.z = restArmZ;
 
   // ---------------- neck & head ----------------
-  const neck = new THREE.Group();
+  const neck = new THREE.Bone();
   neck.position.y = 0.47;
   spine.add(neck);
   neck.add(mesh(limb('neck2', 0.052, 0.06, 0.08), skin, 0, 0.075, 0.0));
-  const head = new THREE.Group();
+  const head = new THREE.Bone();
   head.position.y = 0.035;
   neck.add(head);
   const skull = mesh(sphere(0.105, 24, 18), skin, 0, 0.13, 0);
@@ -308,7 +311,11 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   head.add(skull);
   const jaw = mesh(sphere(0.08, 18, 12), skin, 0, 0.078, 0.008);
   jaw.scale.set(feminine ? 0.88 : 0.95, 0.8, 0.92);
-  head.add(jaw);
+  const jawBone = new THREE.Bone();      // talking opens the jaw by scaling this bone
+  jawBone.position.copy(jaw.position);
+  jaw.position.set(0, 0, 0);
+  head.add(jawBone);
+  jawBone.add(jaw);
   // ears
   for (const side of [-1, 1]) {
     const ear = mesh(sphere(0.026, 10, 8), skin, 0.097 * side, 0.125, -0.005);
@@ -318,7 +325,7 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   // eyes
   const eyes: THREE.Object3D[] = [];
   for (const side of [-1, 1]) {
-    const eye = new THREE.Group();
+    const eye = new THREE.Bone();
     eye.position.set(0.037 * side, 0.142, 0.083);
     const white = mesh(sphere(0.0165, 12, 10), eyeWhite, 0, 0, 0, false);
     white.scale.z = 0.6;
@@ -421,10 +428,14 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
     spine.add(st);
   }
 
+  // One skinned mesh per figure: every part is bound rigidly to its joint (bone) and coloured by vertex.
+  // 1 draw call (+1 for shadows) instead of ~90 per person.
+  skinFigure(root);
+
   root.scale.setScalar(heightScale);
 
   const rig: HumanoidRig = {
-    body, pelvis, spine, chest, neck, head, jaw, eyes,
+    body, pelvis, spine, chest: chestBone, neck, head, jaw: jawBone, eyes,
     hipL: legL.hip, kneeL: legL.knee, ankleL: legL.ankle,
     hipR: legR.hip, kneeR: legR.knee, ankleR: legR.ankle,
     shoulderL: armL.shoulder, elbowL: armL.elbow,
@@ -436,6 +447,59 @@ export function createHumanoid(opts: HumanoidOptions): THREE.Group {
   };
   root.userData.rig = rig;
   return root;
+}
+
+function skinFigure(root: THREE.Object3D): void {
+  root.updateMatrixWorld(true);
+  const bones: THREE.Bone[] = [];
+  root.traverse(o => { if ((o as THREE.Bone).isBone) bones.push(o as THREE.Bone); });
+  const boneIndex = new Map<THREE.Object3D, number>(bones.map((b, i) => [b, i]));
+  const meshes: THREE.Mesh[] = [];
+  root.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const geos: THREE.BufferGeometry[] = [];
+  for (const m of meshes) {
+    let b: THREE.Object3D | null = m.parent;
+    while (b && !(b as THREE.Bone).isBone) b = b.parent;
+    const bi = b ? boneIndex.get(b) ?? 0 : 0;
+    const toRoot = new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld);
+    let g = m.geometry.clone();
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    g.applyMatrix4(toRoot);
+    if (g.index) g = g.toNonIndexed();
+    if (toRoot.determinant() < 0) {
+      for (const name of ['position', 'normal']) {
+        const arr = (g.attributes[name] as THREE.BufferAttribute).array as Float32Array;
+        for (let t = 0; t < arr.length; t += 9) for (let k = 0; k < 3; k++) { const tmp = arr[t + 3 + k]; arr[t + 3 + k] = arr[t + 6 + k]; arr[t + 6 + k] = tmp; }
+      }
+    }
+    const n = g.attributes.position.count;
+    const color = ((m.material as THREE.MeshStandardMaterial).color || new THREE.Color(1, 1, 1));
+    const colors = new Float32Array(n * 3);
+    const skinIndex = new Uint16Array(n * 4);
+    const skinWeight = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      colors[i * 3] = color.r; colors[i * 3 + 1] = color.g; colors[i * 3 + 2] = color.b;
+      skinIndex[i * 4] = bi;
+      skinWeight[i * 4] = 1;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
+    g.clearGroups();
+    geos.push(g);
+  }
+  for (const m of meshes) m.removeFromParent();
+  const merged = mergeGeometries(geos);
+  geos.forEach(g => g.dispose());
+  if (!merged) return;
+  const skinned = new THREE.SkinnedMesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.03 }));
+  skinned.castShadow = true;
+  skinned.receiveShadow = true;
+  skinned.frustumCulled = false;   // limbs move outside the bind-pose bounds
+  root.add(skinned);
+  root.updateMatrixWorld(true);
+  skinned.bind(new THREE.Skeleton(bones));
 }
 
 export function getRig(obj: THREE.Object3D): HumanoidRig | undefined {
@@ -492,7 +556,7 @@ export function animateHumanoid(obj: THREE.Object3D, t: number, dt: number, stat
   // head: steady while walking, nods while talking, looks down while working
   r.neck.rotation.x = -0.04 * w + Math.sin(t * 5.3) * 0.045 * r.talk + 0.32 * r.work;
   r.neck.rotation.y = Math.sin(t * 0.7) * 0.12 * (1 - w) * (1 - r.work);
-  r.jaw.scale.y = 0.8 + r.talk * (0.06 + 0.06 * Math.max(0, Math.sin(t * 13)));
+  r.jaw.scale.y = 1 + r.talk * (0.075 + 0.075 * Math.max(0, Math.sin(t * 13)));
 
   // blinking
   if (t > r.blinkAt + 0.12) {

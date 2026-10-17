@@ -26,6 +26,12 @@ import threading
 import time
 import urllib.request
 
+# Laptops with two GPUs give WebView2 the power-saving one by default; ask Chromium for the
+# high-performance GPU (the 3D city renders on the RTX 3050 instead of the integrated chip).
+_extra = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+if "--force_high_performance_gpu" not in _extra:
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (_extra + " --force_high_performance_gpu").strip()
+
 try:
     import webview  # imported before the backend changes the working directory (pywebview reads it at import)
 except ImportError:

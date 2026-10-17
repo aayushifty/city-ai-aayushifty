@@ -56,7 +56,8 @@ export const CitySimulationView: React.FC = () => {
   const councilRef = useRef<CityGovernmentCouncil>(new CityGovernmentCouncil());
 
   // Primary First-Person exploration & simulation state
-  const [cameraMode, setCameraMode] = useState<CameraMode>('FPV');
+  // Street-level third-person camera by default (GTA style); V toggles first person
+  const [cameraMode, setCameraMode] = useState<CameraMode>('TPV');
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('NONE');
   const [metrics, setMetrics] = useState<CityMetrics>(engineRef.current.metrics);
   const [simulationTime, setSimulationTime] = useState<number>(engineRef.current.simulationTime);

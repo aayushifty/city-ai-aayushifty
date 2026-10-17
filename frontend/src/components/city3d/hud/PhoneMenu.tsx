@@ -13,9 +13,10 @@ export interface HudSettings {
   citizens: boolean;
   missions: boolean;
   notifications: boolean;
+  fps: boolean;
 }
 
-export const DEFAULT_HUD_SETTINGS: HudSettings = { minimap: true, citizens: true, missions: true, notifications: true };
+export const DEFAULT_HUD_SETTINGS: HudSettings = { minimap: true, citizens: true, missions: true, notifications: true, fps: true };
 
 type AppId = 'home' | 'contacts' | 'missions' | 'tasks' | 'alerts' | 'approvals' | 'camera' | 'settings';
 
@@ -241,9 +242,24 @@ const CameraApp: React.FC<{ mode: CameraMode; onSelect: (m: CameraMode) => void;
 };
 
 const SettingsApp: React.FC<{ settings: HudSettings; onChange: (s: HudSettings) => void }> = ({ settings, onChange }) => {
-  const rows: [keyof HudSettings, string][] = [['minimap', 'Mini-map'], ['missions', 'Mission tracker'], ['citizens', 'Citizen activity'], ['notifications', 'Notifications']];
+  const rows: [keyof HudSettings, string][] = [['minimap', 'Mini-map'], ['missions', 'Mission tracker'], ['citizens', 'Citizen activity'], ['notifications', 'Notifications'], ['fps', 'FPS counter']];
+  const [timeOfDay, setTimeOfDay] = useState(() => { try { return window.localStorage.getItem('cityai.timeOfDay') || 'live'; } catch { return 'live'; } });
+  const pickTime = (v: string) => {
+    setTimeOfDay(v);
+    try { window.localStorage.setItem('cityai.timeOfDay', v); } catch { /* storage unavailable */ }
+    window.dispatchEvent(new Event('cityai:timeofday'));
+  };
   return (
     <div className="space-y-1">
+      <div className="p-2.5 rounded-xl bg-white/5">
+        <div className="text-[11.5px] text-slate-100 mb-1.5">Time of day</div>
+        <div className="grid grid-cols-2 gap-1">
+          {[['live', 'Live clock'], ['day', 'Day'], ['golden', 'Golden hour'], ['night', 'Night']].map(([v, l]) => (
+            <button key={v} type="button" onClick={() => pickTime(v)}
+              className={`py-1.5 rounded-lg text-[10.5px] font-semibold border ${timeOfDay === v ? 'border-amber-300/70 bg-amber-400/15 text-amber-100' : 'border-white/10 text-slate-300 hover:bg-white/5'}`}>{l}</button>
+          ))}
+        </div>
+      </div>
       {rows.map(([k, label]) => (
         <label key={k} className="flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 cursor-pointer">
           <span className="text-[11.5px] text-slate-100">{label}</span>

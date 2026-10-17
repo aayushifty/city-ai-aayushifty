@@ -14,6 +14,10 @@ import {
 } from '../../simulation/types';
 import { WorkplaceArchitect } from './WorkplaceArchitect';
 import { createHumanoid, animateHumanoid, ClothingStyle } from './HumanoidBuilder';
+import { buildBoxes, rayToBoxes, stepMovement, TPV_MAX_DIST, TPV_MIN_DIST, WALK_SPEED } from './PlayerController';
+import { buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
+import { spawnPedestrians } from './CityLife';
+import { batchStatic } from './StaticBatcher';
 
 interface CitySceneProps {
   buildings: Building[];
@@ -87,6 +91,11 @@ export const CityScene: React.FC<CitySceneProps> = ({
     velocityY: 0,
     isGrounded: true,
     isPointerLocked: false,
+    vx: 0,
+    vz: 0,
+    bodyYaw: playerState.yaw,   // where the avatar faces (turns toward the direction of travel)
+    camDist: 4.2,               // third-person zoom (mouse wheel)
+    camCurDist: 4.2,            // after camera collision, smoothed
     keys: {
       w: false,
       a: false,
@@ -470,43 +479,33 @@ export const CityScene: React.FC<CitySceneProps> = ({
     scene.add(sun);
     sunLightRef.current = sun;
 
-    // Ground Plate in Clean Daylight Pavement
-    const groundGeo = new THREE.PlaneGeometry(280, 280);
-    const groundMat = new THREE.MeshStandardMaterial({ color: 0x94A3B8, roughness: 0.85, metalness: 0.05 });
+    // ?debug=1 exposes the scene/renderer for performance profiling from the console
+    if (new URLSearchParams(window.location.search).has('debug')) {
+      (window as any).__city = { scene, renderer, camera, sun, fpv: fpv.current, moveBoxes: () => moveBoxes, cameraBoxes: () => cameraBoxes };
+    }
+
+    // Physical sky + sun with a real day/night cycle (follows this computer's clock unless the phone's
+    // Settings pick a fixed time of day)
+    const atmosphere = createAtmosphere(scene, renderer, sun, ambient, hemi);
+    const readTimeSetting = () => { try { return window.localStorage.getItem('cityai.timeOfDay') || 'live'; } catch { return 'live'; } };
+    let timeSetting = readTimeSetting();
+    atmosphere.setHour(hourFor(timeSetting));
+    const onTimeSetting = () => { timeSetting = readTimeSetting(); atmosphere.setHour(hourFor(timeSetting)); };
+    window.addEventListener('cityai:timeofday', onTimeSetting);
+    const clockTimer = window.setInterval(() => { if (timeSetting === 'live') atmosphere.setHour(hourFor('live')); }, 60_000);
+
+    // Ground outside the city blocks (blocks get concrete lots in buildStreetDetail)
+    const groundGeo = new THREE.PlaneGeometry(600, 600);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x5E6B4C, roughness: 1, metalness: 0 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const grid = new THREE.GridHelper(280, 56, 0x64748B, 0xCBD5E1);
-    grid.position.y = -0.02;
-    scene.add(grid);
-
-    // Metropolis Airspace & City Boundary Pylons at ±120m
-    const pylonMat = new THREE.MeshBasicMaterial({ color: 0x00F0FF });
-    for (let bx = -120; bx <= 120; bx += 24) {
-      [-120, 120].forEach(bz => {
-        const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 18), pylonMat);
-        pylon.position.set(bx, 9, bz);
-        scene.add(pylon);
-        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38BDF8 }));
-        beacon.position.set(bx, 18, bz);
-        scene.add(beacon);
-      });
-    }
-    for (let bz = -120; bz <= 120; bz += 24) {
-      [-120, 120].forEach(bx => {
-        const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 18), pylonMat);
-        pylon.position.set(bx, 9, bz);
-        scene.add(pylon);
-        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8), new THREE.MeshBasicMaterial({ color: 0x38BDF8 }));
-        beacon.position.set(bx, 18, bz);
-        scene.add(beacon);
-      });
-    }
-
     // Build Roads & Sidewalks in Clean Daytime Asphalt
+    const sidewalkGroup = new THREE.Group();
+    scene.add(sidewalkGroup);
     roads.forEach(r => {
       const dx = r.end[0] - r.start[0];
       const dz = r.end[1] - r.start[1];
@@ -516,8 +515,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
       const midZ = (r.start[1] + r.end[1]) / 2;
 
       const roadGeo = new THREE.PlaneGeometry(length, 5.2);
-      const roadMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, roughness: 0.75 });
-      const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+      tileUVs(roadGeo, length, 5.2, 6);
+      const roadMesh = new THREE.Mesh(roadGeo, getAsphaltMaterial());
       roadMesh.rotation.x = -Math.PI / 2;
       roadMesh.rotation.z = -angle;
       roadMesh.position.set(midX, 0.02, midZ);
@@ -526,17 +525,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
       scene.add(roadMesh);
       roadMeshMap.current.set(r.id, roadMesh);
 
-      // Center Line (Bright White)
-      const lineGeo = new THREE.PlaneGeometry(length * 0.95, 0.22);
-      const lineMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
-      const line = new THREE.Mesh(lineGeo, lineMat);
-      line.rotation.x = -Math.PI / 2;
-      line.rotation.z = -angle;
-      line.position.set(midX, 0.03, midZ);
-      scene.add(line);
-
       // Concrete Sidewalks in clean daylight stone
-      const swMat = new THREE.MeshStandardMaterial({ color: 0xE2E8F0, roughness: 0.8 });
+      const swMat = new THREE.MeshStandardMaterial({ color: 0xBDB8AE, roughness: 0.9 });
       [-3.1, 3.1].forEach(offY => {
         const swGeo = new THREE.BoxGeometry(length, 0.16, 1.3);
         const swMesh = new THREE.Mesh(swGeo, swMat);
@@ -545,13 +535,20 @@ export const CityScene: React.FC<CitySceneProps> = ({
         const nz = Math.cos(angle) * offY;
         swMesh.position.set(midX + nx, 0.08, midZ + nz);
         swMesh.receiveShadow = true;
-        scene.add(swMesh);
+        sidewalkGroup.add(swMesh);
       });
     });
+
+    batchStatic(sidewalkGroup);   // ~120 sidewalk slabs -> one mesh
+
+    // Lane markings, zebra crossings and concrete block lots
+    buildStreetDetail(scene, roads, intersections, buildings);
 
     // Build Specialized Character Workplaces & Living Urban Blocks
     buildings.forEach(b => {
       const bGroup = WorkplaceArchitect.buildWorkplace(b, createSignboardTexture);
+      // merge the static, plain-coloured parts (rotating holograms keep their own meshes)
+      batchStatic(bGroup, o => o.parent === bGroup && o.userData?.rotSpeed !== undefined);
       scene.add(bGroup);
       buildingGroupMap.current.set(b.id, bGroup);
     });
@@ -586,6 +583,58 @@ export const CityScene: React.FC<CitySceneProps> = ({
     govGroup.position.set(fpv.current.x, fpv.current.y - 1.85, fpv.current.z);
     scene.add(govGroup);
     governorRef.current = govGroup;
+
+    // Background pedestrians on the sidewalks (scenery, not AI citizens)
+    const life = spawnPedestrians(scene, roads, 28);
+
+    // Collision volumes: the player is a 0.45 circle against footprints grown by 0.9 (same reach as the
+    // old 1.35 padding); the third-person camera stops just outside the walls.
+    const PLAYER_RADIUS = 0.45;
+    const moveBoxes = buildBoxes(buildings, 0.9);
+    const cameraBoxes = buildBoxes(buildings, 0.35);
+
+    // Real buildings, street lights, traffic lights, district signs and car models load in the background;
+    // their collision boxes join the player's and the camera's as soon as they arrive.
+    let disposed = false;
+    let disposeDressing: (() => void) | null = null;
+    const keepClear = [
+      { x: fpv.current.x, z: fpv.current.z, r: 4 },                        // spawn point
+      ...[-6, 4, 14, 24, 34, 44, 54].map(z => ({ x: 6, z, r: 8 })),        // executive runway
+    ];
+    dressCity(scene, buildings, roads, intersections, keepClear).then(res => {
+      if (disposed) { res.dispose(); return; }
+      disposeDressing = res.dispose;
+      for (const id of res.hiddenBuildingIds) {
+        const g = buildingGroupMap.current.get(id);
+        if (g) g.visible = false;
+      }
+      for (const b of res.obstacles) {
+        moveBoxes.push({ ...b, minX: b.minX - 0.9, maxX: b.maxX + 0.9, minZ: b.minZ - 0.9, maxZ: b.maxZ + 0.9 });
+        if (b.height > 4) cameraBoxes.push(b);
+      }
+    }).catch(err => console.warn('City dressing failed to load', err));
+
+    loadCarFactory().then(makeCar => {
+      if (disposed) return;
+      vehicles.forEach((v, i) => {
+        const g = vehicleGroupMap.current.get(v.id);
+        if (!g) return;
+        g.clear();
+        g.add(makeCar(v, i));
+      });
+    }).catch(err => console.warn('Car models failed to load', err));
+
+    // Mouse wheel: third-person zoom, or orbit distance in Orbit view
+    const onWheel = (e: WheelEvent) => {
+      const mode = cameraModeRef.current;
+      if (mode === 'TPV' || mode === 'SHOULDER_CAM') {
+        e.preventDefault();
+        fpv.current.camDist = Math.max(TPV_MIN_DIST, Math.min(TPV_MAX_DIST, fpv.current.camDist * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
+      } else if (mode === 'ORBIT') {
+        e.preventDefault();
+        orbitState.current.distance = Math.max(25, Math.min(180, orbitState.current.distance * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
+      }
+    };
 
     // Pointer Lock & Mouse Look Listeners (Works for both 1st Person, 3rd Person, and Flight)
     const onCanvasClick = () => {
@@ -721,6 +770,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     };
 
     container.addEventListener('click', onCanvasClick);
+    container.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('pointerlockchange', onPointerLockChange);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mousedown', onMouseDown);
@@ -750,7 +800,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     const animate = (currentTime: number) => {
       animId = requestAnimationFrame(animate);
-      const dt = Math.min((currentTime - lastLoopTime) / 1000.0, 0.1);
+      // the first rAF timestamp can predate the setup time: never step backwards
+      const dt = Math.max(0, Math.min((currentTime - lastLoopTime) / 1000.0, 0.1));
       lastLoopTime = currentTime;
 
       const p = fpv.current;
@@ -876,75 +927,23 @@ export const CityScene: React.FC<CitySceneProps> = ({
       } else {
         // --- Supreme Governor On-Foot Movement Physics ---
         if (cameraModeRef.current === 'FPV' || cameraModeRef.current === 'STREET_LEVEL' || cameraModeRef.current === 'SHOULDER_CAM' || cameraModeRef.current === 'TPV') {
-          const moveSpeed = (p.keys.shift ? 10.5 : 5.8) * dt;
-          let moveX = 0;
-          let moveZ = 0;
-
-          const forwardX = -Math.sin(p.yaw);
-          const forwardZ = -Math.cos(p.yaw);
-          const rightX = Math.cos(p.yaw);
-          const rightZ = -Math.sin(p.yaw);
-
-          if (p.keys.w) { moveX += forwardX; moveZ += forwardZ; }
-          if (p.keys.s) { moveX -= forwardX; moveZ -= forwardZ; }
-          if (p.keys.d) { moveX += rightX; moveZ += rightZ; }
-          if (p.keys.a) { moveX -= rightX; moveZ -= rightZ; }
-
-          const moveLen = Math.hypot(moveX, moveZ);
-          if (moveLen > 0.001) {
-            const proposedX = p.x + (moveX / moveLen) * moveSpeed;
-            const proposedZ = p.z + (moveZ / moveLen) * moveSpeed;
-
-            // Robust Collision Detection against Solid Buildings (including annexes)
-            let collidesX = false;
-            let collidesZ = false;
-
-            for (let i = 0; i < buildings.length; i++) {
-              const b = buildings[i];
-              if (b.type === 'PARK_SPACE') continue;
-
-              const pad = 1.35;
-              const minX = b.x - b.width / 2 - pad;
-              const maxX = b.x + b.width / 2 + pad;
-              const minZ = b.z - b.depth / 2 - pad;
-              const maxZ = b.z + b.depth / 2 + pad;
-              const bHeight = b.height + 2.5;
-
-              if (p.y < bHeight) {
-                if (proposedX >= minX && proposedX <= maxX && p.z >= minZ && p.z <= maxZ) {
-                  collidesX = true;
-                }
-                if (p.x >= minX && p.x <= maxX && proposedZ >= minZ && proposedZ <= maxZ) {
-                  collidesZ = true;
-                }
-              }
-            }
-
-            const CITY_BOUND = 118.0;
-            if (!collidesX && Math.abs(proposedX) < CITY_BOUND) p.x = proposedX;
-            if (!collidesZ && Math.abs(proposedZ) < CITY_BOUND) p.z = proposedZ;
+          // Camera-relative movement with acceleration, body turning and sliding collisions
+          const isFirstPerson = cameraModeRef.current === 'FPV' || cameraModeRef.current === 'STREET_LEVEL';
+          const move = { x: p.x, z: p.z, y: p.y, vx: p.vx, vz: p.vz, bodyYaw: p.bodyYaw };
+          const people = [...agentCharactersRef.current.map(ag => ({ x: ag.x, z: ag.z, r: 0.55 })), ...life.obstacles()];
+          stepMovement(
+            move,
+            { forward: (p.keys.w ? 1 : 0) - (p.keys.s ? 1 : 0), right: (p.keys.d ? 1 : 0) - (p.keys.a ? 1 : 0), sprint: p.keys.shift },
+            p.yaw, dt, moveBoxes, people, PLAYER_RADIUS, 118,
+          );
+          if (Number.isFinite(move.x) && Number.isFinite(move.z) && Number.isFinite(move.vx) && Number.isFinite(move.vz)) {
+            p.x = move.x; p.z = move.z; p.vx = move.vx; p.vz = move.vz;
+          } else {
+            // never let a bad input poison the player position (keep the last good state)
+            p.vx = 0; p.vz = 0;
           }
-
-          // Anti-Stuck Ejection from Building Footprints
-          buildings.forEach(b => {
-            if (b.type === 'PARK_SPACE') return;
-            const pad = 1.35;
-            const minX = b.x - b.width / 2 - pad;
-            const maxX = b.x + b.width / 2 + pad;
-            const minZ = b.z - b.depth / 2 - pad;
-            const maxZ = b.z + b.depth / 2 + pad;
-            if (p.x > minX && p.x < maxX && p.z > minZ && p.z < maxZ && p.y < b.height + 2) {
-              const distL = Math.abs(p.x - minX);
-              const distR = Math.abs(maxX - p.x);
-              const distT = Math.abs(p.z - minZ);
-              const distB = Math.abs(maxZ - p.z);
-              const minD = Math.min(distL, distR, distT, distB);
-              if (minD === distL) p.x = minX - 0.25;
-              else if (minD === distR) p.x = maxX + 0.25;
-              else if (minD === distT) p.z = minZ - 0.25;
-              else p.z = maxZ + 0.25;
-            }
-          });
+          // In first person the body always faces where you look; in third person it turns toward travel
+          p.bodyYaw = isFirstPerson ? p.yaw : move.bodyYaw;
 
           // Jump & Gravity
           if (!p.isGrounded) {
@@ -998,15 +997,18 @@ export const CityScene: React.FC<CitySceneProps> = ({
           const gov = governorRef.current;
           gov.scale.set(1.0, 1.0, 1.0);
           gov.position.set(p.x, p.y - 1.85, p.z);
-          gov.rotation.set(0, p.yaw + Math.PI, 0);
+          gov.rotation.set(0, p.bodyYaw + Math.PI, 0);
 
           // Hide avatar in first person view so own head does not block view; show in third person & orbit!
           gov.visible = (cameraModeRef.current !== 'FPV' && cameraModeRef.current !== 'STREET_LEVEL');
 
           // Walk / run cycle (only worth animating when the avatar is visible)
-          const isMoving = p.keys.w || p.keys.s || p.keys.a || p.keys.d;
+          const groundSpeed = Math.hypot(p.vx, p.vz);
           if (gov.visible && (gov as any)._human) {
-            animateHumanoid((gov as any)._human, currentTime / 1000, dt, { moving: isMoving, speed: p.keys.shift ? 1.8 : 1 });
+            animateHumanoid((gov as any)._human, currentTime / 1000, dt, {
+              moving: groundSpeed > 0.6,
+              speed: groundSpeed > WALK_SPEED + 0.5 ? 1.8 : 1,
+            });
           }
         }
 
@@ -1052,35 +1054,30 @@ export const CityScene: React.FC<CitySceneProps> = ({
           camera.lookAt(new THREE.Vector3().addVectors(camera.position, lookDir));
 
         } else if (cameraModeRef.current === 'SHOULDER_CAM' || cameraModeRef.current === 'TPV') {
-          // Third-Person Over-the-Shoulder View (100% Synchronized with FPV Orientation)
+          // Third-person orbit camera: mouse turns the camera around a pivot just over the right shoulder,
+          // the wheel zooms, and the camera is pulled in (never through) when a building is in the way.
           const forwardDir = new THREE.Vector3(
             -Math.sin(p.yaw) * Math.cos(p.pitch),
             Math.sin(p.pitch),
             -Math.cos(p.yaw) * Math.cos(p.pitch)
           );
-
-          // Right shoulder lateral offset so avatar does not block the crosshair reticle
           const rightX = Math.cos(p.yaw);
           const rightZ = -Math.sin(p.yaw);
-          const shoulderSide = 0.55;
+          const shoulder = 0.45 * Math.min(1, p.camCurDist / 4);
+          const pivotX = p.x + rightX * shoulder;
+          const pivotY = p.y + 0.15;
+          const pivotZ = p.z + rightZ * shoulder;
 
-          const backDist = 3.6;
-          const eyeHeight = 0.25;
+          const hit = rayToBoxes(pivotX, pivotY, pivotZ, -forwardDir.x, -forwardDir.y, -forwardDir.z, p.camDist, cameraBoxes);
+          const wanted = Math.max(0.6, Math.min(p.camDist, hit - 0.25));
+          // pull in instantly (no clipping), ease back out smoothly
+          p.camCurDist = wanted < p.camCurDist ? wanted : p.camCurDist + (wanted - p.camCurDist) * (1 - Math.exp(-dt * 6));
 
-          // Camera placed behind along -forwardDir (when mouse moves DOWN, pitch < 0, cam elevates to look down)
-          const camX = p.x + rightX * shoulderSide - forwardDir.x * backDist;
-          const camY = Math.max(0.45, p.y + eyeHeight - forwardDir.y * backDist);
-          const camZ = p.z + rightZ * shoulderSide - forwardDir.z * backDist;
-
+          const camX = pivotX - forwardDir.x * p.camCurDist;
+          const camY = Math.max(0.4, pivotY - forwardDir.y * p.camCurDist);
+          const camZ = pivotZ - forwardDir.z * p.camCurDist;
           camera.position.set(camX, camY, camZ);
-
-          // Look 25 meters ahead along the exact forwardDir vector (100% synchronized with FPV)
-          const lookTarget = new THREE.Vector3(
-            camX + forwardDir.x * 25.0,
-            camY + forwardDir.y * 25.0,
-            camZ + forwardDir.z * 25.0
-          );
-          camera.lookAt(lookTarget);
+          camera.lookAt(camX + forwardDir.x * 25.0, camY + forwardDir.y * 25.0, camZ + forwardDir.z * 25.0);
 
         } else if (cameraModeRef.current === 'TOP_DOWN') {
           camera.position.set(0, 130, 0.1);
@@ -1113,6 +1110,17 @@ export const CityScene: React.FC<CitySceneProps> = ({
         faceCamera((jetRef.current as any)._billboard);
       }
 
+      life.update(dt, currentTime / 1000, camera.position);
+
+      // Traffic: cars follow the engine's vehicles every frame (they used to be placed once)
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        const vg = vehicleGroupMap.current.get(v.id);
+        if (!vg) continue;
+        vg.position.set(v.x, 0.05, v.z);
+        vg.rotation.y = -v.angle;
+      }
+
       // Citizens face the Governor when close and swing their limbs while walking
       const walkNow = Date.now();
       for (const ag of agentCharactersRef.current) {
@@ -1120,7 +1128,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         if (!aGroup) continue;
         const dx = p.x - ag.x;
         const dz = p.z - ag.z;
-        aGroup.rotation.y = Math.hypot(dx, dz) <= 4.2 ? Math.atan2(dx, dz) : -ag.angle;
+        aGroup.rotation.y = Math.hypot(dx, dz) <= 4.2 ? Math.atan2(dx, dz) : Math.PI / 2 - ag.angle;
         const g = aGroup as any;
         if (g._human) {
           const near = Math.hypot(dx, dz) <= 4.2;
@@ -1136,9 +1144,12 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       // Always rotate holographic citizen badges and thought bubbles to face the camera
       agentMeshMap.current.forEach((aGroup) => {
+        // floating labels only near the camera (a city full of giant signs is not realistic)
+        const near = aGroup.position.distanceTo(camera.position) < 30;
         const bb = (aGroup as any)._billboard;
-        if (bb) faceCamera(bb);
+        if (bb) { bb.visible = near; if (near) faceCamera(bb); }
         const tb = (aGroup as any)._thought;
+        if (tb && tb.visible && !near) tb.visible = false;
         if (tb && tb.visible) faceCamera(tb);
       });
 
@@ -1151,8 +1162,15 @@ export const CityScene: React.FC<CitySceneProps> = ({
         });
       });
 
+      // The sun's shadow map is the most expensive pass and the city is static: refresh it every other
+      // frame (moving people and cars still update their shadows 30 times a second).
+      shadowFrame = (shadowFrame + 1) % 2;
+      renderer.shadowMap.needsUpdate = shadowFrame === 0;
       renderer.render(scene, camera);
     };
+    let shadowFrame = 0;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     animId = requestAnimationFrame(animate);
 
     const handleResize = () => {
@@ -1169,6 +1187,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       cancelAnimationFrame(animId);
       container.removeEventListener('click', onCanvasClick);
       document.removeEventListener('pointerlockchange', onPointerLockChange);
+      container.removeEventListener('wheel', onWheel);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
@@ -1178,6 +1197,12 @@ export const CityScene: React.FC<CitySceneProps> = ({
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+      disposed = true;
+      if (disposeDressing) disposeDressing();
+      window.removeEventListener('cityai:timeofday', onTimeSetting);
+      window.clearInterval(clockTimer);
+      life.dispose();
+      atmosphere.dispose();
       agentMeshMap.current.clear();
       agentThoughtMeshMap.current.clear();
       vehicleGroupMap.current.clear();
@@ -1219,22 +1244,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
         });
         aGroup.add(human);
 
-        // 6. Glowing District Light Beacon (14 Meters High - Visible Across Metropolis)
-        // Starts above the head so it marks the citizen from afar without cutting through the figure.
-        const beaconGeo = new THREE.CylinderGeometry(0.06, 0.22, 12.0, 12, 1, true);
-        const beaconMat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(ag.color),
-          transparent: true,
-          opacity: 0.22,
-          side: THREE.DoubleSide,
-          depthWrite: false
-        });
-        const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-        beacon.position.y = 8.6;
-        aGroup.add(beacon);
-
         // 7. Glowing Base Status Ring
-        const ringGeo = new THREE.RingGeometry(0.65, 0.95, 32);
+        const ringGeo = new THREE.RingGeometry(0.55, 0.7, 32);
         const ringMat = new THREE.MeshBasicMaterial({
           color: ag.status === 'WORKING' ? 0xF59E0B : 0x10B981,
           side: THREE.DoubleSide
@@ -1273,22 +1284,22 @@ export const CityScene: React.FC<CitySceneProps> = ({
         // Action Key Hints
         tCtx.fillStyle = '#F59E0B';
         tCtx.font = 'bold 14px monospace';
-        tCtx.fillText(`[E] 2-Way Comms  •  [F] Work  •  ${ag.status}`, 256, 114);
+        tCtx.fillText('[E] Talk  •  [T] Assign  •  [Q] Inspect', 256, 114);   // live status is in the HUD
 
         const tagTex = new THREE.CanvasTexture(tagCanvas);
         const tagMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(2.5, 0.72),
+          new THREE.PlaneGeometry(1.6, 0.46),
           new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, side: THREE.DoubleSide })
         );
-        tagMesh.position.y = 2.48;
+        tagMesh.position.y = 2.15;
         aGroup.add(tagMesh);
 
         // Thought Bubble
         const bubbleMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(3.6, 0.95),
+          new THREE.PlaneGeometry(2.3, 0.6),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide })
         );
-        bubbleMesh.position.y = 3.30;
+        bubbleMesh.position.y = 2.65;
         aGroup.add(bubbleMesh);
         agentThoughtMeshMap.current.set(ag.id, bubbleMesh);
 

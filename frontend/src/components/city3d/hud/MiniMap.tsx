@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Map as MapIcon, X } from 'lucide-react';
 import { AgentCharacter, Building, PlayerState, RoadSegment } from '../../../simulation/types';
 import { PANEL, statusHex, useLiveData } from './useCityLiveData';
+import { DistrictZone } from '../../../simulation/districts';
 
 /**
  * GTA-style radar: drawn from the same roads, buildings and citizen positions as the 3D scene,
@@ -27,9 +28,25 @@ interface Props {
   onSelectCitizen: (id: string) => void;
   locationName: string;
   openSignal?: number;   // bump to open the full map (e.g. from the phone)
+  zones: DistrictZone[];
 }
 
 type Projector = (x: number, z: number) => [number, number];
+
+function drawZones(ctx: CanvasRenderingContext2D, project: Projector, zones: DistrictZone[]) {
+  for (const z of zones) {
+    const pts = [project(z.cx - z.half, z.cz - z.half), project(z.cx + z.half, z.cz - z.half), project(z.cx + z.half, z.cz + z.half), project(z.cx - z.half, z.cz + z.half)];
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = z.color + '33';
+    ctx.fill();
+    ctx.strokeStyle = z.color + 'AA';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
 
 function drawWorld(
   ctx: CanvasRenderingContext2D, project: Projector, scale: number,
@@ -96,7 +113,7 @@ function setupCanvas(canvas: HTMLCanvasElement, w: number, h: number): CanvasRen
   return ctx;
 }
 
-export const MiniMap: React.FC<Props> = ({ buildings, roads, agents, player, onSelectCitizen, locationName, openSignal }) => {
+export const MiniMap: React.FC<Props> = ({ buildings, roads, agents, player, onSelectCitizen, locationName, openSignal, zones }) => {
   const live = useLiveData();
   const radarRef = useRef<HTMLCanvasElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -142,6 +159,7 @@ export const MiniMap: React.FC<Props> = ({ buildings, roads, agents, player, onS
 
     ctx.fillStyle = 'rgba(15,23,42,0.85)';
     ctx.fillRect(0, 0, RADAR_SIZE, RADAR_SIZE);
+    drawZones(ctx, project, zones);
     drawWorld(ctx, project, scale, buildings, roads);
 
     for (const ag of agents) {
@@ -171,7 +189,7 @@ export const MiniMap: React.FC<Props> = ({ buildings, roads, agents, player, onS
     ctx.fillText('N', rx, ry + 0.5);
 
     drawArrow(ctx, c, c, 0, 8);
-  }, [player.x, player.z, player.yaw, agents, buildings, roads, statusById]);
+  }, [player.x, player.z, player.yaw, agents, buildings, roads, statusById, zones]);
 
   return (
     <>
@@ -200,6 +218,7 @@ export const MiniMap: React.FC<Props> = ({ buildings, roads, agents, player, onS
           agents={agents}
           player={player}
           statusById={statusById}
+          zones={zones}
           onClose={() => setExpanded(false)}
           onSelectCitizen={(id) => { setExpanded(false); onSelectCitizen(id); }}
         />
@@ -216,11 +235,12 @@ interface FullMapProps {
   agents: AgentCharacter[];
   player: PlayerState;
   statusById: Map<string, string>;
+  zones: DistrictZone[];
   onClose: () => void;
   onSelectCitizen: (id: string) => void;
 }
 
-const FullMap: React.FC<FullMapProps> = ({ buildings, roads, agents, player, statusById, onClose, onSelectCitizen }) => {
+const FullMap: React.FC<FullMapProps> = ({ buildings, roads, agents, player, statusById, zones, onClose, onSelectCitizen }) => {
   const live = useLiveData();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -257,7 +277,17 @@ const FullMap: React.FC<FullMapProps> = ({ buildings, roads, agents, player, sta
 
     ctx.fillStyle = 'rgba(15,23,42,0.9)';
     ctx.fillRect(0, 0, size.w, size.h);
+    drawZones(ctx, project, zones);
     drawWorld(ctx, project, scale, buildings, roads);
+    // district names along the top edge of each zone
+    ctx.font = '800 12px ui-sans-serif, system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const z of zones) {
+      const [x, y] = project(z.cx, z.cz - z.half);
+      ctx.fillStyle = z.color;
+      ctx.fillText(z.name.toUpperCase(), x, y + 9);
+    }
 
     // workplace labels
     ctx.font = '600 11px ui-sans-serif, system-ui';
@@ -295,7 +325,7 @@ const FullMap: React.FC<FullMapProps> = ({ buildings, roads, agents, player, sta
     const [px, py] = project(player.x, player.z);
     // forward = (-sin yaw, -cos yaw) and screen y grows with z, so the up-pointing arrow turns by -yaw
     drawArrow(ctx, px, py, -player.yaw, 10);
-  }, [size, bounds, buildings, roads, agents, player.x, player.z, player.yaw, statusById, hover]);
+  }, [size, bounds, buildings, roads, agents, player.x, player.z, player.yaw, statusById, hover, zones]);
 
   const pick = (e: React.MouseEvent): string | null => {
     const p = projRef.current;

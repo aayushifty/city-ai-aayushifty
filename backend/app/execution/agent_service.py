@@ -29,6 +29,7 @@ from app.models.schemas import (
 from app.providers.base import ModelCompletionRequest
 from app.providers.router import model_router
 from app.execution.computer_service import computer_service
+from app.execution.roster import CITIZENS
 
 logger = logging.getLogger("city_ai.agent_service")
 
@@ -50,139 +51,8 @@ class CitizenExecutionService:
         self._init_citizens()
 
     def _init_citizens(self):
-        """Initializes the 10 persistent citizen personas mapped to specialized local roles."""
-        citizens_data = [
-            {
-                "id": "agent-coordinator",
-                "name": "Alex Vance",
-                "title": "Master Orchestrator",
-                "profession": "Chief Systems Architect & Orchestrator",
-                "department": "Executive Master Orchestration (Citadel Spire)",
-                "color": "#38BDF8",
-                "role_key": "coordinator",
-                "capabilities": ["Task Decomposition", "DAG Scheduling", "Resource Allocation", "Deadlock Resolution"],
-                "tools": ["ModelRouter", "DAGScheduler", "ProcessRunner", "WorkspaceManager"],
-                "home_building_id": "bld-citadel",
-                "thought": "Metropolis operating systems synchronized and on standby."
-            },
-            {
-                "id": "agent-analyst",
-                "name": "Dr. Maya Lin",
-                "title": "Product Vision Analyst",
-                "profession": "Requirements Engineer & Product Analyst",
-                "department": "Requirements & PRD Lab (Vision Lab)",
-                "color": "#C084FC",
-                "role_key": "analyst",
-                "capabilities": ["PRD Formulation", "Contract Verification", "User Stories", "Acceptance Testing"],
-                "tools": ["MarkdownSynthesizer", "ContractValidator", "WorkspaceReader"],
-                "home_building_id": "bld-vision-lab",
-                "thought": "Standing by to analyze governor specifications and produce PRDs."
-            },
-            {
-                "id": "agent-architect",
-                "name": "Marcus Vance",
-                "title": "Principal Software Architect",
-                "profession": "Domain Architect & Civil Modeler",
-                "department": "System Architecture (Blueprint Complex)",
-                "color": "#3B82F6",
-                "role_key": "architect",
-                "capabilities": ["Clean Architecture", "Type Hints", "Schema Normalization", "Structural Engineering"],
-                "tools": ["SchemaArchitect", "DDLGenerator", "InterfaceValidator"],
-                "home_building_id": "bld-blueprint",
-                "thought": "Architecture blueprints and database contracts ready for deployment."
-            },
-            {
-                "id": "agent-engineer",
-                "name": "Devon Cross",
-                "title": "Senior Implementation Engineer",
-                "profession": "Full-Stack Software Engineer",
-                "department": "Source Code Fabrication (Foundry)",
-                "color": "#F59E0B",
-                "role_key": "engineer",
-                "capabilities": ["Python 3.13 / FastAPI", "TypeScript / React", "AsyncIO Concurrency", "File Operations"],
-                "tools": ["FileEditor", "CodeFabricator", "ASTValidator", "ProcessRunner"],
-                "home_building_id": "bld-foundry",
-                "thought": "Compilers primed. Ready to write and test production code."
-            },
-            {
-                "id": "agent-qa",
-                "name": "Elena Rostova",
-                "title": "QA Bastion Test Lead",
-                "profession": "Automated Test Engineer & Verifier",
-                "department": "Quality Assurance & Automated Verification (QA Bastion)",
-                "color": "#10B981",
-                "role_key": "qa",
-                "capabilities": ["Pytest Automation", "Coverage Profiling", "Mutation Testing", "Regression Verification"],
-                "tools": ["PytestVerifier", "CoverageProfiler", "SyntaxChecker"],
-                "home_building_id": "bld-qa-bastion",
-                "thought": "Automated test suites ready for regression execution."
-            },
-            {
-                "id": "agent-diagnostic",
-                "name": "Dr. Aaron Chen",
-                "title": "Diagnostic Specialist",
-                "profession": "Root Cause & Troubleshooting Specialist",
-                "department": "Diagnostic Core & Troubleshooting",
-                "color": "#EC4899",
-                "role_key": "diagnostic",
-                "capabilities": ["Traceback Deconstruction", "Log Telemetry", "Memory Profiling", "RCA Reports"],
-                "tools": ["TracebackAnalyzer", "LogScanner", "DiagnosticDumper"],
-                "home_building_id": "bld-diagnostic",
-                "thought": "Telemetry pipelines active. No system errors detected."
-            },
-            {
-                "id": "agent-security",
-                "name": "Kaelen Voss",
-                "title": "Chief Security Architect",
-                "profession": "Cybersecurity & Policy Enforcement Officer",
-                "department": "Security Citadel & Policy Vault",
-                "color": "#EF4444",
-                "role_key": "security",
-                "capabilities": ["Path Containment Jail", "Secret Sanitization", "Command Whitelisting", "Zero-Trust Auditing"],
-                "tools": ["SecurityEngine", "JailValidator", "SecretRedactor"],
-                "home_building_id": "bld-security",
-                "thought": "Zero-trust sandbox perimeter secure. All filesystems jailed."
-            },
-            {
-                "id": "agent-devops",
-                "name": "Sora Takahashi",
-                "title": "Site Reliability Engineer",
-                "profession": "DevOps & Cloud Infrastructure Specialist",
-                "department": "Cloud Release Dock & CI/CD",
-                "color": "#06B6D4",
-                "role_key": "devops",
-                "capabilities": ["Docker OCI Containers", "GitHub Actions CI", "Healthchecks", "Artifact Packaging"],
-                "tools": ["DockerComposer", "CIPipelineBuilder", "WorkspacePackager"],
-                "home_building_id": "bld-release-dock",
-                "thought": "Deployment pipelines and packaging targets available."
-            },
-            {
-                "id": "agent-constructor",
-                "name": "Harlan Drake",
-                "title": "Civil Infrastructure Superintendent",
-                "profession": "Structural Civil & Construction Engineer",
-                "department": "Civic Works & Heavy Construction",
-                "color": "#F97316",
-                "role_key": "constructor",
-                "capabilities": ["Structural Reinforcement", "Concrete & Steel Specs", "Utility Hookup", "Blueprint Execution"],
-                "tools": ["BlueprintReader", "CivilSpecWriter", "SiteSuperintendent"],
-                "home_building_id": "bld-construction",
-                "thought": "Civic grid foundations calibrated. Structural equipment standing by."
-            },
-            {
-                "id": "agent-doctor",
-                "name": "Dr. Evelyn Reed",
-                "title": "Chief Medical Officer",
-                "profession": "Emergency Health & Biosafety Lead",
-                "department": "Civic Medical Center",
-                "color": "#14B8A6",
-                "role_key": "doctor",
-                "capabilities": ["Emergency Triage", "Bio-Monitoring Protocols", "Crisis Response", "Health Analytics"],
-                "tools": ["TriageProtocol", "HealthMetricsAnalyzer", "EmergencyDispatcher"],
-                "home_building_id": "bld-hospital",
-                "thought": "Trauma bays ready. Citizen health index nominal."
-            }
-        ]
+        """Initializes the 15 persistent citizen personas mapped to specialized local roles."""
+        citizens_data = CITIZENS
 
         for c in citizens_data:
             role_k = c.get("role_key", "coordinator")

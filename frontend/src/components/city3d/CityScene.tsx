@@ -128,6 +128,12 @@ export const CityScene: React.FC<CitySceneProps> = ({
     agentCharactersRef.current = agentCharacters;
   }, [agentCharacters]);
 
+  // The scene and render loop are created once; they read the latest camera mode and callbacks from refs.
+  const cameraModeRef = useRef<CameraMode>(cameraMode);
+  cameraModeRef.current = cameraMode;
+  const cbRef = useRef({ onUpdatePlayer, onInteractWithAgent, onDirectWorkCommand, onOpenPublicMissions, onSelectCameraMode, onToggleJetFlight });
+  cbRef.current = { onUpdatePlayer, onInteractWithAgent, onDirectWorkCommand, onOpenPublicMissions, onSelectCameraMode, onToggleJetFlight };
+
   // Keep jetState synced if toggled via external UI or HUD button
   useEffect(() => {
     if (playerState.isPilotingJet !== undefined && playerState.isPilotingJet !== jetState.current.isPiloted) {
@@ -692,7 +698,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const onPointerLockChange = () => {
       const isLocked = document.pointerLockElement === container;
       fpv.current.isPointerLocked = isLocked;
-      onUpdatePlayer({ isPointerLocked: isLocked });
+      cbRef.current.onUpdatePlayer({ isPointerLocked: isLocked });
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -710,7 +716,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           fpv.current.yaw -= e.movementX * sensitivity;
           fpv.current.pitch = Math.max(-1.1, Math.min(1.1, fpv.current.pitch - e.movementY * sensitivity));
         }
-      } else if (orbitState.current.isDragging && cameraMode === 'ORBIT') {
+      } else if (orbitState.current.isDragging && cameraModeRef.current === 'ORBIT') {
         // Fallback Orbit Drag
         const dx = e.clientX - orbitState.current.prevX;
         const dy = e.clientY - orbitState.current.prevY;
@@ -722,7 +728,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      if (!fpv.current.isPointerLocked && cameraMode === 'ORBIT' && e.button === 0) {
+      if (!fpv.current.isPointerLocked && cameraModeRef.current === 'ORBIT' && e.button === 0) {
         orbitState.current.isDragging = true;
         orbitState.current.prevX = e.clientX;
         orbitState.current.prevY = e.clientY;
@@ -751,14 +757,14 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       // 'V' Key: Toggle between First-Person View [FPV] and Third-Person View [TPV]
       if (k === 'v') {
-        if (onSelectCameraMode) {
+        if (cbRef.current.onSelectCameraMode) {
           if (jetState.current.isPiloted) {
-            onSelectCameraMode(cameraMode === 'JET_CHASE' ? 'JET_COCKPIT' : 'JET_CHASE');
+            cbRef.current.onSelectCameraMode(cameraModeRef.current === 'JET_CHASE' ? 'JET_COCKPIT' : 'JET_CHASE');
           } else {
-            if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL') {
-              onSelectCameraMode('TPV');
+            if (cameraModeRef.current === 'FPV' || cameraModeRef.current === 'STREET_LEVEL') {
+              cbRef.current.onSelectCameraMode('TPV');
             } else {
-              onSelectCameraMode('FPV');
+              cbRef.current.onSelectCameraMode('FPV');
             }
           }
         }
@@ -776,16 +782,16 @@ export const CityScene: React.FC<CitySceneProps> = ({
           fpv.current.x = jetState.current.x + 3.2;
           fpv.current.y = 1.85;
           fpv.current.z = jetState.current.z;
-          if (onSelectCameraMode) onSelectCameraMode('TPV');
-          if (onToggleJetFlight) onToggleJetFlight(false);
-          onUpdatePlayer({ isPilotingJet: false, jetSpeed: 0, jetAltitude: 0 });
+          if (cbRef.current.onSelectCameraMode) cbRef.current.onSelectCameraMode('TPV');
+          if (cbRef.current.onToggleJetFlight) cbRef.current.onToggleJetFlight(false);
+          cbRef.current.onUpdatePlayer({ isPilotingJet: false, jetSpeed: 0, jetAltitude: 0 });
         } else {
           // Board the jet
           jetState.current.isPiloted = true;
           jetState.current.speed = 18.0;
-          if (onSelectCameraMode) onSelectCameraMode('JET_CHASE');
-          if (onToggleJetFlight) onToggleJetFlight(true);
-          onUpdatePlayer({ isPilotingJet: true, jetSpeed: 65, jetAltitude: Math.round(jetState.current.y) });
+          if (cbRef.current.onSelectCameraMode) cbRef.current.onSelectCameraMode('JET_CHASE');
+          if (cbRef.current.onToggleJetFlight) cbRef.current.onToggleJetFlight(true);
+          cbRef.current.onUpdatePlayer({ isPilotingJet: true, jetSpeed: 65, jetAltitude: Math.round(jetState.current.y) });
         }
       }
 
@@ -808,9 +814,9 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
 
         if (closestAgent) {
-          onInteractWithAgent(closestAgent.id);
+          cbRef.current.onInteractWithAgent(closestAgent.id);
         } else if (agentCharactersRef.current.length > 0) {
-          onInteractWithAgent(agentCharactersRef.current[0].id);
+          cbRef.current.onInteractWithAgent(agentCharactersRef.current[0].id);
         }
       }
 
@@ -826,16 +832,16 @@ export const CityScene: React.FC<CitySceneProps> = ({
           }
         }
         if (closestAgent) {
-          onDirectWorkCommand(closestAgent.id);
+          cbRef.current.onDirectWorkCommand(closestAgent.id);
         } else if (agentCharactersRef.current.length > 0) {
-          onDirectWorkCommand(agentCharactersRef.current[0].id);
+          cbRef.current.onDirectWorkCommand(agentCharactersRef.current[0].id);
         }
       }
 
       // 'M' Key: Open Public Missions
       if (k === 'm') {
         if (document.pointerLockElement) document.exitPointerLock();
-        onOpenPublicMissions();
+        cbRef.current.onOpenPublicMissions();
       }
 
       // 'Escape' Key: release pointer lock
@@ -865,6 +871,17 @@ export const CityScene: React.FC<CitySceneProps> = ({
     // 60 FPS Render & Physics Loop
     let animId: number;
     let lastLoopTime = performance.now();
+
+    // Player position goes to React at most 10x/second, or at once when the nearby citizen changes.
+    let lastPlayerSync = 0;
+    let lastNearbyId: string | null | undefined;
+    const syncPlayer = (update: Partial<PlayerState>) => {
+      const now = performance.now();
+      if (now - lastPlayerSync < 100 && update.nearbyAgentId === lastNearbyId) return;
+      lastPlayerSync = now;
+      lastNearbyId = update.nearbyAgentId;
+      cbRef.current.onUpdatePlayer(update);
+    };
 
     const animate = (currentTime: number) => {
       animId = requestAnimationFrame(animate);
@@ -978,7 +995,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           gov.scale.set(0.65, 0.65, 0.65);
         }
 
-        onUpdatePlayer({
+        syncPlayer({
           x: jet.x,
           y: jet.y,
           z: jet.z,
@@ -992,7 +1009,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       } else {
         // --- Supreme Governor On-Foot Movement Physics ---
-        if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL' || cameraMode === 'SHOULDER_CAM' || cameraMode === 'TPV') {
+        if (cameraModeRef.current === 'FPV' || cameraModeRef.current === 'STREET_LEVEL' || cameraModeRef.current === 'SHOULDER_CAM' || cameraModeRef.current === 'TPV') {
           const moveSpeed = (p.keys.shift ? 10.5 : 5.8) * dt;
           let moveX = 0;
           let moveZ = 0;
@@ -1087,7 +1104,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           const nearbyId = closestAgentDist <= 8.5 ? closestAgentId : null;
 
           // Sync player state with React
-          onUpdatePlayer({
+          syncPlayer({
             x: p.x,
             y: p.y,
             z: p.z,
@@ -1111,7 +1128,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           gov.rotation.set(0, p.yaw + Math.PI, 0);
 
           // Hide avatar in first person view so own head does not block view; show in third person & orbit!
-          gov.visible = (cameraMode !== 'FPV' && cameraMode !== 'STREET_LEVEL');
+          gov.visible = (cameraModeRef.current !== 'FPV' && cameraModeRef.current !== 'STREET_LEVEL');
 
           // Walking leg & arm swing animations
           const isMoving = p.keys.w || p.keys.s || p.keys.a || p.keys.d;
@@ -1134,7 +1151,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
       // 2. Camera Positioning & View Modes (FPV, TPV, Jet Chase, Orbit)
       if (jet.isPiloted) {
-        if (cameraMode === 'FPV' || cameraMode === 'JET_COCKPIT') {
+        if (cameraModeRef.current === 'FPV' || cameraModeRef.current === 'JET_COCKPIT') {
           // Cockpit First-Person View inside the jet looking forward
           camera.position.set(jet.x, jet.y + 1.25, jet.z - 0.8);
           const lookDir = new THREE.Vector3(
@@ -1153,7 +1170,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           camera.lookAt(jet.x, jet.y + 0.5, jet.z);
         }
       } else {
-        if (cameraMode === 'FPV' || cameraMode === 'STREET_LEVEL') {
+        if (cameraModeRef.current === 'FPV' || cameraModeRef.current === 'STREET_LEVEL') {
           // First-Person Player View
           camera.position.set(p.x, p.y, p.z);
           const lookDir = new THREE.Vector3(
@@ -1163,7 +1180,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           );
           camera.lookAt(new THREE.Vector3().addVectors(camera.position, lookDir));
 
-        } else if (cameraMode === 'SHOULDER_CAM' || cameraMode === 'TPV') {
+        } else if (cameraModeRef.current === 'SHOULDER_CAM' || cameraModeRef.current === 'TPV') {
           // Third-Person Over-the-Shoulder View (100% Synchronized with FPV Orientation)
           const forwardDir = new THREE.Vector3(
             -Math.sin(p.yaw) * Math.cos(p.pitch),
@@ -1194,7 +1211,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
           );
           camera.lookAt(lookTarget);
 
-        } else if (cameraMode === 'TOP_DOWN') {
+        } else if (cameraModeRef.current === 'TOP_DOWN') {
           camera.position.set(0, 130, 0.1);
           camera.lookAt(0, 0, 0);
 
@@ -1214,6 +1231,25 @@ export const CityScene: React.FC<CitySceneProps> = ({
       }
       if (jetRef.current && (jetRef.current as any)._billboard) {
         (jetRef.current as any)._billboard.quaternion.copy(camera.quaternion);
+      }
+
+      // Citizens face the Governor when close and swing their limbs while walking
+      const walkNow = Date.now();
+      for (const ag of agentCharactersRef.current) {
+        const aGroup = agentMeshMap.current.get(ag.id);
+        if (!aGroup) continue;
+        const dx = p.x - ag.x;
+        const dz = p.z - ag.z;
+        aGroup.rotation.y = Math.hypot(dx, dz) <= 4.2 ? Math.atan2(dx, dz) : -ag.angle;
+        const g = aGroup as any;
+        if (g._leftLeg && g._rightLeg && g._leftArm && g._rightArm) {
+          const isMoving = Math.hypot(ag.x - ag.targetX, ag.z - ag.targetZ) > 0.4 || ag.status === 'TRAVELING';
+          const swing = isMoving ? Math.sin(walkNow * 0.008 * (ag.speed || 3.2)) : 0;
+          g._leftLeg.rotation.x = swing * 0.55;
+          g._rightLeg.rotation.x = -swing * 0.55;
+          g._leftArm.rotation.x = -swing * 0.45;
+          g._rightArm.rotation.x = swing * 0.45;
+        }
       }
 
       // Always rotate holographic citizen badges and thought bubbles to face the camera
@@ -1265,10 +1301,20 @@ export const CityScene: React.FC<CitySceneProps> = ({
       vehicleGroupMap.current.clear();
       buildingGroupMap.current.clear();
       roadMeshMap.current.clear();
+      scene.traverse(obj => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+        mats.forEach(m => {
+          const map = (m as THREE.MeshBasicMaterial).map;
+          if (map) map.dispose();
+          m.dispose();
+        });
+      });
       sceneRef.current = null;
       renderer.dispose();
     };
-  }, [cameraMode]);
+  }, []);
 
   // --- Dynamic AI Agent Characters & Speech ---
   useEffect(() => {
@@ -1667,40 +1713,10 @@ export const CityScene: React.FC<CitySceneProps> = ({
       // Position and heading
       aGroup.position.set(ag.x, 0.05, ag.z);
       
-      // If player is close, face the player! Otherwise use agent trajectory heading
-      const distToPlayer = Math.hypot(playerState.x - ag.x, playerState.z - ag.z);
-      if (distToPlayer <= 4.2) {
-        aGroup.rotation.y = Math.atan2(playerState.x - ag.x, playerState.z - ag.z);
-      } else {
-        aGroup.rotation.y = -ag.angle;
-      }
-
       // Update ring color based on status
       const ring = (aGroup as any)._statusRing;
       if (ring) {
         ring.material.color.setHex(ag.status === 'WORKING' ? 0xF59E0B : 0x10B981);
-      }
-
-      // Animate limb walk stride
-      const leftLeg = (aGroup as any)._leftLeg;
-      const rightLeg = (aGroup as any)._rightLeg;
-      const leftArm = (aGroup as any)._leftArm;
-      const rightArm = (aGroup as any)._rightArm;
-      const isMoving = Math.hypot(ag.x - ag.targetX, ag.z - ag.targetZ) > 0.4 || ag.status === 'TRAVELING';
-
-      if (leftLeg && rightLeg && leftArm && rightArm) {
-        if (isMoving) {
-          const walkCycle = Date.now() * 0.008 * (ag.speed || 3.2);
-          leftLeg.rotation.x = Math.sin(walkCycle) * 0.55;
-          rightLeg.rotation.x = -Math.sin(walkCycle) * 0.55;
-          leftArm.rotation.x = -Math.sin(walkCycle) * 0.45;
-          rightArm.rotation.x = Math.sin(walkCycle) * 0.45;
-        } else {
-          leftLeg.rotation.x = 0;
-          rightLeg.rotation.x = 0;
-          leftArm.rotation.x = 0;
-          rightArm.rotation.x = 0;
-        }
       }
 
       // Update Thought Bubble
@@ -1708,16 +1724,20 @@ export const CityScene: React.FC<CitySceneProps> = ({
       if (bMesh) {
         if (ag.thoughtBubble) {
           const mat = bMesh.material as THREE.MeshBasicMaterial;
-          mat.map = createThoughtTexture(ag.thoughtBubble);
-          mat.opacity = 1.0;
-          mat.needsUpdate = true;
+          if (bMesh.userData.thoughtText !== ag.thoughtBubble) {
+            if (mat.map) mat.map.dispose();
+            mat.map = createThoughtTexture(ag.thoughtBubble);
+            mat.opacity = 1.0;
+            mat.needsUpdate = true;
+            bMesh.userData.thoughtText = ag.thoughtBubble;
+          }
           bMesh.visible = true;
         } else {
           bMesh.visible = false;
         }
       }
     });
-  }, [agentCharacters, playerState.x, playerState.z]);
+  }, [agentCharacters]);
 
   // --- Dynamic Vehicles ---
   useEffect(() => {

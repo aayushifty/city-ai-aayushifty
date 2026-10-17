@@ -15,6 +15,8 @@ from app.models.schemas import (
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
 from app.execution.computer_service import computer_service
+from app.execution.approvals import approval_broker
+from app.config import FREE_MODEL_CATALOG
 
 router = APIRouter(prefix="/api", tags=["agents_and_missions"])
 db = Database(config.DB_PATH)
@@ -29,9 +31,43 @@ async def get_model_registry():
 
 # --- 2. Persistent AI Citizens ---
 
+class ModelAssignment(BaseModel):
+    provider: str = "ollama"
+    model: str
+
+@router.put("/agents/{agent_id}/model", response_model=CitizenProfile)
+def assign_agent_model(agent_id: str, payload: ModelAssignment):
+    """Switches the model a citizen thinks with (any entry of the free model catalog, or any installed Ollama model)."""
+    c = agent_service.get_citizen(agent_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if model_router.get_provider(payload.provider) is None or payload.provider == "mock":
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{payload.provider}'")
+    c.provider_key = payload.provider
+    c.assigned_model = payload.model
+    label = next((m["label"] for m in FREE_MODEL_CATALOG if m["model"] == payload.model), payload.model)
+    c.provider = "Ollama (Local)" if payload.provider == "ollama" else f"{payload.provider} (free tier)"
+    c.thought = f"Now thinking with {label}."
+    return c
+
+# --- Host action approvals (Approve/Deny in the 3D HUD) ---
+
+class ApprovalDecision(BaseModel):
+    approved: bool
+
+@router.get("/host-approvals")
+def list_host_approvals():
+    return {"pending": approval_broker.list_pending(), "recent": approval_broker.list_recent()}
+
+@router.post("/host-approvals/{request_id}/decide")
+def decide_host_approval(request_id: str, payload: ApprovalDecision):
+    if not approval_broker.decide(request_id, payload.approved):
+        raise HTTPException(status_code=404, detail="Approval request not found or already decided")
+    return {"id": request_id, "approved": payload.approved}
+
 @router.get("/agents", response_model=List[CitizenProfile])
 def list_agents():
-    """Returns all 10 persistent AI citizens with real status and deliverables."""
+    """Returns all 15 persistent AI citizens with real status and deliverables."""
     return agent_service.list_citizens()
 
 @router.get("/agents/{agent_id}", response_model=CitizenProfile)

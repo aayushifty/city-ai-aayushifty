@@ -2,6 +2,35 @@ import { Project, Task, ApprovalRequest, ProjectMemoryEntry, BudgetStatus } from
 
 const API_BASE = '/api';
 
+export interface ModelCatalogEntry {
+  provider: string;
+  model: string;
+  label: string;
+  strength: string;
+  size_gb: number;
+  installed: boolean;
+  ready: boolean;
+}
+
+export interface HostApproval {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  kind: 'command' | 'launch' | 'write_file';
+  summary: string;
+  detail: { command?: string; cwd?: string; target?: string; path?: string; preview?: string };
+  task_id?: string;
+  status: 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED';
+  requested_at: string;
+}
+
+/** Turns a backend-relative link (/api/..., /deliverables/...) into a full URL you can open or share. */
+export function absoluteLink(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('/deliverables/')) return `http://127.0.0.1:8000${url}`;
+  return `${window.location.origin}${url}`;
+}
+
 export const api = {
   // Projects
   async listProjects(): Promise<Project[]> {
@@ -91,6 +120,40 @@ export const api = {
     const res = await fetch(`${API_BASE}/models`);
     if (!res.ok) throw new Error('Failed to fetch model registry snapshot');
     return res.json();
+  },
+
+  async getModelCatalog(): Promise<{ ollama_online: boolean; installed_models: { name: string }[]; free_model_catalog: ModelCatalogEntry[] }> {
+    const res = await fetch(`${API_BASE}/models`);
+    if (!res.ok) throw new Error('Failed to fetch model catalog');
+    return res.json();
+  },
+
+  async setAgentModel(agentId: string, provider: string, model: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Model change failed' }));
+      throw new Error(err.detail || 'Model change failed');
+    }
+    return res.json();
+  },
+
+  async listHostApprovals(): Promise<{ pending: HostApproval[]; recent: HostApproval[] }> {
+    const res = await fetch(`${API_BASE}/host-approvals`);
+    if (!res.ok) throw new Error('Failed to list approvals');
+    return res.json();
+  },
+
+  async decideHostApproval(id: string, approved: boolean): Promise<void> {
+    const res = await fetch(`${API_BASE}/host-approvals/${id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved })
+    });
+    if (!res.ok) throw new Error('Failed to record decision');
   },
 
   async listAgents(): Promise<any[]> {

@@ -30,19 +30,13 @@ class GeminiModelProvider(ModelProviderAdapter):
             raise ValueError("GEMINI_API_KEY is not configured")
 
         start = time.perf_counter()
-        model = request.model_name or "gemini-1.5-flash"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+        model = request.model_name or "gemini-2.5-flash"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
         contents = []
-        if request.system_prompt:
-            contents.append({
-                "role": "user",
-                "parts": [{"text": f"SYSTEM INSTRUCTION: {request.system_prompt}"}]
-            })
-        contents.append({
-            "role": "user",
-            "parts": [{"text": request.prompt}]
-        })
+        for m in (request.messages or [{"role": "user", "content": request.prompt}]):
+            role = "model" if m.get("role") == "assistant" else "user"
+            contents.append({"role": role, "parts": [{"text": m.get("content", "")}]})
 
         payload = {
             "contents": contents,
@@ -51,9 +45,13 @@ class GeminiModelProvider(ModelProviderAdapter):
                 "maxOutputTokens": request.max_tokens
             }
         }
+        if request.system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": request.system_prompt}]}
+        if request.json_mode:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, json=payload, headers={"x-goog-api-key": self.api_key})
             resp.raise_for_status()
             data = resp.json()
 

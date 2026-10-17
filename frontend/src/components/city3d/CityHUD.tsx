@@ -42,6 +42,9 @@ import {
   AgentChatMessage
 } from '../../simulation/types';
 import { DeliverableArtifact } from '../../types';
+import { absoluteLink } from '../../api/client';
+import { HostApprovalPanel } from './HostApprovalPanel';
+import { ModelPicker } from './ModelPicker';
 
 interface CityHUDProps {
   metrics: CityMetrics;
@@ -105,6 +108,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   const [taskDesc, setTaskDesc] = useState('');
   const [taskDeliverable, setTaskDeliverable] = useState('');
   const [taskPriority, setTaskPriority] = useState<AgentTask['priority']>('HIGH');
+  const [, forceRender] = useState(0);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [activeAgentTab, setActiveAgentTab] = useState<'PROFILE' | 'ASSIGN' | 'HISTORY'>('PROFILE');
 
   // 2-Way chat input state
@@ -231,6 +236,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between overflow-hidden font-mono">
+      <HostApprovalPanel />
       {/* 1. TOP MINIMAL EXPLORATION BAR */}
       <div className="p-4 flex items-center justify-between">
         {/* Compass & Location Tag */}
@@ -524,6 +530,18 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                   <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
                     {interactingAgent.profession} • {interactingAgent.department}
                   </div>
+                  <div className="mt-1.5 max-w-md">
+                    <ModelPicker
+                      key={interactingAgent.id}
+                      agentId={interactingAgent.id}
+                      currentModel={interactingAgent.aiModel}
+                      onChanged={(model, providerLabel) => {
+                        interactingAgent.aiModel = model;
+                        interactingAgent.aiProvider = providerLabel;
+                        forceRender(n => n + 1);
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -647,6 +665,30 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                               {msg.deliverablePath && (
                                 <div className="text-[10px] font-mono text-slate-300 bg-black/50 px-2.5 py-1.5 rounded border border-slate-700/60 truncate mb-2.5 select-all">
                                   📁 {msg.deliverablePath}
+                                </div>
+                              )}
+                              {msg.deliverableUrl && (
+                                <div className="flex items-center gap-1.5 mb-2.5">
+                                  <a
+                                    href={absoluteLink(msg.deliverableUrl)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-1 min-w-0 text-[10px] font-mono text-cyan-300 hover:text-cyan-200 underline bg-black/50 px-2.5 py-1.5 rounded border border-cyan-700/50 truncate"
+                                    title="Open in a new browser tab"
+                                  >
+                                    🔗 {absoluteLink(msg.deliverableUrl)}
+                                  </a>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(absoluteLink(msg.deliverableUrl!)).catch(() => {});
+                                      setCopiedLink(msg.id);
+                                      setTimeout(() => setCopiedLink(c => (c === msg.id ? null : c)), 1500);
+                                    }}
+                                    className="shrink-0 px-2 py-1.5 text-[10px] font-bold rounded border border-slate-600 text-slate-200 hover:bg-slate-700"
+                                  >
+                                    {copiedLink === msg.id ? 'Copied' : 'Copy'}
+                                  </button>
                                 </div>
                               )}
                               <div className="flex items-center gap-2">
@@ -1152,7 +1194,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span className="font-bold text-slate-100 uppercase text-[11px]">Metropolis Status:</span>
             <span className="text-slate-400 text-[11px]">
-              {events[0]?.message || 'All 10 AI citizens operating autonomously across city districts.'}
+              {events[0]?.message || 'All 15 AI citizens operating autonomously across city districts.'}
             </span>
           </div>
 

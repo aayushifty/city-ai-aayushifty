@@ -93,8 +93,116 @@ export const AGENT_LOCATIONS: Record<string, AgentWorkplaceConfig> = {
     testRig: { x: -23, z: 50.5, name: 'Civic Medical ICU Bio-Telemetry Station', buildingId: 'bld-hospital' },
     terrace: { x: -19, z: 47.5, name: 'Civic Hospital Wellness Garden Terrace', buildingId: 'bld-hospital' },
     collaboratorId: 'agent-constructor'
+  },
+  'agent-designer': {
+    desk: { x: 24, z: 4, name: 'Vision Lab 3D Design Studio', buildingId: 'bld-vision-lab' },
+    testRig: { x: 25, z: 6, name: 'Vision Lab Presentation Wall', buildingId: 'bld-vision-lab' },
+    terrace: { x: 19, z: 5, name: 'Vision Lab Design Terrace', buildingId: 'bld-vision-lab' },
+    collaboratorId: 'agent-analyst'
+  },
+  'agent-webdev': {
+    desk: { x: -24.5, z: 17.5, name: 'Foundry Web & App Bench', buildingId: 'bld-foundry' },
+    testRig: { x: -26, z: 19, name: 'Foundry Browser Test Rig', buildingId: 'bld-foundry' },
+    terrace: { x: -18.5, z: 16.5, name: 'Foundry Courtyard Patio', buildingId: 'bld-foundry' },
+    collaboratorId: 'agent-engineer'
+  },
+  'agent-researcher': {
+    desk: { x: 17.5, z: -24.5, name: 'Blueprint Research Library', buildingId: 'bld-blueprint' },
+    testRig: { x: 16, z: -26, name: 'Blueprint Source Archive', buildingId: 'bld-blueprint' },
+    terrace: { x: 16.5, z: -18.5, name: 'Blueprint Observation Balcony', buildingId: 'bld-blueprint' },
+    collaboratorId: 'agent-architect'
+  },
+  'agent-data': {
+    desk: { x: -24.5, z: 4, name: 'Diagnostic Analytics Console', buildingId: 'bld-diagnostic' },
+    testRig: { x: -26, z: 6, name: 'Diagnostic Data Pipeline Rack', buildingId: 'bld-diagnostic' },
+    terrace: { x: -18.5, z: 5, name: 'Diagnostic West Observation Deck', buildingId: 'bld-diagnostic' },
+    collaboratorId: 'agent-diagnostic'
+  },
+  'agent-operator': {
+    desk: { x: 17.5, z: 24.5, name: 'Release Dock Host Operations Desk', buildingId: 'bld-release-dock' },
+    testRig: { x: 16, z: 26, name: 'Release Dock Automation Rack', buildingId: 'bld-release-dock' },
+    terrace: { x: 16.5, z: 18.5, name: 'Release Dock Promenade', buildingId: 'bld-release-dock' },
+    collaboratorId: 'agent-devops'
   }
 };
+
+interface RosterEntry {
+  id: string;
+  name: string;
+  model: string;
+  extra?: {
+    role: AgentCharacter['role'];
+    title: string;
+    profession: string;
+    department: string;
+    color: string;
+    clothingStyle: AgentCharacter['clothingStyle'];
+    avatarIcon: string;
+    skills: string[];
+    tools: string[];
+    skinColor: string;
+    hairColor: string;
+  };
+}
+
+// The 15 citizens. Ids, names and models mirror backend/app/execution/roster.py and config.py.
+export const CITIZEN_ROSTER: RosterEntry[] = [
+  { id: 'agent-coordinator', name: 'Sahas Lamichhane', model: 'qwen3:4b-instruct' },
+  { id: 'agent-analyst', name: 'Rajib Karki', model: 'gemma3:4b' },
+  { id: 'agent-architect', name: 'Prasanna Basyal', model: 'qwen3:4b-instruct' },
+  { id: 'agent-engineer', name: 'Drishya Adhikari', model: 'qwen2.5-coder:7b' },
+  { id: 'agent-qa', name: 'Johan Karki', model: 'qwen3:4b-instruct' },
+  { id: 'agent-diagnostic', name: 'Bidheyak Bhattarai', model: 'qwen3:4b-instruct' },
+  { id: 'agent-security', name: 'Safal Sharma', model: 'qwen3:4b-instruct' },
+  { id: 'agent-devops', name: 'Santosh Yadav', model: 'qwen3:4b-instruct' },
+  { id: 'agent-constructor', name: 'Hemanta Bhatta', model: 'gemma3:4b' },
+  { id: 'agent-doctor', name: 'Anuj Neupane', model: 'gemma3:4b' },
+  {
+    id: 'agent-designer', name: 'Rihan Bajracharya', model: 'qwen3:4b-instruct',
+    extra: {
+      role: 'URBAN_PLANNER', title: 'Experience & 3D Design Lead', profession: 'UX & Interactive 3D Presentation Designer',
+      department: 'Design & Spatial Experience Studio', color: '#A78BFA', clothingStyle: 'ARCHITECT', avatarIcon: 'Sparkles',
+      skills: ['3D Presentation Design', 'Visual Storytelling', 'Slide Narrative', 'Brand Systems'],
+      tools: ['PresentationBuilder', 'SceneComposer'], skinColor: '#C68642', hairColor: '#1C1C1C'
+    }
+  },
+  {
+    id: 'agent-webdev', name: 'Amit Basnet', model: 'qwen2.5-coder:7b',
+    extra: {
+      role: 'ECONOMY', title: 'Front-End Web Lead', profession: 'Web & App Interface Engineer',
+      department: 'Web & App Fabrication Studio', color: '#F472B6', clothingStyle: 'ENGINEER', avatarIcon: 'Globe',
+      skills: ['Responsive Web Apps', 'Interactive HTML/JS', 'Component UI', 'Accessibility'],
+      tools: ['WebsiteBuilder', 'AppBuilder'], skinColor: '#D8A06A', hairColor: '#231A14'
+    }
+  },
+  {
+    id: 'agent-researcher', name: 'Aayam Wagle', model: 'qwen3:4b-instruct',
+    extra: {
+      role: 'WELFARE', title: 'Research & Intelligence Lead', profession: 'Web Research & Knowledge Synthesis Analyst',
+      department: 'Open-Source Intelligence & Research Wing', color: '#22D3EE', clothingStyle: 'SCIENTIST', avatarIcon: 'Compass',
+      skills: ['Web Research', 'Source Synthesis', 'Fact Checking', 'Briefing Reports'],
+      tools: ['WebSearch', 'WebFetch'], skinColor: '#E0AC69', hairColor: '#2D251E'
+    }
+  },
+  {
+    id: 'agent-data', name: 'Bibek Lama', model: 'qwen3:4b-instruct',
+    extra: {
+      role: 'ENERGY', title: 'Data & Analytics Lead', profession: 'Data Engineer & Analytics Specialist',
+      department: 'Data Foundry & Analytics', color: '#84CC16', clothingStyle: 'DIAGNOSTIC', avatarIcon: 'Activity',
+      skills: ['Data Pipelines', 'Analysis Scripts', 'Charts & Reports', 'CSV/JSON Processing'],
+      tools: ['DataFrameForge', 'ChartSynthesizer'], skinColor: '#C99A6E', hairColor: '#141414'
+    }
+  },
+  {
+    id: 'agent-operator', name: 'Sandim Pokharel', model: 'qwen3:4b-instruct',
+    extra: {
+      role: 'PUBLIC_SAFETY', title: 'Host Operations Lead', profession: 'Computer Operations & Automation Specialist',
+      department: 'Host Operations Command', color: '#FBBF24', clothingStyle: 'DEVOPS', avatarIcon: 'Terminal',
+      skills: ['Host Automation', 'File Operations', 'App Orchestration', 'Script Authoring'],
+      tools: ['HostCommand (approval)', 'AppLauncher (approval)'], skinColor: '#D2A679', hairColor: '#2A2018'
+    }
+  },
+];
 
 export const AGENT_WORKPLACES: Record<string, { x: number; z: number; name: string; buildingId: string }> = Object.fromEntries(
   Object.entries(AGENT_LOCATIONS).map(([k, v]) => [k, { x: v.desk.x, z: v.desk.z, name: v.desk.name, buildingId: v.desk.buildingId || '' }])
@@ -1058,7 +1166,7 @@ export class CitySimulationEngine {
       health: 100
     });
 
-    // Landmark 11: Civic Works & Heavy Construction Yard (Harlan Drake HQ)
+    // Landmark 11: Civic Works & Heavy Construction Yard (Hemanta Bhatta HQ)
     this.buildings.push({
       id: 'bld-construction',
       name: 'Civic Works & Heavy Construction Yard',
@@ -1180,13 +1288,13 @@ export class CitySimulationEngine {
     }
   }
 
-  // --- Initialize The 10 Specialized AI Citizens with Human Personas & AI Models ---
+  // --- Initialize The 15 Specialized AI Citizens with Human Personas & AI Models ---
   private initAIAgentCharacters(): void {
     this.agentCharacters = [
       {
         id: 'agent-coordinator',
         role: 'COORDINATOR',
-        name: 'Alex Vance',
+        name: 'Sahas Lamichhane',
         title: 'Master Orchestrator',
         profession: 'Chief Systems Architect & Orchestrator',
         department: 'Executive Master Orchestration (Citadel Spire)',
@@ -1225,8 +1333,8 @@ export class CitySimulationEngine {
           {
             id: 'init-coord',
             sender: 'AGENT',
-            senderName: 'Alex Vance',
-            text: 'Greetings Commander! Alex Vance, Chief Architect, powered by OpenAI o1 reasoning engine. All autonomous city workflows are operational. Press [F] to issue an immediate work order or ask me anything!',
+            senderName: 'Sahas Lamichhane',
+            text: 'Greetings Commander! Sahas Lamichhane, Chief Architect, powered by OpenAI o1 reasoning engine. All autonomous city workflows are operational. Press [F] to issue an immediate work order or ask me anything!',
             timestamp: '09:00 AM'
           }
         ]
@@ -1234,7 +1342,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-analyst',
         role: 'URBAN_PLANNER',
-        name: 'Dr. Maya Lin',
+        name: 'Rajib Karki',
         title: 'Product Vision Analyst',
         profession: 'Requirements Engineer & Product Analyst',
         department: 'Requirements & PRD Lab (Vision Lab)',
@@ -1273,8 +1381,8 @@ export class CitySimulationEngine {
           {
             id: 'init-analyst',
             sender: 'AGENT',
-            senderName: 'Dr. Maya Lin',
-            text: 'Hello Commander. Dr. Maya Lin here, powered by Claude 3.5 Sonnet. I specialize in deep technical reasoning, PRD formulation, and system acceptance criteria.',
+            senderName: 'Rajib Karki',
+            text: 'Hello Commander. Rajib Karki here, powered by Claude 3.5 Sonnet. I specialize in deep technical reasoning, PRD formulation, and system acceptance criteria.',
             timestamp: '09:05 AM'
           }
         ]
@@ -1282,7 +1390,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-architect',
         role: 'TRAFFIC',
-        name: 'Marcus Vance',
+        name: 'Prasanna Basyal',
         title: 'Principal Software Architect',
         profession: 'Domain Architect & Civil Modeler',
         department: 'System Architecture (Blueprint Complex)',
@@ -1321,8 +1429,8 @@ export class CitySimulationEngine {
           {
             id: 'init-arch',
             sender: 'AGENT',
-            senderName: 'Marcus Vance',
-            text: 'Marcus Vance ready for structural modeling, powered by DeepSeek R1. I verify mathematical structural proofs and clean architecture contracts.',
+            senderName: 'Prasanna Basyal',
+            text: 'Prasanna Basyal ready for structural modeling, powered by DeepSeek R1. I verify mathematical structural proofs and clean architecture contracts.',
             timestamp: '09:10 AM'
           }
         ]
@@ -1330,7 +1438,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-engineer',
         role: 'ENERGY',
-        name: 'Devon Cross',
+        name: 'Drishya Adhikari',
         title: 'Senior Implementation Engineer',
         profession: 'Full-Stack Software Engineer',
         department: 'Source Code Fabrication (Foundry)',
@@ -1369,8 +1477,8 @@ export class CitySimulationEngine {
           {
             id: 'init-eng',
             sender: 'AGENT',
-            senderName: 'Devon Cross',
-            text: 'Devon Cross on standby! Powered by Qwen 2.5 Coder. High-speed code fabrication, async logic, and AST transformations are ready to compile.',
+            senderName: 'Drishya Adhikari',
+            text: 'Drishya Adhikari on standby! Powered by Qwen 2.5 Coder. High-speed code fabrication, async logic, and AST transformations are ready to compile.',
             timestamp: '09:15 AM'
           }
         ]
@@ -1378,7 +1486,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-qa',
         role: 'WATER_WASTE',
-        name: 'Elena Rostova',
+        name: 'Johan Karki',
         title: 'QA Bastion Test Lead',
         profession: 'Automated Test Engineer & Verifier',
         department: 'Quality Assurance & Automated Verification (QA Bastion)',
@@ -1417,8 +1525,8 @@ export class CitySimulationEngine {
           {
             id: 'init-qa',
             sender: 'AGENT',
-            senderName: 'Elena Rostova',
-            text: 'Elena Rostova standing by, powered by GPT-4o. I run rigorous pytest and integration test suites. 20/20 test assertions currently verified.',
+            senderName: 'Johan Karki',
+            text: 'Johan Karki standing by, powered by GPT-4o. I run rigorous pytest and integration test suites. 20/20 test assertions currently verified.',
             timestamp: '09:20 AM'
           }
         ]
@@ -1426,7 +1534,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-diagnostic',
         role: 'ECONOMY',
-        name: 'Dr. Aaron Chen',
+        name: 'Bidheyak Bhattarai',
         title: 'Diagnostic Specialist',
         profession: 'Root Cause & Troubleshooting Specialist',
         department: 'Diagnostic Core & Troubleshooting',
@@ -1465,7 +1573,7 @@ export class CitySimulationEngine {
           {
             id: 'init-diag',
             sender: 'AGENT',
-            senderName: 'Dr. Aaron Chen',
+            senderName: 'Bidheyak Bhattarai',
             text: 'Dr. Chen here, powered by Gemini 2.0 Flash. Real-time telemetry, exception tracing, and automated heuristic repair operational.',
             timestamp: '09:25 AM'
           }
@@ -1474,7 +1582,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-security',
         role: 'PUBLIC_SAFETY',
-        name: 'Kaelen Voss',
+        name: 'Safal Sharma',
         title: 'Security Sentinel',
         profession: 'Security Engineer & Policy Auditor',
         department: 'Security Citadel & Policy Guardrails',
@@ -1513,7 +1621,7 @@ export class CitySimulationEngine {
           {
             id: 'init-sec',
             sender: 'AGENT',
-            senderName: 'Kaelen Voss',
+            senderName: 'Safal Sharma',
             text: 'Security Sentinel Voss active, powered by Llama 3.1 70B. Workspace jail boundaries, secret filtering, and command whitelist policies are strictly enforced.',
             timestamp: '09:30 AM'
           }
@@ -1522,7 +1630,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-devops',
         role: 'WELFARE',
-        name: 'Sora Takahashi',
+        name: 'Santosh Yadav',
         title: 'Cloud Release Dock Chief',
         profession: 'DevOps & Cloud Infrastructure Engineer',
         department: 'Deployment & CI/CD Pipeline (Release Dock)',
@@ -1561,8 +1669,8 @@ export class CitySimulationEngine {
           {
             id: 'init-devops',
             sender: 'AGENT',
-            senderName: 'Sora Takahashi',
-            text: 'Sora Takahashi here, powered by Claude 3 Opus! Managing Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
+            senderName: 'Santosh Yadav',
+            text: 'Santosh Yadav here, powered by Claude 3 Opus! Managing Docker builds, CI/CD runners, and deployment staging. Standing by for instructions.',
             timestamp: '09:35 AM'
           }
         ]
@@ -1570,7 +1678,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-constructor',
         role: 'URBAN_PLANNER',
-        name: 'Harlan Drake',
+        name: 'Hemanta Bhatta',
         title: 'Civil Construction Lead',
         profession: 'Civil Infrastructure & Construction Engineer',
         department: 'Civic Works & Heavy Construction Yard',
@@ -1609,8 +1717,8 @@ export class CitySimulationEngine {
           {
             id: 'init-con',
             sender: 'AGENT',
-            senderName: 'Harlan Drake',
-            text: 'Harlan Drake on site, powered by Mistral Large! High-visibility vest on, hard hat ready. Press [F] to command construction and structural repairs.',
+            senderName: 'Hemanta Bhatta',
+            text: 'Hemanta Bhatta on site, powered by Mistral Large! High-visibility vest on, hard hat ready. Press [F] to command construction and structural repairs.',
             timestamp: '09:40 AM'
           }
         ]
@@ -1618,7 +1726,7 @@ export class CitySimulationEngine {
       {
         id: 'agent-doctor',
         role: 'PUBLIC_SAFETY',
-        name: 'Dr. Sarah Miller',
+        name: 'Anuj Neupane',
         title: 'Chief Medical Director',
         profession: 'Emergency Medicine & Healthcare Operations',
         department: 'Civic Medical Center (Hospital)',
@@ -1657,13 +1765,57 @@ export class CitySimulationEngine {
           {
             id: 'init-doc',
             sender: 'AGENT',
-            senderName: 'Dr. Sarah Miller',
-            text: 'Greetings Commander. Dr. Sarah Miller, Chief Medical Director, powered by Gemini 1.5 Pro. White coat on, bio-telemetry online. Citizen health index at 98%.',
+            senderName: 'Anuj Neupane',
+            text: 'Greetings Commander. Anuj Neupane, Chief Medical Director, powered by Gemini 1.5 Pro. White coat on, bio-telemetry online. Citizen health index at 98%.',
             timestamp: '09:45 AM'
           }
         ]
       }
     ];
+
+    // Five additional citizens share the look of an existing colleague and get their own desks.
+    const template = this.agentCharacters.find(a => a.id === 'agent-engineer')!;
+    CITIZEN_ROSTER.filter(r => r.extra).forEach(r => {
+      this.agentCharacters.push({
+        ...template,
+        id: r.id,
+        role: r.extra!.role,
+        title: r.extra!.title,
+        profession: r.extra!.profession,
+        department: r.extra!.department,
+        color: r.extra!.color,
+        clothingStyle: r.extra!.clothingStyle,
+        homeBuildingId: AGENT_LOCATIONS[r.id].desk.buildingId || template.homeBuildingId,
+        currentBuildingId: AGENT_LOCATIONS[r.id].desk.buildingId || template.homeBuildingId,
+        avatarIcon: r.extra!.avatarIcon,
+        skills: r.extra!.skills,
+        toolsInUse: r.extra!.tools,
+        collaboratorIds: [AGENT_LOCATIONS[r.id].collaboratorId],
+        currentTask: r.extra!.profession,
+        currentThought: `${r.extra!.title} standing by.`,
+        taskQueue: [],
+        taskHistory: [],
+        skinColor: r.extra!.skinColor,
+        hairColor: r.extra!.hairColor,
+      });
+    });
+
+    // Names and real local models from the shared roster (mirrors backend/app/execution/roster.py).
+    this.agentCharacters.forEach(ag => {
+      const r = CITIZEN_ROSTER.find(x => x.id === ag.id);
+      if (!r) return;
+      ag.name = r.name;
+      ag.aiModel = r.model;
+      ag.aiProvider = 'Ollama (Local)';
+      ag.aiModelBadgeColor = '#10B981';
+      ag.chatHistory = [{
+        id: `init-${ag.id}`,
+        sender: 'AGENT',
+        senderName: r.name,
+        text: `Namaste, Governor. ${r.name}, ${ag.title}, running ${r.model} on your machine. Ask me anything or press [F] for a work order.`,
+        timestamp: '09:00 AM'
+      }];
+    });
 
     // Initialize each agent with natural human lifecycle, domain workplace desk, and procedural tasks
     this.agentCharacters.forEach((ag, idx) => {
@@ -1678,7 +1830,7 @@ export class CitySimulationEngine {
         ag.currentDestinationName = loc.desk.name;
       }
       ag.routinePhase = 'DESK_WORK';
-      // Stagger timers naturally across the 10 citizens
+      // Stagger timers naturally across the 15 citizens
       ag.routineTimer = 16.0 + ((idx * 3.5) % 14.0);
       ag.speed = 2.4;
 
@@ -1736,7 +1888,7 @@ export class CitySimulationEngine {
             status: 'COMPLETED',
             progress: 100,
             assignedAgentId: 'agent-architect',
-            assignedAgentName: 'Marcus Vance',
+            assignedAgentName: 'Prasanna Basyal',
             source: 'PUBLIC_MISSION',
             publicMissionId: 'mission-hospital',
             requiredSkills: ['Structural Engineering'],
@@ -1754,7 +1906,7 @@ export class CitySimulationEngine {
             status: 'WORKING',
             progress: 45,
             assignedAgentId: 'agent-constructor',
-            assignedAgentName: 'Harlan Drake',
+            assignedAgentName: 'Hemanta Bhatta',
             source: 'PUBLIC_MISSION',
             publicMissionId: 'mission-hospital',
             requiredSkills: ['Structural Construction'],
@@ -1770,7 +1922,7 @@ export class CitySimulationEngine {
             status: 'PENDING',
             progress: 0,
             assignedAgentId: 'agent-devops',
-            assignedAgentName: 'Sora Takahashi',
+            assignedAgentName: 'Santosh Yadav',
             source: 'PUBLIC_MISSION',
             publicMissionId: 'mission-hospital',
             requiredSkills: ['Cloud Run Provisioning'],
@@ -1786,7 +1938,7 @@ export class CitySimulationEngine {
             status: 'PENDING',
             progress: 0,
             assignedAgentId: 'agent-doctor',
-            assignedAgentName: 'Dr. Sarah Miller',
+            assignedAgentName: 'Anuj Neupane',
             source: 'PUBLIC_MISSION',
             publicMissionId: 'mission-hospital',
             requiredSkills: ['Hospital Operations'],
@@ -2482,7 +2634,7 @@ export class CitySimulationEngine {
           status: 'WORKING',
           progress: 10,
           assignedAgentId: 'agent-analyst',
-          assignedAgentName: 'Dr. Maya Lin',
+          assignedAgentName: 'Rajib Karki',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['PRD Formulation'],
@@ -2498,7 +2650,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-architect',
-          assignedAgentName: 'Marcus Vance',
+          assignedAgentName: 'Prasanna Basyal',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Clean Architecture'],
@@ -2514,7 +2666,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-engineer',
-          assignedAgentName: 'Devon Cross',
+          assignedAgentName: 'Drishya Adhikari',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Python 3.13 / FastAPI'],
@@ -2530,7 +2682,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-qa',
-          assignedAgentName: 'Elena Rostova',
+          assignedAgentName: 'Johan Karki',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Pytest Automation'],
@@ -2546,7 +2698,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-devops',
-          assignedAgentName: 'Sora Takahashi',
+          assignedAgentName: 'Santosh Yadav',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Docker OCI Containers'],
@@ -2565,7 +2717,7 @@ export class CitySimulationEngine {
           status: 'WORKING',
           progress: 10,
           assignedAgentId: 'agent-architect',
-          assignedAgentName: 'Marcus Vance',
+          assignedAgentName: 'Prasanna Basyal',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Structural Engineering'],
@@ -2581,7 +2733,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-constructor',
-          assignedAgentName: 'Harlan Drake',
+          assignedAgentName: 'Hemanta Bhatta',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Structural Construction'],
@@ -2597,7 +2749,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-devops',
-          assignedAgentName: 'Sora Takahashi',
+          assignedAgentName: 'Santosh Yadav',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Cloud Run Provisioning'],
@@ -2616,7 +2768,7 @@ export class CitySimulationEngine {
           status: 'WORKING',
           progress: 15,
           assignedAgentId: 'agent-diagnostic',
-          assignedAgentName: 'Dr. Aaron Chen',
+          assignedAgentName: 'Bidheyak Bhattarai',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Traceback Deconstruction'],
@@ -2632,7 +2784,7 @@ export class CitySimulationEngine {
           status: 'PENDING',
           progress: 0,
           assignedAgentId: 'agent-engineer',
-          assignedAgentName: 'Devon Cross',
+          assignedAgentName: 'Drishya Adhikari',
           source: 'PUBLIC_MISSION',
           publicMissionId: missionId,
           requiredSkills: ['Python 3.13 / FastAPI'],

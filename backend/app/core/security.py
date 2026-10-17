@@ -32,6 +32,35 @@ class SecurityEngine:
         "dir", "type", "mkdir", "touch", "ls", "pip"
     ]
 
+    # Host commands the agents may never run, even with full computer access: they destroy disks,
+    # the OS or whole profiles and cannot be undone.
+    CATASTROPHIC_PATTERNS = [
+        re.compile(r"\bformat(\.com)?\s+[a-z]:", re.IGNORECASE),
+        re.compile(r"\b(diskpart|clear-disk|initialize-disk|remove-partition|format-volume)\b", re.IGNORECASE),
+        re.compile(r"\bbcdedit\b", re.IGNORECASE),
+        re.compile(r"\bvssadmin\b.*\bdelete\b", re.IGNORECASE),
+        re.compile(r"\bcipher\s+/w", re.IGNORECASE),
+        re.compile(r"\breg(\.exe)?\s+delete\s+hklm", re.IGNORECASE),
+        re.compile(r"\bmkfs\b|\bdd\s+if=.*of=/dev/", re.IGNORECASE),
+        re.compile(r":\(\)\s*\{\s*:\|:&\s*\};:"),
+        # Recursive deletes aimed at a drive root, Windows, Program Files, the Users folder or a whole profile.
+        re.compile(
+            r"\b(rm|rmdir|rd|del|erase|remove-item|ri)\b[^|;&]*?"
+            r"(\s|['\"])([a-z]:\\?(\*)?|[a-z]:\\(windows|program files( \(x86\))?|programdata|users)(\\[^\\\s'\"]+)?\\?(\*)?|~|\$env:userprofile|%userprofile%|/)(['\"])?(\s+-{1,2}\w+)*\s*($|[|;&])",
+            re.IGNORECASE,
+        ),
+    ]
+
+    @classmethod
+    def check_host_command(cls, command: str) -> None:
+        """Raises SecurityViolationError for the small set of irreversible, system-destroying commands."""
+        for pattern in cls.CATASTROPHIC_PATTERNS:
+            if pattern.search(command):
+                raise SecurityViolationError(
+                    "Blocked: this command could wipe a disk, the operating system or a whole user profile. "
+                    "Run it yourself if you really intend to."
+                )
+
     @classmethod
     def validate_path_in_workspace(cls, target_path: Path | str, workspace_root: Path | str) -> Path:
         """Ensures target_path resolves strictly inside workspace_root."""

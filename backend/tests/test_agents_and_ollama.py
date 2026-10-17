@@ -41,11 +41,11 @@ async def test_model_registry_snapshot():
     assert "ollama_online" in snapshot
     assert "available_providers" in snapshot
     assert "active_default_provider" in snapshot
-    assert snapshot["concurrency_limit"] == 2
+    assert snapshot["concurrency_limit"] == 1  # one local GPU: Ollama calls are serialized
 
 def test_citizen_registry_initialization(agent_service):
     citizens = agent_service.list_citizens()
-    assert len(citizens) == 10
+    assert len(citizens) == 15
     agent_ids = [c.id for c in citizens]
     assert "agent-coordinator" in agent_ids
     assert "agent-engineer" in agent_ids
@@ -61,7 +61,7 @@ async def test_chat_with_citizen(agent_service):
         "Governor here. What is your primary objective today?"
     )
     assert response.agent_id == "agent-analyst"
-    assert response.agent_name == "Dr. Maya Lin"
+    assert response.agent_name == "Rajib Karki"
     assert len(response.reply) > 0
     assert response.model_used is not None
 

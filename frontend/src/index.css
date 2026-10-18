@@ -23,10 +23,13 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Reset kept in the base layer so Tailwind spacing utilities (p-*, m-*) still apply */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 body {

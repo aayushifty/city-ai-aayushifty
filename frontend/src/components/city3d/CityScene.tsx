@@ -476,7 +476,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1200);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // no canvas MSAA: every quality level renders through PostFX's 4x MSAA target
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;

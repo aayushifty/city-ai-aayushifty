@@ -149,7 +149,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#080B11] text-slate-100 flex flex-col font-sans">
+    <div className={`${activeTab === 'city3d' ? 'h-[100dvh] overflow-hidden' : 'min-h-screen'} bg-[#080B11] text-slate-100 flex flex-col font-sans`}>
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -166,7 +166,7 @@ export const App: React.FC = () => {
         onResume={handleToggleEmergencyStop}
       />
 
-      <main className="flex-1">
+      <main className="flex-1 min-h-0">
         {activeTab === 'city3d' && (
           <CitySimulationView />
         )}

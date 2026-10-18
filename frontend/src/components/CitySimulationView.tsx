@@ -518,7 +518,7 @@ export const CitySimulationView: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden bg-[#06080E]">
+    <div className="relative w-full h-full overflow-hidden bg-[#06080E]">
       {/* Floating Work Order Notification Toast */}
       {workToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#070D1A]/95 border-2 border-amber-500 text-amber-200 px-6 py-3 rounded-2xl shadow-2xl text-xs font-mono font-bold flex items-center gap-3 animate-bounce">

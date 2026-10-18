@@ -4,6 +4,16 @@ from app.main import app
 
 client = TestClient(app, base_url="http://127.0.0.1")
 
+
+@pytest.fixture(autouse=True)
+def temp_database(tmp_path, monkeypatch):
+    """Point the API's database at a throwaway file so tests never add projects to the real forge.db."""
+    from app.api import routes_agents, routes_misc, routes_projects, routes_tasks
+    for module in (routes_agents, routes_misc, routes_projects, routes_tasks):
+        monkeypatch.setattr(module.db, "db_path", tmp_path / "forge-test.db")
+        module.db._init_schema()
+    monkeypatch.setattr(routes_projects.config, "WORKSPACES_DIR", tmp_path / "workspaces")
+
 def test_health_check_endpoint():
     response = client.get("/health")
     assert response.status_code == 200

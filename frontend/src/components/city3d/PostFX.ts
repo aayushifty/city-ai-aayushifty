@@ -11,7 +11,8 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
  * colour grade (contrast, saturation, warmth, vignette).
  *   high   = ambient occlusion + bloom + grade (ambient occlusion re-renders the scene: most expensive)
  *   medium = bloom + grade (default)
- *   low    = plain render, no post-processing
+ *   low    = no effects, rendered at 1x pixel ratio (still through the composer: on this ANGLE/D3D11
+ *            setup a direct canvas render measured slower than the composer's off-screen MSAA target)
  */
 export type GraphicsQuality = 'high' | 'medium' | 'low';
 
@@ -75,22 +76,30 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
   composer.addPass(grade);
 
   let quality: GraphicsQuality = readQuality();
+  const size = new THREE.Vector2(w, h);
+  const resize = () => {
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(size.x, size.y);
+    ao.setSize(size.x, size.y);
+  };
   const apply = () => {
     ao.enabled = quality === 'high';
     bloom.enabled = quality !== 'low';
     grade.enabled = quality !== 'low';
+    const pixelRatio = quality === 'low' ? 1 : Math.min(window.devicePixelRatio, 2);
+    if (renderer.getPixelRatio() !== pixelRatio) {
+      renderer.setPixelRatio(pixelRatio);
+      renderer.setSize(size.x, size.y, false);
+      resize();
+    }
   };
   apply();
 
   return {
-    render: () => {
-      if (quality === 'low') renderer.render(scene, camera);
-      else composer.render();
-    },
+    render: () => composer.render(),
     setSize: (nw, nh) => {
-      composer.setPixelRatio(renderer.getPixelRatio());
-      composer.setSize(nw, nh);
-      ao.setSize(nw, nh);
+      size.set(nw, nh);
+      resize();
     },
     setQuality: (q) => { quality = q; apply(); },
     setNight: (night) => {

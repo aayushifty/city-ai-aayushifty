@@ -46,7 +46,7 @@ export const HudBadge: React.FC<{ location: string; showFps: boolean }> = ({ loc
 export interface KeyHint { k: string; label: string; onClick?: () => void; active?: boolean }
 
 export const KeyHints: React.FC<{ hints: KeyHint[] }> = ({ hints }) => (
-  <div className="flex flex-col gap-1.5 pointer-events-auto">
+  <div className="grid grid-cols-1 gap-x-5 gap-y-1.5 [@media(max-height:940px)]:grid-cols-2 pointer-events-auto">
     {hints.map(h => (
       <button key={h.k + h.label} type="button" onClick={h.onClick}
         className="group flex items-center gap-2.5 text-left" title={`${h.label} [${h.k}]`}>

@@ -1019,8 +1019,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                   <span>Publish New City Mission</span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
                     <input
                       type="text"
                       value={missionTitle}
@@ -1047,7 +1047,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                 </div>
 
                 {/* Pre-made Mission Presets */}
-                <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
                   <span>Presets:</span>
                   <button
                     type="button"

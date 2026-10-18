@@ -36,6 +36,18 @@ export interface LiveSubtask {
   url?: string;
 }
 
+export interface ChannelPost {
+  id: string;
+  author_kind: 'governor' | 'citizen' | 'system';
+  author_id: string | null;
+  author_name: string;
+  text: string;
+  kind: string;                  // brief, plan, progress, deliverable, failed, blocked, final, message, reply, report, system
+  url: string | null;
+  task_id: string | null;
+  at: string;
+}
+
 export interface LiveMission {
   id: string;
   title: string;
@@ -47,6 +59,8 @@ export interface LiveMission {
   deliverables: string[];
   published_at: string;
   completed_at: string | null;
+  channel?: ChannelPost[];
+  final_deliverable?: { title: string; url: string; task_id: string; version?: number } | null;
 }
 
 export interface CityLiveData {

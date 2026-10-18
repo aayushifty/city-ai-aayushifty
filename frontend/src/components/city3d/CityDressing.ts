@@ -145,7 +145,7 @@ export function createAtmosphere(
       hemi.color.set(0xC6D8EE);
       hemi.groundColor.set(0x5B4A38);
       hemi.intensity = 0.34;
-      renderer.toneMappingExposure = 0.95;
+      renderer.toneMappingExposure = 0.88;
       (scene.fog as THREE.Fog).color.set(0xBCCFE2);
       for (const g of nightGlow) g.material.emissiveIntensity = 0;
       lastNight = 0;
@@ -167,7 +167,7 @@ export function createAtmosphere(
     hemi.color.copy(lerpColor(0x2A3A66, 0xC3D6EE, d));
     hemi.groundColor.copy(lerpColor(0x0B0B10, 0x5B4A38, d));
     hemi.intensity = 0.3 - 0.06 * d;
-    renderer.toneMappingExposure = 0.7 + 0.5 * (1 - d);
+    renderer.toneMappingExposure = 0.7 + 0.38 * (1 - d);   // brighter at night, but no glare at dawn/dusk
 
     const fog = scene.fog as THREE.Fog;
     fog.color.copy(lerpColor(0x0C1222, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
@@ -330,7 +330,7 @@ export function buildStreetDetail(scene: THREE.Scene, roads: RoadSegment[], inte
   }
 
   const lineMat = (c: number) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
-  for (const [geos, color] of [[yellow, 0xE8B931], [white, 0xF1F1EC]] as [THREE.BufferGeometry[], number][]) {
+  for (const [geos, color] of [[yellow, 0xD9AC2C], [white, 0xD6D6D0]] as [THREE.BufferGeometry[], number][]) {
     if (!geos.length) continue;
     const m = new THREE.Mesh(mergeGeometries(geos), lineMat(color));
     m.receiveShadow = true;
@@ -419,6 +419,7 @@ class StaticBatch {
         if (std.isMeshStandardMaterial) {
           std.envMapIntensity = 0.6;
           std.roughness = Math.min(std.roughness ?? 1, 0.8);
+          std.color.setScalar(0.82);   // Kenney's white roofs/facades read as blown-out under full sun
           if (opts.map) std.map = opts.map;
           if (opts.glow) {
             std.emissive = new THREE.Color(0xFFFFFF);

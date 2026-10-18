@@ -1,5 +1,8 @@
 import asyncio
+import heapq
+import itertools
 import logging
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict, List, Optional, Any
 from app.config import config, FREE_MODEL_CATALOG
 from app.providers.base import ModelProviderAdapter, ModelCompletionRequest, ModelCompletionResponse
@@ -9,6 +12,46 @@ from app.providers.gemini_provider import GeminiModelProvider
 from app.providers.ollama_provider import OllamaModelProvider
 
 logger = logging.getLogger("city_ai.model_router")
+
+class PriorityGate:
+    """A one-slot (or n-slot) lock whose waiters are served by priority, then arrival order.
+    Interactive requests (a citizen answering you) use priority 0 and go ahead of queued background work
+    (priority 1); a running generation is never interrupted."""
+
+    def __init__(self, slots: int = 1):
+        self._free = slots
+        self._waiters: List[Any] = []
+        self._seq = itertools.count()
+
+    async def acquire(self, priority: int) -> None:
+        if self._free > 0 and not self._waiters:
+            self._free -= 1
+            return
+        fut = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._waiters, (priority, next(self._seq), fut))
+        try:
+            await fut
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                self.release()          # the slot was handed to us just as we were cancelled
+            raise
+
+    def release(self) -> None:
+        while self._waiters:
+            _, _, fut = heapq.heappop(self._waiters)
+            if not fut.done():
+                fut.set_result(None)
+                return
+        self._free += 1
+
+    @asynccontextmanager
+    async def hold(self, priority: int = 1):
+        await self.acquire(priority)
+        try:
+            yield
+        finally:
+            self.release()
+
 
 class ModelRouter:
     """Routes inference requests across local and free cloud providers with fallback and concurrency control."""
@@ -23,9 +66,10 @@ class ModelRouter:
             "mock": MockModelProvider(),
         }
         self.fallback_chain = ["ollama", "groq", "openrouter", "gemini", "openai", "mock"]
-        # Local GPU work is serialized per provider; cloud providers get a little parallelism.
-        self._semaphores: Dict[str, asyncio.Semaphore] = {
-            "ollama": asyncio.Semaphore(1),
+        # Local GPU work is serialized (one generation at a time, interactive first); cloud providers get
+        # a little parallelism.
+        self._semaphores: Dict[str, PriorityGate] = {
+            "ollama": PriorityGate(1),
         }
         self._waiting: Dict[str, int] = {}
 
@@ -35,9 +79,9 @@ class ModelRouter:
     def get_provider(self, name: str) -> Optional[ModelProviderAdapter]:
         return self._providers.get(name)
 
-    def _sem(self, provider_name: str) -> asyncio.Semaphore:
+    def _sem(self, provider_name: str) -> PriorityGate:
         if provider_name not in self._semaphores:
-            self._semaphores[provider_name] = asyncio.Semaphore(3)
+            self._semaphores[provider_name] = PriorityGate(3)
         return self._semaphores[provider_name]
 
     def queue_depth(self, provider_name: str = "ollama") -> int:
@@ -85,7 +129,8 @@ class ModelRouter:
     async def route_completion(
         self,
         request: ModelCompletionRequest,
-        preferred_provider: Optional[str] = None
+        preferred_provider: Optional[str] = None,
+        interactive: bool = False,
     ) -> ModelCompletionResponse:
         """Tries the preferred provider, then falls back down the chain. Each provider gets its own default
         model when it isn't the one the request's model name was chosen for."""
@@ -112,7 +157,7 @@ class ModelRouter:
             self._waiting[provider_name] = self._waiting.get(provider_name, 0) + 1
             acquired = False
             try:
-                async with self._sem(provider_name):
+                async with self._sem(provider_name).hold(0 if interactive else 1):
                     acquired = True
                     self._waiting[provider_name] -= 1
                     response = await provider.generate(req)
@@ -140,7 +185,7 @@ class ModelRouter:
         """Streams completion from Ollama if available, otherwise completes and yields content."""
         ollama_p = self._providers.get("ollama")
         if preferred_provider == "ollama" and ollama_p and await ollama_p.is_available() and hasattr(ollama_p, "generate_stream"):
-            async with self._sem("ollama"):
+            async with self._sem("ollama").hold(0):
                 try:
                     async for token in ollama_p.generate_stream(request):  # type: ignore
                         yield token

@@ -155,11 +155,35 @@ def get_host_telemetry():
 
 @router.post("/missions")
 async def publish_public_mission(payload: PublicMissionCreateRequest):
-    """Publishes a city-wide national mission, auto-decomposing into multi-agent DAG subtasks."""
+    """Publishes a city-wide mission. Answers at once (status PLANNING); the coordinator decomposes it into
+    a dependency graph of subtasks in the background, then the citizens run it."""
     try:
-        return await agent_service.publish_public_mission(payload)
+        return agent_service.submit_public_mission(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to publish mission: {str(e)}")
+
+class ChannelMessage(BaseModel):
+    text: str
+
+@router.get("/missions/{mission_id}/channel")
+def mission_channel(mission_id: str):
+    """The mission's shared thread: the Governor's briefings and messages, each citizen's progress,
+    questions, deliverables and the final report."""
+    mission = agent_service.get_mission(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return {"mission_id": mission_id, "posts": mission.get("channel", [])}
+
+@router.post("/missions/{mission_id}/channel")
+async def post_to_mission_channel(mission_id: str, payload: ChannelMessage):
+    """Write once to everyone on the mission. Steps that have not started are given the message, @Name asks one
+    citizen, and 'revise: ...' after the mission requests a new verified version of its deliverable."""
+    try:
+        return agent_service.post_to_mission(mission_id, payload.text)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/missions")
 def list_public_missions():
@@ -168,12 +192,45 @@ def list_public_missions():
 
 # --- 5. Cancellation & Task Management ---
 
+@router.get("/guide")
+def app_guide():
+    """The user guide (docs/USER_GUIDE.md) as Markdown, shown in the phone's Guide app."""
+    guide = config.BASE_DIR.parent / "docs" / "USER_GUIDE.md"
+    if not guide.is_file():
+        raise HTTPException(status_code=404, detail="Guide not found")
+    return {"markdown": guide.read_text(encoding="utf-8")}
+
 @router.get("/task-history")
 def get_task_history(limit: int = Query(100, ge=1, le=500), agent_id: Optional[str] = None,
                      mission_id: Optional[str] = None):
     """Every citizen task (chat deliverables, assigned tasks, mission subtasks), newest first, with live
     status/progress, deliverable links and the verification result."""
     return {"tasks": agent_service.list_task_history(limit=limit, agent_id=agent_id, mission_id=mission_id)}
+
+class RevisionRequest(BaseModel):
+    feedback: str
+
+@router.post("/tasks/{task_id}/revise")
+async def revise_task(task_id: str, payload: RevisionRequest):   # async: the revision runs on the server's event loop
+    """Request changes on a finished task: the same citizen edits its previous deliverable (same workspace)
+    according to the feedback, the result is verified again (with repair attempts), and it is saved as the next
+    version. Earlier versions keep their own links."""
+    try:
+        return agent_service.revise_task(task_id, payload.feedback)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+@router.get("/tasks/{task_id}/versions")
+def task_versions(task_id: str):
+    """Every version of a deliverable, the original first."""
+    chain = agent_service.revision_chain(task_id)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"versions": chain}
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):

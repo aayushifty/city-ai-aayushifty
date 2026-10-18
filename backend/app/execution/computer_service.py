@@ -669,445 +669,19 @@ class ComputerService:
         citizen_name: str,
         citizen_profession: str,
         task_id: str,
-        content: Optional[Dict[str, Any]] = None
+        content: Optional[Dict[str, Any]] = None,
+        three_d: bool = False,
     ) -> DeliverableArtifact:
-        """Renders a responsive website. `content` (headline, subheadline, features, metrics, ...) is normally
-        written by the citizen's model; without it generic copy is used."""
+        """Renders a responsive website. `content` (headline, subheadline, features, sections, metrics, ...) is
+        normally written by the citizen's model; without it generic copy is used. three_d adds a real Three.js
+        scene to the hero."""
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", topic.lower()).strip("-")[:40] or "website"
         site_folder = self.websites_dir / f"{slug}-{uuid.uuid4().hex[:6]}"
         site_folder.mkdir(parents=True, exist_ok=True)
         out_file = site_folder / "index.html"
 
         c = _website_content(topic.strip().title(), content)
-        safe_topic = html.escape(c["brand"])
-        brand_name = safe_topic.split()[0] if safe_topic else "Apex"
-        citizen_name = html.escape(citizen_name)
-        citizen_profession = html.escape(citizen_profession)
-        headline = html.escape(c["headline"])
-        subheadline = html.escape(c["subheadline"])
-        features_title = html.escape(c["features_title"])
-        features_subtitle = html.escape(c["about"])
-        metrics_html = "\n".join(
-            f'      <div class="metric-item">\n        <div class="metric-value">{html.escape(m["value"])}</div>\n'
-            f'        <div class="metric-label">{html.escape(m["label"])}</div>\n      </div>'
-            for m in c["metrics"]
-        )
-        cards_html = "\n".join(
-            f'        <div class="card">\n          <div class="card-icon">{html.escape(f["icon"])}</div>\n'
-            f'          <h3>{html.escape(f["title"])}</h3>\n          <p>{html.escape(f["text"])}</p>\n        </div>'
-            for f in c["features"]
-        )
-
-        html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{safe_topic} — Official Web Application</title>
-  <style>
-    :root {{
-      --primary: #0284c7;
-      --primary-light: #38bdf8;
-      --bg: #090d16;
-      --surface: #0f172a;
-      --surface-border: rgba(255, 255, 255, 0.1);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #10b981;
-    }}
-    * {{
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    }}
-    body {{
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      overflow-x: hidden;
-    }}
-    /* Header & Navigation */
-    header {{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(9, 13, 22, 0.8);
-      backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--surface-border);
-    }}
-    .nav-container {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 16px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }}
-    .logo {{
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-    }}
-    .logo-badge {{
-      background: var(--primary);
-      color: white;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 4px 8px;
-      border-radius: 6px;
-    }}
-    .nav-links {{
-      display: flex;
-      gap: 28px;
-      list-style: none;
-    }}
-    .nav-links a {{
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 600;
-      transition: color 0.2s;
-    }}
-    .nav-links a:hover {{
-      color: var(--primary-light);
-    }}
-    .btn {{
-      padding: 10px 20px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all 0.2s;
-      border: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .btn-primary {{
-      background: var(--primary);
-      color: white;
-      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
-    }}
-    .btn-primary:hover {{
-      background: var(--primary-light);
-      color: #030712;
-      transform: translateY(-2px);
-    }}
-    .btn-secondary {{
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      border: 1px solid var(--surface-border);
-    }}
-    .btn-secondary:hover {{
-      background: rgba(255, 255, 255, 0.1);
-    }}
-
-    /* Hero Section */
-    .hero {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 90px 24px 60px;
-      text-align: center;
-    }}
-    .hero-badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      color: var(--primary-light);
-      padding: 6px 16px;
-      border-radius: 9999px;
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 24px;
-    }}
-    .hero h1 {{
-      font-size: clamp(38px, 6vw, 68px);
-      font-weight: 900;
-      line-height: 1.15;
-      margin-bottom: 24px;
-      background: linear-gradient(135deg, #ffffff 40%, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }}
-    .hero p {{
-      font-size: 18px;
-      color: var(--text-muted);
-      max-width: 720px;
-      margin: 0 auto 36px;
-      line-height: 1.65;
-    }}
-    .hero-cta {{
-      display: flex;
-      justify-content: center;
-      gap: 16px;
-      margin-bottom: 50px;
-    }}
-
-    /* Metrics Strip */
-    .metrics-grid {{
-      max-width: 1000px;
-      margin: 0 auto 80px;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-      padding: 24px;
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 18px;
-    }}
-    .metric-item {{
-      text-align: center;
-    }}
-    .metric-value {{
-      font-size: 32px;
-      font-weight: 900;
-      color: var(--primary-light);
-    }}
-    .metric-label {{
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }}
-
-    /* Features Section */
-    .section {{
-      max-width: 1200px;
-      margin: 0 auto 90px;
-      padding: 0 24px;
-    }}
-    .section-header {{
-      text-align: center;
-      margin-bottom: 50px;
-    }}
-    .section-title {{
-      font-size: 32px;
-      font-weight: 800;
-      margin-bottom: 12px;
-    }}
-    .section-subtitle {{
-      color: var(--text-muted);
-      font-size: 16px;
-    }}
-    .cards-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 24px;
-    }}
-    .card {{
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 18px;
-      padding: 32px;
-      transition: all 0.3s;
-    }}
-    .card:hover {{
-      border-color: var(--primary-light);
-      transform: translateY(-4px);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-    }}
-    .card-icon {{
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      background: rgba(2, 132, 199, 0.15);
-      color: var(--primary-light);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      margin-bottom: 20px;
-    }}
-    .card h3 {{
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 12px;
-    }}
-    .card p {{
-      color: var(--text-muted);
-      font-size: 14px;
-      line-height: 1.6;
-    }}
-
-    /* Interactive Demo Box */
-    .interactive-box {{
-      background: linear-gradient(135deg, rgba(2, 132, 199, 0.1), rgba(15, 23, 42, 0.8));
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 24px;
-      padding: 40px;
-      margin-bottom: 90px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }}
-    .demo-counter {{
-      font-size: 56px;
-      font-weight: 900;
-      color: #38bdf8;
-      margin: 16px 0;
-    }}
-
-    /* Contact Section */
-    .contact-form {{
-      max-width: 540px;
-      margin: 0 auto;
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 20px;
-      padding: 36px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }}
-    .form-group {{
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      text-align: left;
-    }}
-    .form-group label {{
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 700;
-      text-transform: uppercase;
-    }}
-    .form-group input, .form-group textarea {{
-      background: #090d16;
-      border: 1px solid var(--surface-border);
-      border-radius: 10px;
-      padding: 12px 16px;
-      color: var(--text);
-      font-size: 14px;
-      outline: none;
-    }}
-    .form-group input:focus, .form-group textarea:focus {{
-      border-color: var(--primary-light);
-    }}
-
-    /* Footer */
-    footer {{
-      border-top: 1px solid var(--surface-border);
-      padding: 40px 24px;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 13px;
-    }}
-
-    @media (max-width: 768px) {{
-      .metrics-grid {{ grid-template-columns: repeat(2, 1fr); }}
-      .nav-links {{ display: none; }}
-    }}
-  </style>
-</head>
-<body>
-  <header>
-    <div class="nav-container">
-      <a href="#" class="logo">
-        <span class="logo-badge">{brand_name.upper()}</span>
-        <span>{safe_topic}</span>
-      </a>
-      <ul class="nav-links">
-        <li><a href="#features">Features</a></li>
-        <li><a href="#demo">Demo</a></li>
-        <li><a href="#contact">Contact</a></li>
-      </ul>
-      <a href="#contact" class="btn btn-primary">Get In Touch</a>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="hero-badge">⚡ Live Local Artifact • Synthesized by {citizen_name}</div>
-      <h1>{headline}</h1>
-      <p>{subheadline}</p>
-      <div class="hero-cta">
-        <button class="btn btn-primary" onclick="document.getElementById('contact').scrollIntoView({{behavior:'smooth'}})">Start Now</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('features').scrollIntoView({{behavior:'smooth'}})">Explore Architecture</button>
-      </div>
-    </section>
-
-    <div class="metrics-grid">
-{metrics_html}
-    </div>
-
-    <section class="section" id="features">
-      <div class="section-header">
-        <h2 class="section-title">{features_title}</h2>
-        <p class="section-subtitle">{features_subtitle}</p>
-      </div>
-
-      <div class="cards-grid">
-{cards_html}
-      </div>
-    </section>
-
-    <section class="section" id="demo">
-      <div class="interactive-box">
-        <h2>Interactive System Simulator</h2>
-        <p style="color: var(--text-muted); max-width: 500px; margin-top: 8px;">
-          Test the live interactive runtime widget directly inside this synthesized web application.
-        </p>
-        <div class="demo-counter" id="live-counter">1,024</div>
-        <div style="display: flex; gap: 12px;">
-          <button class="btn btn-primary" onclick="increment()">Boost Throughput (+128)</button>
-          <button class="btn btn-secondary" onclick="resetCounter()">Reset Baseline</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="contact">
-      <div class="section-header">
-        <h2 class="section-title">Direct Connection Portal</h2>
-        <p class="section-subtitle">Send a directive or dispatch an inquiry to {citizen_name}.</p>
-      </div>
-
-      <form class="contact-form" onsubmit="event.preventDefault(); this.reset(); this.querySelector('button').textContent = 'Sent ✓';">
-        <div class="form-group">
-          <label>Your Name</label>
-          <input type="text" placeholder="Supreme Governor" required>
-        </div>
-        <div class="form-group">
-          <label>Directive Title</label>
-          <input type="text" placeholder="Regarding {safe_topic} deployment..." required>
-        </div>
-        <div class="form-group">
-          <label>Operational Message</label>
-          <textarea rows="4" placeholder="Enter instructions or specifications here..." required></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary" style="justify-content: center;">Transmit Directive</button>
-      </form>
-    </section>
-  </main>
-
-  <footer>
-    <p>© 2026 {safe_topic} • city_ai_aayushifty Autonomous Operating System</p>
-    <p style="margin-top: 6px; font-size: 11px;">Synthesized by {citizen_name} ({citizen_profession}) • Saved on local disk.</p>
-  </footer>
-
-  <script>
-    let count = 1024;
-    function increment() {{
-      count += 128;
-      document.getElementById('live-counter').innerText = count.toLocaleString();
-    }}
-    function resetCounter() {{
-      count = 1024;
-      document.getElementById('live-counter').innerText = '1,024';
-    }}
-  </script>
-</body>
-</html>
-"""
+        html_content = render_website(c, citizen_name, citizen_profession, three_d)
         out_file.write_text(html_content, encoding="utf-8")
         logger.info(f"Generated website: {out_file}")
 
@@ -1475,8 +1049,14 @@ _CAMERA_PATH = [
 
 
 def _clean_text(value: Any, limit: int = 400) -> str:
+    """Collapses whitespace and shortens over-long text at a word boundary (never mid-word)."""
     text = re.sub(r"\s+", " ", str(value or "")).strip()
-    return text[:limit]
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut[limit // 2:]:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def _slides_to_json(topic: str, content: Optional[Dict[str, Any]]) -> str:
@@ -1526,15 +1106,28 @@ def _website_content(topic: str, content: Optional[Dict[str, Any]]) -> Dict[str,
     for m in (c.get("metrics") or [])[:4]:
         if isinstance(m, dict) and _clean_text(m.get("value")):
             metrics.append({"value": _clean_text(m.get("value"), 16), "label": _clean_text(m.get("label"), 40)})
+    sections = []
+    for sec in (c.get("sections") or [])[:6]:
+        if isinstance(sec, dict) and _clean_text(sec.get("title")) and _clean_text(sec.get("text")):
+            sections.append({"title": _clean_text(sec.get("title"), 90), "text": _clean_text(sec.get("text"), 700)})
+    accent = str(c.get("accent") or "").strip()
+    scene = str(c.get("scene") or "").strip().lower()
     return {
         "brand": _clean_text(c.get("brand") or topic, 60) or topic,
-        "headline": _clean_text(c.get("headline") or topic, 120),
-        "subheadline": _clean_text(c.get("subheadline") or f"Everything you need to know about {topic}.", 300),
+        "headline": _clean_text(c.get("headline") or topic, 140),
+        "subheadline": _clean_text(c.get("subheadline") or f"Everything you need to know about {topic}.", 320),
         "features_title": _clean_text(c.get("features_title") or "What We Offer", 80),
-        "about": _clean_text(c.get("about") or "", 400),
+        "about": _clean_text(c.get("about") or "", 700),
         "features": features,
         "metrics": metrics,
+        "sections": sections,
+        "sections_title": _clean_text(c.get("sections_title") or "In detail", 80),
+        "cta": _clean_text(c.get("cta") or "Explore", 30),
+        "scene": scene if scene in SCENES else "globe",
+        "accent": accent if re.fullmatch(r"#[0-9a-fA-F]{6}", accent) else "#38bdf8",
     }
+
+from app.execution.web_templates import SCENES, render_website  # noqa: E402  (template module has no imports back)
 
 # Singleton instance
 computer_service = ComputerService()

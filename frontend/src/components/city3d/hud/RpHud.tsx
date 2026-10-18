@@ -3,6 +3,7 @@ import { CheckCircle2, Activity, ShieldAlert, Phone, PhoneOff, Send, Star, Flag,
 import { AgentCharacter, PlayerState } from '../../../simulation/types';
 import { BUSY_CITIZEN_STATUSES, RUNNING_TASK_STATUSES, statusStyle, useLiveData } from './useCityLiveData';
 import { HudNotice } from './Notifications';
+import { openMissionChannel } from './MissionChannel';
 import { CitizenActivityPanel } from './CitizenActivityPanel';
 import { MissionTracker } from './MissionTracker';
 import { FpsCounter } from './FpsCounter';
@@ -64,7 +65,7 @@ export const ObjectiveCard: React.FC<{ agents: AgentCharacter[]; player: PlayerS
   ({ agents, player, onOpenMissions, onTalk }) => {
     const live = useLiveData();
     // focus: the first running mission subtask, else the most recent running task
-    const mission = live.missions.find(m => m.status === 'IN_PROGRESS');
+    const mission = live.missions.find(m => m.status === 'IN_PROGRESS' || m.status === 'PLANNING');
     const sub = mission?.subtasks.find(s => RUNNING_TASK_STATUSES.includes(s.status));
     const task = live.tasks.find(t => RUNNING_TASK_STATUSES.includes(t.status));
     const agentId = sub?.assigned_agent_id || task?.agent_id;
@@ -91,6 +92,13 @@ export const ObjectiveCard: React.FC<{ agents: AgentCharacter[]; player: PlayerS
           <span className="block text-[12.5px] leading-snug text-white/85 drop-shadow-[0_1px_2px_rgba(0,0,0,.95)] line-clamp-2">
             {detail || <>Press <span className="text-amber-300 font-bold">M</span> to publish a mission or <span className="text-amber-300 font-bold">T</span> to assign a task.</>}
           </span>
+          {mission && (
+            <span role="button" tabIndex={0} onClick={e => { e.stopPropagation(); openMissionChannel(mission.id); }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); openMissionChannel(mission.id); } }}
+              className="mt-0.5 inline-block text-[11.5px] font-bold text-amber-300 hover:text-amber-200 drop-shadow-[0_1px_2px_rgba(0,0,0,.95)]">
+              💬 Mission channel{mission.channel?.length ? ` (${mission.channel.length})` : ''}
+            </span>
+          )}
         </span>
       </button>
     );
@@ -136,7 +144,7 @@ export const ApprovalStars: React.FC = () => {
 export const StatusBars: React.FC = () => {
   const live = useLiveData();
   const busy = live.citizens.length ? live.citizens.filter(c => BUSY_CITIZEN_STATUSES.includes(c.status)).length / live.citizens.length : 0;
-  const mission = live.missions.find(m => m.status === 'IN_PROGRESS');
+  const mission = live.missions.find(m => m.status === 'IN_PROGRESS' || m.status === 'PLANNING');
   const bars: [number, string, string][] = [
     [live.online ? 1 : 0, 'bg-lime-500', 'Backend link'],
     [busy, 'bg-sky-500', 'Citizens working'],
@@ -268,8 +276,8 @@ export const FeedPanel: React.FC<FeedProps> = ({ agents, notices, onSelectCitize
 
 // ---- incoming call: a citizen reports a finished task -------------------------------------------------
 
-export const IncomingCall: React.FC<{ notice: HudNotice | null; agents: AgentCharacter[]; onAccept: (agentId: string) => void; onDecline: () => void }> =
-  ({ notice, agents, onAccept, onDecline }) => {
+export const IncomingCall: React.FC<{ notice: HudNotice | null; agents: AgentCharacter[]; onAccept: (agentId: string) => void; onDecline: () => void; onRevise?: (taskId: string) => void }> =
+  ({ notice, agents, onAccept, onDecline, onRevise }) => {
     if (!notice) return null;
     const name = notice.body.split(':')[0];
     const ag = agents.find(a => a.name === name);
@@ -281,6 +289,11 @@ export const IncomingCall: React.FC<{ notice: HudNotice | null; agents: AgentCha
         <div className="min-w-0 flex-1">
           <div className={`${COND} text-[17px] font-bold text-white truncate`}>{name}</div>
           <div className="text-[12px] text-white/70 truncate">{notice.kind === 'verified' ? 'Calling: task verified' : 'Calling: task failed verification'}</div>
+          {notice.taskId && onRevise && (
+            <button type="button" onClick={() => onRevise(notice.taskId!)} className="text-[11px] font-semibold text-amber-300 hover:text-amber-200">
+              Request changes
+            </button>
+          )}
         </div>
         <button type="button" onClick={() => ag && onAccept(ag.id)} className="w-11 h-11 rounded-full bg-green-500 hover:bg-green-400 flex items-center justify-center text-white shadow" title="Answer: open comms">
           <Phone size={18} />

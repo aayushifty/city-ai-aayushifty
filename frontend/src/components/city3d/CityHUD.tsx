@@ -54,6 +54,8 @@ import { MissionTracker } from './hud/MissionTracker';
 import { CitizenActivityPanel } from './hud/CitizenActivityPanel';
 import { StatusCluster } from './hud/StatusCluster';
 import { NotificationFeed, useHudNotifications } from './hud/Notifications';
+import { RevisionDialog } from './hud/RevisionBox';
+import { MissionChannelPanel, openMissionChannel } from './hud/MissionChannel';
 import { DEFAULT_HUD_SETTINGS, HudSettings, PhoneMenu } from './hud/PhoneMenu';
 import { CitizenInspectCard, InteractionPrompt } from './hud/CitizenInteraction';
 import { ApprovalStars, COND, FeedPanel, HudBadge, IncomingCall, KeyHints, ObjectiveCard, Speedometer, StatusBars, TopCounters } from './hud/RpHud';
@@ -145,6 +147,14 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   const live = useCityLiveDataPoller();
   const notifications = useHudNotifications(live);
   const [call, setCall] = useState<HudNotice | null>(null);
+  const [revisionTaskId, setRevisionTaskId] = useState<string | null>(null);
+  const [channelMissionId, setChannelMissionId] = useState<string | null>(null);
+  React.useEffect(() => {
+    const open = (e: Event) => setChannelMissionId((e as CustomEvent<string>).detail);
+    window.addEventListener('cityai:channel', open);
+    return () => window.removeEventListener('cityai:channel', open);
+  }, []);
+  const revisionTask = revisionTaskId ? live.tasks.find(t => t.task_id === revisionTaskId) || null : null;
   const lastCallId = React.useRef<string | null>(null);
   React.useEffect(() => {
     const n = notifications.history[0];
@@ -356,6 +366,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
     <CityLiveDataContext.Provider value={live}>
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between overflow-hidden font-mono">
       <HostApprovalPanel />
+      {revisionTask && <RevisionDialog task={revisionTask} onClose={() => setRevisionTaskId(null)} />}
+      {channelMissionId && <MissionChannelPanel missionId={channelMissionId} onClose={() => setChannelMissionId(null)} />}
       {/* 1. TOP LEFT: badge, clickable key hints, current objective. TOP RIGHT: live counters + feed panel */}
       {!panelsHidden && (
         <div className="absolute left-4 top-3 z-20 flex flex-col gap-4 font-sans">
@@ -495,15 +507,18 @@ export const CityHUD: React.FC<CityHUDProps> = ({
           <div className="absolute h-6 w-0.5 bg-white/30" />
         </div>
 
-        {/* Proximity prompt: what you can do with the citizen next to you (live status from the backend) */}
+        {/* Proximity prompt: what you can do with the citizen next to you (live status from the backend).
+            Docked near the bottom so it never covers the citizen you are looking at. */}
         {nearbyAgent && !interactingAgent && !showPublicMissionsModal && (
-          <InteractionPrompt
-            agent={nearbyAgent}
-            onTalk={() => talkTo(nearbyAgent.id)}
-            onAssign={() => assignTo(nearbyAgent.id)}
-            onWork={() => onDirectWorkCommand(nearbyAgent.id)}
-            onInspect={() => setInspectId(id => (id === nearbyAgent.id ? null : nearbyAgent.id))}
-          />
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-[252px] sm:bottom-24 z-30 pointer-events-auto">
+            <InteractionPrompt
+              agent={nearbyAgent}
+              onTalk={() => talkTo(nearbyAgent.id)}
+              onAssign={() => assignTo(nearbyAgent.id)}
+              onWork={() => onDirectWorkCommand(nearbyAgent.id)}
+              onInspect={() => setInspectId(id => (id === nearbyAgent.id ? null : nearbyAgent.id))}
+            />
+          </div>
         )}
 
         {/* Pointer Lock Help Banner when not locked */}
@@ -843,6 +858,9 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                     <span>Send</span>
                   </button>
                 </form>
+                <div className="text-[10px] text-slate-500 px-1">
+                  To change finished work, say <span className="text-amber-300">"revise that: …"</span> (or use Request changes in the phone's Tasks app).
+                </div>
               </div>
             )}
 
@@ -1095,6 +1113,10 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                         <div className="text-[11px] text-slate-400 mt-0.5">
                           Category: <span className="text-blue-400">{m.category}</span> • Published: {m.publishedAt}
                         </div>
+                        <button type="button" onClick={() => { onClosePublicMissions(); openMissionChannel(m.id); }}
+                          className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/90 hover:bg-amber-400 text-black text-[10.5px] font-bold">
+                          Open mission channel
+                        </button>
                       </div>
                       <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
                         m.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
@@ -1227,7 +1249,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
       {/* 5. BOTTOM LEFT: notifications, approval stars, mini-map with status bars */}
       <div className="absolute left-4 bottom-4 z-30 flex flex-col gap-2 items-start">
         {hudSettings.notifications && !modalOpen && (
-          <NotificationFeed toasts={notifications.toasts} onDismiss={notifications.dismiss} />
+          <NotificationFeed toasts={notifications.toasts} onDismiss={notifications.dismiss} onRevise={setRevisionTaskId} />
         )}
         {hudSettings.minimap && !panelsHidden && (
           <div className="flex flex-col items-start">
@@ -1251,7 +1273,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
       {/* BOTTOM RIGHT: incoming call, jet speedometer, phone */}
       <div className="absolute right-4 bottom-[76px] z-40 flex flex-col items-end gap-3">
-        <IncomingCall notice={call} agents={agentCharacters} onAccept={(id) => { setCall(null); talkTo(id); }} onDecline={() => setCall(null)} />
+        <IncomingCall notice={call} agents={agentCharacters} onAccept={(id) => { setCall(null); talkTo(id); }} onDecline={() => setCall(null)}
+          onRevise={(id) => { setCall(null); setRevisionTaskId(id); }} />
         {playerState.isPilotingJet && <Speedometer speed={playerState.jetSpeed ?? 0} altitude={playerState.jetAltitude ?? 0} />}
       </div>
 

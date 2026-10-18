@@ -180,10 +180,14 @@ async def test_assign_task_3d_presentation_guaranteed_success(agent_service):
     task_id = dispatch_res["task_id"]
     assert task_id is not None
 
-    # Wait for completion
-    for _ in range(60):
+    # Wait for completion: writing the slides on the local GPU takes about 80 s, so allow up to 4 minutes
+    # (stop early if the task ends without a deliverable)
+    for _ in range(480):
         artifact = agent_service.get_artifact(task_id)
         if artifact:
+            break
+        rec = agent_service.history.get(task_id)
+        if rec and rec.get("status") in ("FAILED", "CANCELLED"):
             break
         await asyncio.sleep(0.5)
 

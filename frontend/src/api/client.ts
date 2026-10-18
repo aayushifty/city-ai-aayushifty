@@ -30,7 +30,7 @@ export interface TaskRecord {
   agent_id: string;
   agent_name: string;
   title: string;
-  kind: 'TASK' | 'CHAT' | 'MISSION_SUBTASK';
+  kind: 'TASK' | 'CHAT' | 'MISSION_SUBTASK' | 'REVISION';
   mission_id: string | null;
   status: 'QUEUED' | 'PLANNING' | 'WORKING' | 'TESTING' | 'VERIFYING' | 'REPAIRING' | 'VERIFIED' | 'FAILED' | 'BLOCKED' | 'CANCELLED';
   progress: number;
@@ -49,6 +49,12 @@ export interface TaskRecord {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  // revisions ("Request changes"): every version of a deliverable shares root_task_id; the original is v1
+  version?: number;
+  revision_of?: string;
+  root_task_id?: string;
+  base_title?: string;
+  feedback?: string;
 }
 
 export function absoluteLink(url: string): string {
@@ -290,6 +296,42 @@ export const api = {
   async listPublicMissions(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/missions`);
     if (!res.ok) throw new Error('Failed to list public missions');
+    return res.json();
+  },
+
+  /** The user guide (docs/USER_GUIDE.md) as Markdown. */
+  async getGuide(): Promise<string> {
+    const res = await fetch(`${API_BASE}/guide`);
+    if (!res.ok) throw new Error('Guide not available');
+    return (await res.json()).markdown;
+  },
+
+  /** Write once to everyone on a mission (its shared channel). */
+  async postToMission(missionId: string, text: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/missions/${missionId}/channel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      let detail = `Request failed (${res.status})`;
+      try { detail = (await res.json()).detail || detail; } catch { /* keep the status text */ }
+      throw new Error(detail);
+    }
+  },
+
+  /** Request changes on a finished task: the same citizen edits its deliverable into the next version. */
+  async reviseTask(taskId: string, feedback: string): Promise<{ task_id: string; version: number; title: string; agent_name: string }> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/revise`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback }),
+    });
+    if (!res.ok) {
+      let detail = `Request failed (${res.status})`;
+      try { detail = (await res.json()).detail || detail; } catch { /* keep the status text */ }
+      throw new Error(detail);
+    }
     return res.json();
   },
 

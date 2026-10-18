@@ -13,7 +13,7 @@ from app.execution.agent_service import CitizenExecutionService
 from app.execution.task_history import TaskHistory
 from app.models.database import Database
 from app.models.schemas import CitizenTaskRequest, PublicMissionCreateRequest
-from app.providers.router import model_router
+from app.providers.router import PriorityGate, model_router
 
 
 @pytest.fixture
@@ -32,8 +32,9 @@ class ScriptedModel:
         self.replies = list(replies)
         self.prompts = []
 
-    async def __call__(self, request, preferred_provider=None):
+    async def __call__(self, request, preferred_provider=None, interactive=False):
         self.prompts.append(request.prompt)
+        self.interactive = getattr(self, "interactive", []) + [interactive]
         reply = self.replies[min(len(self.prompts) - 1, len(self.replies) - 1)]
         if not isinstance(reply, str):
             reply = json.dumps(reply)
@@ -181,7 +182,7 @@ async def run_mission(svc, monkeypatch, outcomes):
     monkeypatch.setattr(model_router, "route_completion", ScriptedModel([GRAPH]))
     log = {"events": [], "contexts": {}, "workspaces": set()}
 
-    async def fake_loop(citizen, task_id, req, workspace_dir=None, context="", mission_id=None):
+    async def fake_loop(citizen, task_id, req, workspace_dir=None, context="", mission_id=None, **kwargs):
         step = req.title.split()[-1]
         log["events"].append(("start", step))
         log["contexts"][step] = context
@@ -272,7 +273,7 @@ async def test_chat_remembers_the_conversation_and_current_task(svc, monkeypatch
     model = ScriptedModel(["I am reviewing the firewall rules.", "Yes, the firewall review I mentioned."])
     seen = []
 
-    async def spy(request, preferred_provider=None):
+    async def spy(request, preferred_provider=None, interactive=False):
         seen.append(request.system_prompt)
         return await model(request, preferred_provider)
 
@@ -285,3 +286,97 @@ async def test_chat_remembers_the_conversation_and_current_task(svc, monkeypatch
     assert "Audit firewall rules" in seen[0]
     assert "I am reviewing the firewall rules." in seen[1] and "what are you working on" in seen[1]
     assert second.reply.startswith("Yes")
+
+
+# --- Responsiveness: missions answer at once, no duplicates, chat goes first ---------------------------
+
+@pytest.mark.asyncio
+async def test_mission_submit_returns_immediately_and_plans_in_background(svc, monkeypatch):
+    gate = asyncio.Event()
+
+    async def slow_planner(request, preferred_provider=None, interactive=False):
+        await gate.wait()                      # the GPU is busy: planning takes a while
+        return SimpleNamespace(content=json.dumps(plan(("A", "agent-analyst", []))), model_name="s", provider_name="t")
+
+    async def fake_loop(citizen, task_id, req, workspace_dir=None, context="", mission_id=None, **kwargs):
+        svc.history.update(task_id, status="VERIFIED")
+        return {"verified": True, "files": [], "summary": "ok", "error": None}
+
+    monkeypatch.setattr(model_router, "route_completion", slow_planner)
+    monkeypatch.setattr(svc, "_run_task_execution_loop", fake_loop)
+    req = PublicMissionCreateRequest(title="Build a  Modern Trauma Center", description="d")
+    mission = svc.submit_public_mission(req)
+    assert mission["status"] == "PLANNING" and mission["subtasks"] == []
+    assert svc.list_public_missions()[0]["id"] == mission["id"]
+
+    again = svc.submit_public_mission(PublicMissionCreateRequest(title="build a modern trauma center", description="d"))
+    assert again["id"] == mission["id"] and again["duplicate"] is True
+    assert len(svc.list_public_missions()) == 1
+
+    gate.set()
+    await svc._active_tasks[mission["id"]]
+    assert mission["status"] == "COMPLETED" and len(mission["subtasks"]) == 1
+
+
+def test_mission_route_answers_without_waiting_for_the_model(monkeypatch):
+    from app.api import routes_agents
+    from app.main import app
+    seen = {}
+
+    def fake_submit(payload):
+        seen["title"] = payload.title
+        return {"id": "mission-x", "status": "PLANNING", "subtasks": []}
+
+    monkeypatch.setattr(routes_agents.agent_service, "submit_public_mission", fake_submit)
+    res = TestClient(app, base_url="http://127.0.0.1").post("/api/missions", json={"title": "Trauma center", "description": "d"})
+    assert res.status_code == 200 and res.json()["status"] == "PLANNING" and seen["title"] == "Trauma center"
+
+
+@pytest.mark.asyncio
+async def test_priority_gate_serves_interactive_requests_first():
+    gate = PriorityGate(1)
+    order = []
+
+    async def job(name, prio, hold=0.02):
+        async with gate.hold(prio):
+            order.append(name)
+            await asyncio.sleep(hold)
+
+    first = asyncio.create_task(job("running-task", 1, 0.05))
+    await asyncio.sleep(0.01)
+    queued = [asyncio.create_task(job(f"task-{i}", 1)) for i in range(3)]
+    await asyncio.sleep(0.005)
+    chat = asyncio.create_task(job("chat", 0))
+    await asyncio.gather(first, chat, *queued)
+    assert order[0] == "running-task"          # a running generation is never interrupted
+    assert order[1] == "chat"                  # the chat reply jumps the background queue
+    assert order[2:] == ["task-0", "task-1", "task-2"]
+
+
+@pytest.mark.asyncio
+async def test_priority_gate_survives_cancelled_waiters():
+    gate = PriorityGate(1)
+    await gate.acquire(1)
+    waiter = asyncio.create_task(gate.acquire(1))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    gate.release()
+    await asyncio.wait_for(gate.acquire(0), 0.5)   # the slot was not lost to the cancelled waiter
+
+
+@pytest.mark.asyncio
+async def test_chat_is_interactive_and_short(svc, monkeypatch):
+    scripted = ScriptedModel(["Hello Governor, the analysis is on track."])
+    captured = {}
+    orig = scripted.__call__
+
+    async def spy(request, preferred_provider=None, interactive=False):
+        captured["max_tokens"] = request.max_tokens
+        return await orig(request, preferred_provider, interactive)
+
+    monkeypatch.setattr(model_router, "route_completion", spy)
+    await svc.chat_with_citizen("agent-analyst", "How is the requirements analysis for the clinic going so far?")
+    assert scripted.interactive == [True]
+    assert captured["max_tokens"] <= 400

@@ -12,6 +12,7 @@ import {
   AgentCharacter,
   PlayerState 
 } from '../../simulation/types';
+import { AGENT_LOCATIONS, SHARED_COMMUNAL_SPOTS } from '../../simulation/engine';
 import { WorkplaceArchitect } from './WorkplaceArchitect';
 import { createHumanoid, animateHumanoid, ClothingStyle } from './HumanoidBuilder';
 import { buildBoxes, rayToBoxes, stepMovement, TPV_MAX_DIST, TPV_MIN_DIST, WALK_SPEED } from './PlayerController';
@@ -42,6 +43,30 @@ interface CitySceneProps {
   onSelectEntity: (type: 'BUILDING' | 'VEHICLE' | 'AGENT', id: string) => void;
   onSelectCameraMode?: (mode: CameraMode) => void;
   onToggleJetFlight?: (piloting: boolean) => void;
+}
+
+/**
+ * Moves any citizen waypoint (desk, test rig, terrace, shared plaza spot) that lies inside a collision box to
+ * the nearest point just outside it, so citizens are never hidden inside a building, dais or planter.
+ */
+function moveSpotsOutOfBoxes(boxes: { minX: number; maxX: number; minZ: number; maxZ: number }[]): void {
+  const spots = [
+    ...Object.values(AGENT_LOCATIONS).flatMap(l => [l.desk, l.testRig, l.terrace]),
+    ...SHARED_COMMUNAL_SPOTS,
+  ];
+  const MARGIN = 0.3;   // boxes already include the 0.9 walking clearance
+  for (const s of spots) {
+    for (let pass = 0; pass < 4; pass++) {
+      const b = boxes.find(k => s.x > k.minX && s.x < k.maxX && s.z > k.minZ && s.z < k.maxZ);
+      if (!b) break;
+      const exits = [
+        { x: b.minX - MARGIN, z: s.z, d: s.x - b.minX }, { x: b.maxX + MARGIN, z: s.z, d: b.maxX - s.x },
+        { x: s.x, z: b.minZ - MARGIN, d: s.z - b.minZ }, { x: s.x, z: b.maxZ + MARGIN, d: b.maxZ - s.z },
+      ].sort((a, c) => a.d - c.d);
+      s.x = exits[0].x;
+      s.z = exits[0].z;
+    }
+  }
 }
 
 /** Canvas for a citizen's overhead badge (name, model it runs, role, keys). */
@@ -555,7 +580,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       roadMeshMap.current.set(r.id, roadMesh);
 
       // Concrete Sidewalks in clean daylight stone
-      const swMat = new THREE.MeshStandardMaterial({ color: 0xBDB8AE, roughness: 0.9 });
+      const swMat = new THREE.MeshStandardMaterial({ color: 0xA19C93, roughness: 0.9 });
       [-3.1, 3.1].forEach(offY => {
         const swGeo = new THREE.BoxGeometry(length, 0.16, 1.3);
         const swMesh = new THREE.Mesh(swGeo, swMat);
@@ -621,6 +646,14 @@ export const CityScene: React.FC<CitySceneProps> = ({
     const PLAYER_RADIUS = 0.45;
     const moveBoxes = buildBoxes(buildings, 0.9);
     const cameraBoxes = buildBoxes(buildings, 0.35);
+    for (const b of buildings.filter(x => x.type === 'PARK_SPACE')) {
+      for (const o of WorkplaceArchitect.plazaObstacles(b)) {
+        moveBoxes.push({ ...o, minX: o.minX - 0.9, maxX: o.maxX + 0.9, minZ: o.minZ - 0.9, maxZ: o.maxZ + 0.9 });
+      }
+    }
+    // Citizens stand at their desk / test rig / terrace and meet at plaza spots: keep every spot out of solid
+    // geometry (some Kenney buildings and the plaza dais sit on top of the original coordinates).
+    moveSpotsOutOfBoxes(moveBoxes);
 
     // Real buildings, street lights, traffic lights, district signs and car models load in the background;
     // their collision boxes join the player's and the camera's as soon as they arrive.
@@ -641,6 +674,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         moveBoxes.push({ ...b, minX: b.minX - 0.9, maxX: b.maxX + 0.9, minZ: b.minZ - 0.9, maxZ: b.maxZ + 0.9 });
         if (b.height > 4) cameraBoxes.push(b);
       }
+      moveSpotsOutOfBoxes(moveBoxes);
     }).catch(err => console.warn('City dressing failed to load', err));
 
     loadCarFactory().then(makeCar => {

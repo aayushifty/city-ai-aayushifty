@@ -21,7 +21,7 @@ from app.core.security import SecurityEngine
 from app.execution.workspace import WorkspaceManager
 from app.execution.runner import ProcessRunner
 from app.execution.verifier import VerifierEngine, verify_deliverables
-from app.execution.task_history import TaskHistory
+from app.execution.task_history import TERMINAL_STATUSES, TaskHistory
 from app.models.database import Database
 from app.models.schemas import (
     CitizenProfile, CitizenChatResponse, CitizenTaskRequest,
@@ -48,6 +48,7 @@ class CitizenExecutionService:
         self.citizens: Dict[str, CitizenProfile] = {}
         self.artifacts: Dict[str, DeliverableArtifact] = {}
         self.public_missions: List[Dict[str, Any]] = []
+        self._mission_planned: Dict[str, asyncio.Event] = {}
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._citizen_locks: Dict[str, asyncio.Lock] = {}
         self._chat_memory: Dict[str, List[Tuple[str, str]]] = {}  # recent chat turns per citizen
@@ -101,6 +102,40 @@ class CitizenExecutionService:
 
         msg_id = f"cmsg-{uuid.uuid4().hex[:8]}"
         task_id = f"task-{uuid.uuid4().hex[:8]}"
+
+        # --- 0. "Revise that: ..." -> next version of this citizen's latest finished deliverable ---
+        revise = _REVISE_RE.match(message)
+        if revise:
+            feedback = revise.group(1).strip()
+            if feedback and not re.match(r"\s*(?:please\s+)?(?:revise|redo|request changes)\b", message, re.IGNORECASE):
+                feedback = message.strip()     # "change that to blue": the whole sentence is the instruction
+            latest = next((r for r in self.history.list(limit=50, agent_id=citizen.id)
+                           if r["status"] in REVISABLE_STATUSES), None)
+            if not feedback:
+                reply_content = "Supreme Governor, what should I change? Tell me, e.g. \"revise that: make the title shorter and add a pricing section\"."
+                action = "REVISION_NEEDS_FEEDBACK"
+            elif not latest:
+                reply_content = "Supreme Governor, I have no finished work to revise yet."
+                action = "REVISION_NOTHING_TO_REVISE"
+            else:
+                try:
+                    started = self.revise_task(latest["task_id"], feedback)
+                    reply_content = (f"Supreme Governor, I'm revising **{latest.get('base_title') or latest['title']}** as "
+                                     f"version {started['version']} with your changes. It will be verified again before I report back; "
+                                     "the previous version stays available.")
+                    action = "REVISION_STARTED"
+                    citizen.thought = f"Revising {latest['title'][:50]} (v{started['version']})"
+                except (LookupError, ValueError, RuntimeError) as ex:
+                    reply_content = f"Supreme Governor, I can't start that revision: {ex}"
+                    action = "REVISION_REFUSED"
+            memory = self._chat_memory.setdefault(citizen.id, [])
+            memory.extend([("user", message[:1000]), ("citizen", reply_content[:1000])])
+            del memory[:-16]
+            return CitizenChatResponse(
+                message_id=msg_id, agent_id=agent_id, agent_name=citizen.name, reply=reply_content,
+                model_used=citizen.assigned_model, provider=citizen.provider,
+                timestamp=telemetry["system_clock"], action_taken=action,
+            )
 
         # --- 1. Real-World Time & Date Query ---
         if intent == "TIME_QUERY":
@@ -366,8 +401,11 @@ class CitizenExecutionService:
             topic = intent_data.get("topic", default_topic)
             kind_label = "3D presentation" if intent == "3D_PRESENTATION" else "website"
             self.history.start(task_id, citizen.id, citizen.name, f"{kind_label.capitalize()}: {topic}", kind="CHAT", status="WORKING")
+            self.history.update(task_id, brief={"title": f"{kind_label.capitalize()}: {topic}", "description": message[:2000],
+                                                "expected_deliverable": "index.html"})
             await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing the {kind_label} content for {topic}...")
-            result = await self._produce_web_deliverable(citizen, task_id, intent, topic, context=message)
+            result = await self._produce_web_deliverable(citizen, task_id, intent, topic, context=message,
+                                                         three_d=_wants_3d(message))
             artifact, evidence = result["artifact"], result["evidence"]
             verified = evidence.exit_code == 0
             self._record_artifact(citizen, task_id, artifact, verified)
@@ -433,17 +471,20 @@ class CitizenExecutionService:
             f"HOST COMPUTER: Windows ({telemetry['os_name']} {telemetry['os_release']}) [{telemetry['architecture']}], "
             f"Python {telemetry['python_version']}, {telemetry['free_disk_gb']} GB free disk space.\n"
             "The user speaking to you is the Supreme Governor. Speak directly, professionally, authentically in character, and in natural human language.\n"
-            "CRITICAL: Always speak fluently in clear human language. NEVER return raw JSON, code dictionaries, or developer debug structures. Answer thoroughly, accurately, and helpfully."
+            "CRITICAL: Always speak fluently in clear human language. NEVER return raw JSON, code dictionaries, or developer debug structures. "
+            "Be accurate and helpful, and keep it short: two to four sentences unless the Governor asks for detail."
         )
 
         req = ModelCompletionRequest(
             prompt=message,
             system_prompt=system_prompt,
             model_name=citizen.assigned_model,
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=CHAT_MAX_TOKENS,
         )
 
-        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama")
+        # interactive: a reply you are waiting for goes ahead of queued background task/mission work
+        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama", interactive=True)
         reply_content = resp.content.strip()
 
         # Sanitize any accidental raw JSON / mock engine code structures into articulate human dialogue
@@ -500,9 +541,10 @@ class CitizenExecutionService:
 
     # --- Helpers shared by chat deliverables, tasks and missions ---
 
-    async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2) -> str:
+    async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2,
+                          json_mode: bool = False) -> str:
         req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt,
-                                     model_name=citizen.assigned_model, temperature=temperature)
+                                     model_name=citizen.assigned_model, temperature=temperature, json_mode=json_mode)
         resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama")
         return resp.content or ""
 
@@ -562,22 +604,35 @@ class CitizenExecutionService:
 
     # --- AI-written websites and 3D presentations ---
 
-    async def _write_web_content(self, citizen: CitizenProfile, kind: str, topic: str,
-                                 context: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
-        """Asks the citizen's model for slide content / website copy as JSON. Returns (content, problem)."""
+    async def _write_web_content(self, citizen: CitizenProfile, kind: str, topic: str, context: str = "",
+                                 revise_from: Optional[str] = None,
+                                 feedback: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Asks the citizen's model for slide content / website copy as JSON. Returns (content, problem).
+        With revise_from + feedback it edits the previous version instead of writing a new one."""
         schema = _SLIDES_SCHEMA if kind == "3D_PRESENTATION" else _WEBSITE_SCHEMA
-        what = "a 5-7 slide presentation" if kind == "3D_PRESENTATION" else "a one-page website"
-        prompt = (
-            f"Write the content for {what} about: {topic}\n"
-            + (f"Request details: {context[:1500]}\n" if context and context.strip() != topic else "")
-            + "Use specific, accurate facts about the topic, not generic marketing filler.\n"
-            f"Reply with ONLY a JSON object of this shape:\n{schema}"
-        )
+        what = "a 5-7 slide presentation" if kind == "3D_PRESENTATION" else (
+            "a one-page website (3 or more features, 2-4 detail sections, 3-4 metrics)")
+        if revise_from is not None:
+            prompt = (
+                f"You made {what} about: {topic}\n"
+                f"CURRENT VERSION (content):\n{revise_from[:6000]}\n\n"
+                f"THE GOVERNOR'S REQUESTED CHANGES:\n{(feedback or '')[:2000]}\n\n"
+                "Apply exactly these changes and keep everything else as it is (same facts, same structure, "
+                "same wording where no change was asked for).\n"
+                f"Reply with ONLY the complete updated JSON object of this shape:\n{schema}"
+            )
+        else:
+            prompt = (
+                f"Write the content for {what} about: {topic}\n"
+                + (f"Request details: {context[:1500]}\n" if context and context.strip() != topic else "")
+                + "Use specific, accurate facts about the topic, not generic marketing filler.\n"
+                f"Reply with ONLY a JSON object of this shape:\n{schema}"
+            )
         system = f"You are {citizen.name}, {citizen.profession}. You reply with a single valid JSON object and nothing else."
         problem = "no reply"
         for _ in range(2):
             try:
-                raw = await self._model_call(citizen, prompt, system, temperature=0.4)
+                raw = await self._model_call(citizen, prompt, system, temperature=0.4, json_mode=revise_from is not None)
             except Exception as ex:
                 return None, f"model call failed: {ex}"
             data = _extract_json(raw)
@@ -587,13 +642,20 @@ class CitizenExecutionService:
         return None, problem
 
     async def _produce_web_deliverable(self, citizen: CitizenProfile, task_id: str, kind: str, topic: str,
-                                       context: str = "") -> Dict[str, Any]:
-        content, problem = await self._write_web_content(citizen, kind, topic, context)
+                                       context: str = "", revise_from: Optional[str] = None,
+                                       feedback: Optional[str] = None, three_d: bool = False) -> Dict[str, Any]:
+        content, problem = await self._write_web_content(citizen, kind, topic, context, revise_from, feedback)
+        # remembered so a later "Request changes" can edit this exact content
+        self.history.update(task_id, web_kind=kind, topic=topic, web_content=content, three_d=three_d)
         label = "3D presentation" if kind == "3D_PRESENTATION" else "website"
         await self._progress(citizen, task_id, "WORKING", 65.0, f"Building the {label} for {topic}...")
-        synth = computer_service.synthesize_3d_presentation if kind == "3D_PRESENTATION" else computer_service.synthesize_website
-        artifact = await asyncio.to_thread(synth, topic=topic, citizen_name=citizen.name,
-                                           citizen_profession=citizen.profession, task_id=task_id, content=content)
+        if kind == "3D_PRESENTATION":
+            artifact = await asyncio.to_thread(computer_service.synthesize_3d_presentation, topic=topic, citizen_name=citizen.name,
+                                               citizen_profession=citizen.profession, task_id=task_id, content=content)
+        else:
+            artifact = await asyncio.to_thread(computer_service.synthesize_website, topic=topic, citizen_name=citizen.name,
+                                               citizen_profession=citizen.profession, task_id=task_id, content=content,
+                                               three_d=three_d)
         artifact.agent_id = citizen.id
         artifact.url = computer_service.public_url(artifact.relative_path)
         await self._progress(citizen, task_id, "TESTING", 85.0, "Verifying the generated HTML...")
@@ -634,14 +696,20 @@ class CitizenExecutionService:
 
     async def _run_task_execution_loop(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest,
                                        workspace_dir: Optional[Path] = None, context: str = "",
-                                       mission_id: Optional[str] = None) -> Dict[str, Any]:
+                                       mission_id: Optional[str] = None,
+                                       revision: Optional[Dict[str, Any]] = None,
+                                       allow_web: bool = True) -> Dict[str, Any]:
         """Runs one task to an honest outcome. Returns {"verified", "files", "evidence", "attempts", "summary", "error"}."""
         if self.history.get(task_id) is None:
             self.history.start(task_id, citizen.id, citizen.name, req.title,
                                kind="MISSION_SUBTASK" if mission_id else "TASK", mission_id=mission_id)
         citizen.current_task = req.title
+        rec = self.history.get(task_id) or {}
+        if not rec.get("brief"):
+            self.history.update(task_id, brief={"title": req.title, "description": req.description,
+                                                "expected_deliverable": req.expected_deliverable})
         try:
-            result = await self._execute_task(citizen, task_id, req, workspace_dir, context)
+            result = await self._execute_task(citizen, task_id, req, workspace_dir, context, revision, allow_web)
         except asyncio.CancelledError:
             self.history.update(task_id, status="CANCELLED", note="Cancelled by the Governor.")
             citizen.status = "IDLE"
@@ -658,7 +726,8 @@ class CitizenExecutionService:
         return result
 
     async def _execute_task(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest,
-                            workspace_dir: Optional[Path], context: str) -> Dict[str, Any]:
+                            workspace_dir: Optional[Path], context: str,
+                            revision: Optional[Dict[str, Any]] = None, allow_web: bool = True) -> Dict[str, Any]:
         workspace_dir = Path(workspace_dir) if workspace_dir else self.workspaces_root / f"{citizen.id}_{task_id}"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         ws_manager = WorkspaceManager(workspace_dir)
@@ -676,8 +745,20 @@ class CitizenExecutionService:
         elif "website" in task_text or "landing page" in task_text or "web app" in task_text:
             web_kind = "WEBSITE"
 
-        if web_kind:
+        if web_kind and not allow_web:
+            web_kind = None      # a supporting mission step: it writes content/specs, the assembly step builds the page
+        if web_kind and not revision:
             return await self._execute_web_task(citizen, task_id, req, web_kind, workspace_dir, ws_manager, context)
+
+        previous_files: List[Path] = []
+        if revision:
+            for rel in revision.get("files", []):
+                try:
+                    fp = ws_manager.resolve_path(rel)
+                except Exception:
+                    continue
+                if fp.is_file() and fp not in previous_files:
+                    previous_files.append(fp)
 
         # Generic deliverable: the model writes files, real checks verify them, failures go back for repair.
         plan_prompt = (
@@ -696,13 +777,40 @@ class CitizenExecutionService:
             "  ]\n"
             "}"
         )
+        if revision:
+            current = "\n\n".join(
+                f"--- {_rel(fp, workspace_dir)} ---\n{fp.read_text(encoding='utf-8', errors='replace')[:6000]}"
+                for fp in previous_files
+            )[:16000]
+            plan_prompt = (
+                f"You are {citizen.name}, {citizen.profession}. You are REVISING your earlier deliverable "
+                f"(this will be version {revision.get('version')}).\n"
+                f"ORIGINAL TASK: {req.title}\n"
+                f"DESCRIPTION: {req.description}\n"
+                f"EXPECTED DELIVERABLE: {req.expected_deliverable}\n\n"
+                f"THE GOVERNOR'S REQUESTED CHANGES:\n{str(revision.get('feedback', ''))[:3000]}\n\n"
+                f"YOUR CURRENT FILES (in your workspace):\n{current or '(none found)'}\n\n"
+                "Apply the requested changes by editing these files. Keep everything that was not asked to change, "
+                "and keep the code working: Python files must run and existing tests must still pass "
+                "(do not delete or weaken tests).\n"
+                "Output valid JSON with ONLY the files you change or add, each with its FULL new content:\n"
+                '{"summary": "What you changed", "files": [{"path": "relative/path", "content": "full file content"}]}'
+            )
         system = f"You are {citizen.name}. Generate complete, working code, reports and documentation."
-        await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing deliverables for {req.title}")
-        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1)
+        await self._progress(citizen, task_id, "WORKING", 30.0,
+                             f"Applying your changes to {req.title}" if revision else f"Writing deliverables for {req.title}")
+        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1, json_mode=bool(revision))
         parsed = _extract_json(raw_output)
         files_to_write = _files_from(parsed)
+        if not files_to_write and revision:
+            # models sometimes answer in the "--- path ---" / fenced-code layout they were shown
+            files_to_write = _files_from_text(raw_output, [_rel(fp, workspace_dir) for fp in previous_files])
         summary = str(parsed.get("summary", "")) if isinstance(parsed, dict) else ""
-        if not files_to_write:
+        if not files_to_write and revision and previous_files:
+            # A revision must edit the existing work: a reply without a file list cannot be applied safely.
+            snippet = re.sub(r"\s+", " ", raw_output or "")[:300]
+            self.history.update(task_id, note=f"Model did not return edited files; nothing was changed. Its reply began: {snippet!r}")
+        elif not files_to_write:
             # Plain-text reply: save it (or its first code block) as the expected deliverable.
             content = raw_output
             code_match = re.search(r"```(?:\w+)?\s*([\s\S]*?)\s*```", raw_output)
@@ -711,9 +819,20 @@ class CitizenExecutionService:
             files_to_write = [{"path": req.expected_deliverable.strip() or f"{citizen.id}_deliverable.md", "content": content}]
             self.history.update(task_id, note="Model did not return the JSON file list; saved its reply as the deliverable.")
 
-        written: List[Path] = []
+        written: List[Path] = list(previous_files)    # a revision is verified as the whole deliverable
         self._write_files(ws_manager, files_to_write, written, task_id)
-        ws_manager.commit_changes(f"feat: {req.title} by {citizen.name}")
+        ws_manager.commit_changes(f"revise: {req.title} v{revision.get('version')} by {citizen.name}" if revision
+                                  else f"feat: {req.title} by {citizen.name}")
+        if revision and previous_files and not files_to_write:
+            evidence = await verify_deliverables(workspace_dir, written)
+            evidence.exit_code = evidence.exit_code or 1
+            evidence.output_snippet = ("The model did not return any edited files, so the requested changes were "
+                                       "not applied.\n" + (evidence.output_snippet or ""))
+            self._finish_history(task_id, False, evidence, 0)
+            await self._progress(citizen, task_id, "FAILED", 100.0, "Changes not applied: no edited files came back",
+                                 history_status="FAILED")
+            return {"verified": False, "files": [_rel(fp, workspace_dir) for fp in written], "evidence": evidence,
+                    "attempts": 0, "summary": "", "error": "no edited files returned"}
 
         # The artifact is visible right away; its verification fields are filled in below.
         expected_name = Path(req.expected_deliverable).name if req.expected_deliverable else ""
@@ -755,11 +874,12 @@ class CitizenExecutionService:
                 'Reply with ONLY JSON: {"diagnosis": "...", "files": [{"path": "...", "content": "full fixed file"}]}'
             )
             try:
-                repair_raw = await self._model_call(citizen, repair_prompt, system, temperature=0.1)
+                repair_raw = await self._model_call(citizen, repair_prompt, system, temperature=0.1, json_mode=True)
             except Exception as ex:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model call failed ({ex}).")
                 continue
-            fixes = _files_from(_extract_json(repair_raw))
+            fixes = _files_from(_extract_json(repair_raw)) or _files_from_text(
+                repair_raw, [_rel(p, workspace_dir) for p in written])
             if not fixes:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model reply had no file fixes.")
                 continue
@@ -802,7 +922,8 @@ class CitizenExecutionService:
             topic = match.group(1).strip().strip("?!.,\"' ")
         await self._progress(citizen, task_id, "WORKING", 30.0, f"Writing content for {topic}...")
         result = await self._produce_web_deliverable(citizen, task_id, web_kind, topic,
-                                                     context=f"{req.description}\n{context}".strip())
+                                                     context=f"{req.description}\n{context}".strip(),
+                                                     three_d=_wants_3d(f"{req.title} {req.description}"))
         artifact, evidence = result["artifact"], result["evidence"]
         default_name = "3d_presentation.html" if web_kind == "3D_PRESENTATION" else "index.html"
         target_name = Path(req.expected_deliverable).name if req.expected_deliverable.lower().endswith(".html") else default_name
@@ -827,6 +948,143 @@ class CitizenExecutionService:
                 continue
             if p not in written:
                 written.append(p)
+
+    # --- Revisions: "Request changes" on a finished task ---
+
+    def revision_chain(self, task_id: str) -> List[Dict[str, Any]]:
+        """All versions of a deliverable (the original first), newest last."""
+        rec = self.history.get(task_id)
+        if not rec:
+            return []
+        root = rec.get("root_task_id") or rec["task_id"]
+        chain = [r for r in self.history.list(limit=MAX_HISTORY_SCAN)
+                 if r["task_id"] == root or r.get("root_task_id") == root]
+        return sorted(({k: v for k, v in r.items() if k != "web_content"} for r in chain),
+                      key=lambda r: r.get("version") or 1)
+
+    def revise_task(self, task_id: str, feedback: str) -> Dict[str, Any]:
+        """Starts the next version of a finished task: the same citizen edits its previous deliverable (same
+        workspace) according to the feedback; the result is verified (with repair attempts) like any task and
+        both versions stay available. Raises LookupError / ValueError / RuntimeError for 404 / 400 / 409."""
+        loop = asyncio.get_running_loop()   # raises before anything is written when called outside the event loop
+        feedback = (feedback or "").strip()
+        if not feedback:
+            raise ValueError("Describe the changes you want.")
+        orig = self.history.get(task_id)
+        if not orig:
+            raise LookupError(f"Task '{task_id}' not found.")
+        if orig["status"] not in REVISABLE_STATUSES:
+            raise RuntimeError(f"Only finished work can be revised (this task is {orig['status']}).")
+        citizen = self.citizens.get(orig["agent_id"])
+        if not citizen:
+            raise LookupError(f"Citizen '{orig['agent_id']}' not found.")
+        chain = self.revision_chain(task_id)
+        if any(r["status"] not in TERMINAL_STATUSES for r in chain):
+            raise RuntimeError("A revision of this deliverable is already in progress.")
+
+        web_kind = orig.get("web_kind") or _web_kind_from_deliverables(orig)
+        workspace = Path(orig["workspace"]) if orig.get("workspace") else None
+        if not web_kind and not (workspace and workspace.is_dir()):
+            raise RuntimeError("The original workspace no longer exists, so there is nothing to edit.")
+
+        root = orig.get("root_task_id") or orig["task_id"]
+        version = max((r.get("version") or 1) for r in chain) + 1
+        base_title = orig.get("base_title") or orig["title"]
+        if not web_kind:
+            self._snapshot_version(orig, root)     # keep the version being revised viewable as it is now
+
+        new_id = f"task-{uuid.uuid4().hex[:8]}"
+        title = f"{base_title} (v{version})"
+        self.history.start(new_id, citizen.id, citizen.name, title, kind="REVISION", mission_id=orig.get("mission_id"))
+        self.history.update(new_id, revision_of=orig["task_id"], root_task_id=root, version=version,
+                            base_title=base_title, feedback=feedback[:4000], brief=orig.get("brief"))
+        if not orig.get("version"):
+            self.history.update(orig["task_id"], version=1, base_title=base_title)
+
+        job = loop.create_task(self._run_revision(citizen, new_id, orig, feedback, version, root, web_kind, workspace))
+        self._active_tasks[new_id] = job
+        job.add_done_callback(lambda _t: self._active_tasks.pop(new_id, None))
+        return {"status": "QUEUED", "task_id": new_id, "revision_of": orig["task_id"], "root_task_id": root,
+                "version": version, "agent_id": citizen.id, "agent_name": citizen.name, "title": title}
+
+    async def _run_revision(self, citizen: CitizenProfile, task_id: str, orig: Dict[str, Any], feedback: str,
+                            version: int, root: str, web_kind: Optional[str], workspace: Optional[Path]) -> Dict[str, Any]:
+        brief = orig.get("brief") or {}
+        req = CitizenTaskRequest(title=brief.get("title") or orig.get("base_title") or orig["title"],
+                                 description=brief.get("description") or "",
+                                 expected_deliverable=brief.get("expected_deliverable") or "")
+        if not web_kind:
+            revision = {"feedback": feedback, "version": version,
+                        "files": [d["path"] for d in orig.get("deliverables", []) if not d.get("url") or "/revisions/" in d["url"]]}
+            result = await self._run_task_execution_loop(citizen, task_id, req, workspace_dir=workspace,
+                                                         mission_id=orig.get("mission_id"), revision=revision)
+            self._snapshot_version(self.history.get(task_id) or {}, root)
+            return result
+
+        # websites / 3D presentations: the model edits the previous content; the new version gets its own link
+        citizen.current_task = req.title
+        try:
+            await self._progress(citizen, task_id, "PLANNING", 10.0, f"Reading your feedback on {req.title}")
+            previous = orig.get("web_content")
+            revise_from = json.dumps(previous, ensure_ascii=False, indent=1) if previous else _deliverable_text(orig)
+            topic = orig.get("topic") or _topic_from_title(orig.get("base_title") or orig["title"])
+            await self._progress(citizen, task_id, "WORKING", 30.0, f"Applying your changes (v{version})...")
+            result = await self._produce_web_deliverable(citizen, task_id, web_kind, topic, context=req.description,
+                                                         revise_from=revise_from, feedback=feedback,
+                                                         three_d=bool(orig.get("three_d")))
+            artifact, evidence = result["artifact"], result["evidence"]
+            verified = evidence.exit_code == 0 and result["ai_written"]
+            if not result["ai_written"]:
+                evidence.exit_code = evidence.exit_code or 1
+                evidence.output_snippet = (f"The model did not return usable revised content ({result['fallback_reason']}), "
+                                           "so the changes were not applied.\n" + (evidence.output_snippet or ""))
+            artifact.title = f"{artifact.title} (v{version})"
+            if workspace and workspace.is_dir():
+                target = workspace / ("3d_presentation.html" if web_kind == "3D_PRESENTATION" else "index.html")
+                target.write_text(Path(artifact.file_path).read_text(encoding="utf-8"), encoding="utf-8")
+                WorkspaceManager(workspace).commit_changes(f"revise: {req.title} v{version} by {citizen.name}")
+            self._record_artifact(citizen, task_id, artifact, verified)
+            self._finish_history(task_id, verified, evidence, attempts=0)
+            await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
+                                 f"{req.title} v{version}: {'verified' if verified else 'changes not applied'}",
+                                 history_status="VERIFIED" if verified else "FAILED")
+            return {"verified": verified, "url": artifact.url}
+        except asyncio.CancelledError:
+            self.history.update(task_id, status="CANCELLED", note="Cancelled by the Governor.")
+            raise
+        except Exception as ex:
+            logger.exception(f"Revision {task_id} crashed")
+            self.history.update(task_id, note=f"Revision crashed: {ex}")
+            await self._progress(citizen, task_id, "FAILED", 100.0, f"Revision failed: {ex}"[:120], history_status="FAILED")
+            return {"verified": False, "error": str(ex)}
+        finally:
+            self._schedule_idle(citizen, task_id)
+
+    def _snapshot_version(self, rec: Dict[str, Any], root: str) -> None:
+        """Copies a version's files to data/deliverables/revisions/<root>/v<n>/ so every version keeps its own link,
+        and points the record's deliverables at that copy."""
+        workspace = rec.get("workspace")
+        if not rec or not workspace or not Path(workspace).is_dir():
+            return
+        if any((d.get("url") or "").find("/revisions/") >= 0 for d in rec.get("deliverables", [])):
+            return                                   # already snapshotted
+        ws = Path(workspace).resolve()
+        dest = (config.DELIVERABLES_DIR / "revisions" / root / f"v{rec.get('version') or 1}").resolve()
+        updated = []
+        for d in rec.get("deliverables", []):
+            if d.get("url"):
+                updated.append(d)
+                continue
+            src = (ws / d["path"]).resolve()
+            if ws not in src.parents or not src.is_file():  # never copy anything outside the workspace
+                updated.append(d)
+                continue
+            out = dest / d["path"]
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(src.read_bytes())
+            rel = out.relative_to(config.DELIVERABLES_DIR.resolve()).as_posix()
+            updated.append({**d, "url": computer_service.public_url(rel)})
+        self.history.update(rec["task_id"], deliverables=updated)
 
     async def cancel_task(self, task_id: str) -> bool:
         """Cancels a running task safely."""
@@ -853,12 +1111,79 @@ class CitizenExecutionService:
 
     def list_task_history(self, limit: int = 100, agent_id: Optional[str] = None,
                           mission_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        return self.history.list(limit=limit, agent_id=agent_id, mission_id=mission_id)
+        # the stored website/slide content is only needed for revisions; keep the polled list small
+        return [{k: v for k, v in r.items() if k != "web_content"}
+                for r in self.history.list(limit=limit, agent_id=agent_id, mission_id=mission_id)]
 
     # --- Public Missions System ---
     async def publish_public_mission(self, req: PublicMissionCreateRequest) -> Dict[str, Any]:
-        """Creates a mission, decomposes it into a dependency graph and runs it in one shared workspace."""
+        """Submits a mission and waits until it has been decomposed (the run itself continues in the background)."""
+        mission = self.submit_public_mission(req)
+        planned = self._mission_planned.get(mission["id"])
+        if planned is not None:
+            await planned.wait()
+        return mission
+
+    def submit_public_mission(self, req: PublicMissionCreateRequest) -> Dict[str, Any]:
+        """Registers a mission at once (status PLANNING) and plans + runs it in the background, so the caller
+        gets an answer immediately even while the local GPU is busy. Publishing the same title again while
+        it is still being planned or running returns the existing mission instead of starting a duplicate."""
+        key = " ".join(req.title.lower().split())
+        for existing in self.public_missions:
+            if (existing["status"] in ("PLANNING", "IN_PROGRESS")
+                    and " ".join(existing["title"].lower().split()) == key
+                    and time.time() - existing.get("published_ts", 0) < DUPLICATE_MISSION_WINDOW_S):
+                return {**existing, "duplicate": True}
+
         mission_id = f"mission-{uuid.uuid4().hex[:8]}"
+        mission: Dict[str, Any] = {
+            "id": mission_id,
+            "title": req.title,
+            "description": req.description,
+            "category": req.category,
+            "status": "PLANNING",
+            "progress": 0,
+            "subtasks": [],
+            "participating_agent_ids": [],
+            "deliverables": [],
+            "workspace_dir": str(self.workspaces_root / mission_id),
+            "published_at": datetime.now().strftime("%I:%M %p"),
+            "published_ts": time.time(),
+            "completed_at": None,
+            "channel": [],              # one shared thread: Governor briefings, citizens' progress, deliverables
+            "governor_notes": [],       # Governor messages; every step that starts later is given them
+            "web_kind": _mission_web_kind(f"{req.title} {req.description}"),
+            "three_d": _wants_3d(f"{req.title} {req.description}"),
+            "final_subtask_id": None,
+            "final_deliverable": None,
+        }
+        self.public_missions.insert(0, mission)
+        self._post(mission, "governor", f"**{req.title}**\n{req.description}".strip(), kind="brief",
+                   author_name="Supreme Governor")
+        planned = asyncio.Event()
+        self._mission_planned[mission_id] = planned
+
+        async def plan_then_run() -> None:
+            try:
+                await self._plan_mission(mission, req)
+            except Exception as ex:  # planning has its own fallback; this only guards unexpected errors
+                logger.warning(f"Mission planning failed: {ex}")
+                mission["status"] = "FAILED"
+                mission["completed_at"] = datetime.now().strftime("%I:%M %p")
+                return
+            finally:
+                planned.set()
+                self._mission_planned.pop(mission_id, None)
+            await self._run_mission_pipeline(mission)
+
+        mission_task = asyncio.create_task(plan_then_run())
+        self._active_tasks[mission_id] = mission_task
+        mission_task.add_done_callback(lambda _t: self._active_tasks.pop(mission_id, None))
+        return mission
+
+    async def _plan_mission(self, mission: Dict[str, Any], req: PublicMissionCreateRequest) -> None:
+        """Decomposes the mission into a dependency graph of subtasks (filled into the mission in place)."""
+        mission_id = mission["id"]
         coordinator = self.citizens["agent-coordinator"]
         agent_list = ", ".join(f"{c.id} ({c.profession})" for c in self.citizens.values() if c.id != coordinator.id)
         decomp_prompt = (
@@ -868,6 +1193,12 @@ class CitizenExecutionService:
             f"CATEGORY: {req.category}\n\n"
             "Decompose this mission into 2-5 subtasks. Subtasks that do not need each other's output must not "
             "depend on each other, so they can run in parallel.\n"
+            + (f"The mission's result is ONE {'3D ' if mission.get('three_d') else ''}"
+               f"{'website' if mission.get('web_kind') == 'WEBSITE' else 'presentation'}. Your subtasks must NOT build it: they "
+               "research and write the content, copy, data and design notes (markdown or JSON). A final assembly step, "
+               "added automatically, builds the single deliverable from all of their work.\n"
+               if mission.get("web_kind") else "")
+            + 
             f"Available agent IDs: {agent_list}.\n"
             "Respond in valid JSON format:\n"
             "{\n"
@@ -916,25 +1247,37 @@ class CitizenExecutionService:
             })
             self.history.start(task_id, assigned_c.id, assigned_c.name, title, kind="MISSION_SUBTASK", mission_id=mission_id)
 
-        mission = {
-            "id": mission_id,
-            "title": req.title,
-            "description": req.description,
-            "category": req.category,
-            "status": "IN_PROGRESS",
-            "progress": 0,
-            "subtasks": formatted_subtasks,
-            "participating_agent_ids": list(dict.fromkeys(s["assigned_agent_id"] for s in formatted_subtasks)),
-            "deliverables": [],
-            "workspace_dir": str(self.workspaces_root / mission_id),
-            "published_at": datetime.now().strftime("%I:%M %p"),
-            "completed_at": None
-        }
-        self.public_missions.insert(0, mission)
-        mission_task = asyncio.create_task(self._run_mission_pipeline(mission))
-        self._active_tasks[mission_id] = mission_task
-        mission_task.add_done_callback(lambda _t: self._active_tasks.pop(mission_id, None))
-        return mission
+        if mission.get("web_kind"):
+            # one coherent deliverable: a final step combines everyone's work into a single site / presentation
+            for st in formatted_subtasks:
+                if st["expected_deliverable"].lower().endswith((".html", ".htm")):
+                    st["expected_deliverable"] = Path(st["expected_deliverable"]).stem + "_content.md"
+            builder = self.citizens["agent-webdev" if mission["web_kind"] == "WEBSITE" else "agent-designer"]
+            what = ("3D website" if mission.get("three_d") else "website") if mission["web_kind"] == "WEBSITE" else "3D presentation"
+            final_task = f"m-{uuid.uuid4().hex[:6]}"
+            final_title = f"Assemble the final {what}: {req.title}"
+            formatted_subtasks.append({
+                "id": f"{mission_id}-final", "task_id": final_task, "title": final_title,
+                "assigned_agent_id": builder.id, "assigned_agent_name": builder.name,
+                "expected_deliverable": "index.html" if mission["web_kind"] == "WEBSITE" else "3d_presentation.html",
+                "status": "PENDING", "progress": 0,
+                "dependencies": [st["id"] for st in formatted_subtasks],
+                "deliverable_result": None, "verification": None, "blocked_by": [], "error": None, "final": True,
+            })
+            self.history.start(final_task, builder.id, builder.name, final_title, kind="MISSION_SUBTASK", mission_id=mission_id)
+            mission["final_subtask_id"] = f"{mission_id}-final"
+
+        mission["subtasks"] = formatted_subtasks
+        mission["participating_agent_ids"] = list(dict.fromkeys(s["assigned_agent_id"] for s in formatted_subtasks))
+        mission["status"] = "IN_PROGRESS"
+        lines = []
+        for st in formatted_subtasks:
+            deps = [d.rsplit("-", 1)[-1] for d in st["dependencies"]]
+            lines.append(f"{'🎯' if st.get('final') else '•'} {st['title']} — {st['assigned_agent_name']}"
+                         + (" (after everyone else)" if st.get("final") else f" (after step {', '.join(deps)})" if deps else ""))
+        self._post(mission, "citizen", "Plan for this mission:\n" + "\n".join(lines)
+                   + "\n\nPost here to brief everyone at once; @Name asks one citizen.", kind="plan",
+                   author_id=coordinator.id, author_name=coordinator.name)
 
     async def _run_mission_pipeline(self, mission: Dict[str, Any]) -> None:
         """Runs subtasks as a dependency graph: independent ones in parallel, dependents after their
@@ -951,14 +1294,24 @@ class CitizenExecutionService:
                         if st["status"] != "PENDING":
                             continue
                         bad = [d for d in st["dependencies"] if subtasks[d]["status"] in ("FAILED", "BLOCKED")]
+                        if st.get("final"):
+                            # the assembly step still runs with what succeeded; blocked only if nothing did
+                            settled = all(subtasks[d]["status"] in ("COMPLETED", "FAILED", "BLOCKED") for d in st["dependencies"])
+                            if not (settled and st["dependencies"] and not any(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"])):
+                                continue
                         if bad:
                             st["status"] = "BLOCKED"
                             st["blocked_by"] = bad
                             st["error"] = "Blocked: depends on " + ", ".join(subtasks[d]["title"] for d in bad) + ", which did not succeed."
                             self.history.update(st["task_id"], status="BLOCKED", note=st["error"])
+                            self._post(mission, "system", f"⛔ {st['title']} ({st['assigned_agent_name']}) is blocked: {st['error']}",
+                                       kind="blocked")
                             changed = True
                 for st in subtasks.values():
-                    if st["status"] == "PENDING" and all(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"]):
+                    deps_done = (all(subtasks[d]["status"] in ("COMPLETED", "FAILED", "BLOCKED") for d in st["dependencies"])
+                                 and any(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"])) if st.get("final") \
+                        else all(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"])
+                    if st["status"] == "PENDING" and deps_done:
                         st["status"] = "QUEUED"
                         running[asyncio.create_task(self._run_mission_subtask(mission, st, subtasks))] = st["id"]
                 if not running:
@@ -988,6 +1341,7 @@ class CitizenExecutionService:
                     for f in result.get("files") or []:
                         if f not in mission["deliverables"]:
                             mission["deliverables"].append(f)
+                    self._post_subtask_result(mission, st, verified, result)
                 finished = sum(1 for s in subtasks.values() if s["status"] in ("COMPLETED", "FAILED", "BLOCKED"))
                 mission["progress"] = int(finished / max(len(subtasks), 1) * 100)
                 await event_bus.publish(ForgeEvent(
@@ -1008,6 +1362,7 @@ class CitizenExecutionService:
             if mission["status"] != "CANCELLED":
                 mission["status"] = _mission_status(list(subtasks.values()))
             mission["completed_at"] = datetime.now().strftime("%I:%M %p")
+            self._post(mission, "system", _mission_report(mission), kind="report")
         await event_bus.publish(ForgeEvent(
             event_id=uuid.uuid4().hex,
             topic="mission:completed",
@@ -1030,9 +1385,15 @@ class CitizenExecutionService:
                     part += f"--- {rel} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2500]}\n"
             context_parts.append(part)
         st["context_from"] = list(st["dependencies"])
+        description = f"Part of mission '{mission['title']}': {mission['description']}"
+        if st.get("final"):
+            failed = [subtasks[d]["title"] for d in st["dependencies"] if subtasks[d]["status"] != "COMPLETED"]
+            description += ("\nBuild ONE coherent deliverable that combines the team's work below "
+                            "(use their facts, copy and design notes; do not invent a different topic)."
+                            + (f" These steps did not succeed, so work without them: {', '.join(failed)}." if failed else ""))
         task_req = CitizenTaskRequest(
             title=st["title"],
-            description=f"Part of mission '{mission['title']}': {mission['description']}",
+            description=description,
             expected_deliverable=st["expected_deliverable"],
             priority="HIGH"
         )
@@ -1040,25 +1401,268 @@ class CitizenExecutionService:
         async with self._citizen_locks.setdefault(citizen.id, asyncio.Lock()):
             st["status"] = "WORKING"
             st["progress"] = 20
+            # the Governor's channel messages, read at the moment the step really starts
+            notes = list(mission.get("governor_notes") or [])[-10:]
+            if notes:
+                context_parts.insert(0, "## The Governor's instructions for this mission (mission channel)\n"
+                                     + "\n".join(f"- {n}" for n in notes) + "\n")
+            self._post(mission, "citizen", f"Starting: {st['title']}" + (
+                f" (using the Governor's {len(mission['governor_notes'])} note(s))" if mission.get("governor_notes") else ""),
+                kind="progress", author_id=citizen.id, author_name=citizen.name, task_id=st["task_id"])
+            allow_web = bool(st.get("final")) or not mission.get("web_kind")
             return await self._run_task_execution_loop(citizen, st["task_id"], task_req, workspace_dir=workspace,
-                                                       context="\n".join(context_parts), mission_id=mission["id"])
+                                                       context="\n".join(context_parts), mission_id=mission["id"],
+                                                       allow_web=allow_web)
+
+    # --- Mission channel: one shared thread per mission ---
+
+    def _post(self, mission: Dict[str, Any], author_kind: str, text: str, kind: str = "update",
+              author_id: Optional[str] = None, author_name: Optional[str] = None,
+              url: Optional[str] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
+        post = {"id": f"post-{uuid.uuid4().hex[:8]}", "author_kind": author_kind, "author_id": author_id,
+                "author_name": author_name or ("City AI" if author_kind == "system" else ""), "text": text[:4000],
+                "kind": kind, "url": url, "task_id": task_id, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        channel = mission.setdefault("channel", [])
+        channel.append(post)
+        del channel[:-MAX_CHANNEL_POSTS]
+        try:
+            asyncio.get_running_loop().create_task(event_bus.publish(ForgeEvent(
+                event_id=uuid.uuid4().hex, topic=f"mission:{mission['id']}:channel", payload=post)))
+        except RuntimeError:
+            pass
+        return post
+
+    def _post_subtask_result(self, mission: Dict[str, Any], st: Dict[str, Any], verified: bool, result: Dict[str, Any]) -> None:
+        rec = self.history.get(st["task_id"]) or {}
+        url = result.get("url") or next((d.get("url") for d in rec.get("deliverables", []) if d.get("url")), None)
+        files = ", ".join((result.get("files") or [])[:6])
+        if verified:
+            text = f"✅ Done and verified: {st['title']}" + (f"\nFiles: {files}" if files else "")
+        else:
+            reason = re.sub(r"\s+", " ", str(result.get("error") or "verification failed"))[:300]
+            text = f"❌ {st['title']} did not pass verification: {reason}"
+        self._post(mission, "citizen", text, kind="deliverable" if verified else "failed",
+                   author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], url=url, task_id=st["task_id"])
+        if st.get("final") and verified and url:
+            mission["final_deliverable"] = {"title": st["title"], "url": url, "task_id": st["task_id"], "version": 1}
+            self._post(mission, "citizen", f"🎯 The mission's deliverable is ready: {url}", kind="final", url=url,
+                       author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], task_id=st["task_id"])
+
+    def get_mission(self, mission_id: str) -> Optional[Dict[str, Any]]:
+        return next((m for m in self.public_missions if m["id"] == mission_id), None)
+
+    def post_to_mission(self, mission_id: str, text: str) -> Dict[str, Any]:
+        """The Governor writes once to everyone on the mission. Steps that have not started yet are given the
+        message; @Name asks one citizen; 'revise: ...' after the mission requests changes to the final deliverable.
+        Replies are posted to the channel when ready. Raises LookupError / ValueError."""
+        loop = asyncio.get_running_loop()
+        mission = self.get_mission(mission_id)
+        if not mission:
+            raise LookupError(f"Mission '{mission_id}' not found.")
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("Write a message for the team.")
+        post = self._post(mission, "governor", text, kind="message", author_name="Supreme Governor")
+        revise = _REVISE_RE.match(text)
+        if revise and revise.group(1).strip() and mission["status"] not in ("PLANNING", "IN_PROGRESS"):
+            target = self._mission_revision_target(mission)
+            if not target:
+                self._post(mission, "system", "There is no finished deliverable on this mission to revise.", kind="system")
+                return post
+            try:
+                started = self.revise_task(target, revise.group(1).strip())
+            except (LookupError, ValueError, RuntimeError) as ex:
+                self._post(mission, "system", f"Could not start the revision: {ex}", kind="system")
+                return post
+            self._post(mission, "citizen", f"On it: revising the deliverable as version {started['version']}. "
+                       "It will be verified again; the current version stays available.", kind="progress",
+                       author_id=started["agent_id"], author_name=started["agent_name"], task_id=started["task_id"])
+            loop.create_task(self._report_mission_revision(mission, started))
+            return post
+
+        mission["governor_notes"].append(text[:1500])
+        del mission["governor_notes"][:-20]
+        names = {c.id: c.name for c in self.citizens.values()}
+        mentioned = [cid for cid, name in names.items()
+                     if re.search(r"@" + re.escape(name.split()[0]) + r"\b", text, re.IGNORECASE)]
+        if not mentioned:
+            waiting = [st for st in mission["subtasks"] if st["status"] in ("PENDING", "QUEUED")]
+            running = [st for st in mission["subtasks"] if st["status"] == "WORKING"]
+            people = sorted({st["assigned_agent_name"] for st in mission["subtasks"]})
+            ack = f"📣 Delivered to {len(people)} citizen(s): {', '.join(people) or 'nobody yet (still planning)'}."
+            if mission["status"] in ("PLANNING", "IN_PROGRESS"):
+                ack += (f" {len(waiting)} step(s) that have not started will follow it"
+                        + (f"; {len(running)} already running will not see it" if running else "") + ".")
+            else:
+                ack += " The mission has finished: write 'revise: …' to change its deliverable."
+            self._post(mission, "system", ack, kind="system")
+        responders = mentioned or ["agent-coordinator"]
+        loop.create_task(self._mission_replies(mission, text, responders[:3]))
+        return post
+
+    def _mission_revision_target(self, mission: Dict[str, Any]) -> Optional[str]:
+        final = mission.get("final_deliverable")
+        if final:
+            chain = self.revision_chain(final["task_id"])
+            done = [r for r in chain if r["status"] in REVISABLE_STATUSES]
+            return done[-1]["task_id"] if done else None
+        done = [st for st in mission["subtasks"] if st["status"] == "COMPLETED"]
+        return done[-1]["task_id"] if done else None
+
+    async def _report_mission_revision(self, mission: Dict[str, Any], started: Dict[str, Any]) -> None:
+        job = self._active_tasks.get(started["task_id"])
+        if job:
+            try:
+                await asyncio.shield(job)
+            except Exception:
+                pass
+        rec = self.history.get(started["task_id"]) or {}
+        url = next((d.get("url") for d in rec.get("deliverables", []) if d.get("url")), None)
+        if rec.get("status") == "VERIFIED":
+            if mission.get("final_deliverable") and url:
+                mission["final_deliverable"] = {**mission["final_deliverable"], "url": url, "task_id": started["task_id"],
+                                                "version": started["version"]}
+            self._post(mission, "citizen", f"✅ Version {started['version']} is ready and verified" + (f": {url}" if url else "."),
+                       kind="final" if url else "deliverable", url=url, author_id=started["agent_id"],
+                       author_name=started["agent_name"], task_id=started["task_id"])
+        else:
+            out = ((rec.get("verification") or {}).get("output") or "").strip().splitlines()
+            self._post(mission, "citizen", f"❌ Version {started['version']} did not pass verification"
+                       + (f": {out[0][:200]}" if out else ".") + " The previous version is unchanged.",
+                       kind="failed", author_id=started["agent_id"], author_name=started["agent_name"], task_id=started["task_id"])
+
+    async def _mission_replies(self, mission: Dict[str, Any], text: str, responder_ids: List[str]) -> None:
+        status = "\n".join(f"- {st['title']} — {st['assigned_agent_name']}: {st['status']}"
+                            + (f" (error: {str(st.get('error'))[:120]})" if st.get("error") else "")
+                            for st in mission["subtasks"]) or "- still being planned"
+        for cid in responder_ids:
+            citizen = self.citizens.get(cid)
+            if not citizen:
+                continue
+            mine = [st["title"] for st in mission["subtasks"] if st["assigned_agent_id"] == cid]
+            prompt = (
+                f"MISSION: {mission['title']} ({mission['status']})\n{mission['description']}\n\n"
+                f"CURRENT STATUS OF EVERY STEP:\n{status}\n\n"
+                + (f"YOUR STEPS: {', '.join(mine)}\n" if mine else "")
+                + f"\nTHE GOVERNOR JUST WROTE TO THE WHOLE TEAM:\n{text}\n\n"
+                "Reply in 2-4 sentences, in plain language, for the whole team"
+                + (" as the mission coordinator" if cid == "agent-coordinator" else "")
+                + ". Be accurate about the status above; do not claim work is done unless it says COMPLETED. "
+                "If it is a question, answer it; if it is an instruction, say how the team will apply it."
+            )
+            req = ModelCompletionRequest(prompt=prompt, model_name=citizen.assigned_model, temperature=0.3,
+                                         max_tokens=CHAT_MAX_TOKENS,
+                                         system_prompt=f"You are {citizen.name}, {citizen.profession}, posting in a shared mission channel.")
+            try:
+                resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama", interactive=True)
+                reply = (resp.content or "").strip()
+            except Exception as ex:
+                reply = ""
+                logger.warning(f"Mission channel reply failed: {ex}")
+            if reply:
+                self._post(mission, "citizen", reply, kind="reply", author_id=citizen.id, author_name=citizen.name)
+            else:
+                self._post(mission, "system", f"{citizen.name} could not reply (the model did not answer).", kind="system")
 
     def list_public_missions(self) -> List[Dict[str, Any]]:
         return self.public_missions
 
 
 MAX_REPAIR_ATTEMPTS = 3
+MAX_CHANNEL_POSTS = 300
+REVISABLE_STATUSES = {"VERIFIED", "FAILED"}
+MAX_HISTORY_SCAN = 500
+_REVISE_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:(?:revise|redo)(?:\s+(?:it|that|this|your last (?:one|task|deliverable|work)|the last one))?"
+    r"|request changes|make (?:these|the following|some) changes"
+    r"|(?:edit|change|update|fix)\s+(?:it|that|this|your last (?:one|task|deliverable|work)|the last one))\b[\s:,.\-]*(.*)$",
+    re.IGNORECASE | re.DOTALL)
+CHAT_MAX_TOKENS = 320             # spoken replies stay short so they come back quickly on the local GPU
+DUPLICATE_MISSION_WINDOW_S = 120   # a repeated publish of the same title within this window is not a new mission
 
 _SLIDES_SCHEMA = (
     '{"slides": [{"title": "Slide title", "desc": "One or two sentences of real content", '
     '"bullets": ["Specific point", "Specific point", "Specific point"]}]}'
 )
 _WEBSITE_SCHEMA = (
-    '{"brand": "Name", "headline": "Hero headline", "subheadline": "One sentence", '
+    '{"brand": "Name", "headline": "Hero headline", "subheadline": "One sentence", "cta": "Button text", '
     '"features_title": "Section title", "about": "Two or three sentences", '
     '"features": [{"icon": "one emoji", "title": "Feature", "text": "One or two sentences"}], '
-    '"metrics": [{"value": "24/7", "label": "Short label"}]}'
+    '"sections_title": "Title for the detail sections", '
+    '"sections": [{"title": "Topic", "text": "A short paragraph of real, specific content"}], '
+    '"metrics": [{"value": "24/7", "label": "Short label"}], '
+    '"scene": "one of: city, globe, orbit, crystal, waves, galaxy (the 3D backdrop that best fits the topic)", '
+    '"accent": "#hex colour that suits the brand"}'
 )
+
+
+def _mission_web_kind(text: str) -> Optional[str]:
+    """Missions that ask for one website / presentation get a single final assembly step."""
+    t = (text or "").lower()
+    if re.search(r"\bpresentation\b|\bslides?\b|\bslide deck\b|\bdeck\b", t):
+        return "3D_PRESENTATION"
+    if re.search(r"\bwebsite\b|\bweb ?site\b|\blanding page\b|\bweb page\b|\bhomepage\b", t):
+        return "WEBSITE"
+    return None
+
+
+def _mission_report(mission: Dict[str, Any]) -> str:
+    subs = mission.get("subtasks", [])
+    done = [s for s in subs if s["status"] == "COMPLETED"]
+    failed = [s for s in subs if s["status"] == "FAILED"]
+    blocked = [s for s in subs if s["status"] == "BLOCKED"]
+    lines = [f"📋 Mission report — {mission['status']}: {len(done)}/{len(subs)} steps verified"
+             + (f", {len(failed)} failed" if failed else "") + (f", {len(blocked)} blocked" if blocked else "") + "."]
+    final = mission.get("final_deliverable")
+    if final:
+        lines.append(f"🎯 Deliverable: {final['url']}")
+    elif mission.get("web_kind") and mission["status"] != "CANCELLED":
+        lines.append("No final deliverable was produced.")
+    for s in failed:
+        reason = re.sub(r"\s+", " ", str(s.get("error") or ""))[:160]
+        lines.append(f"❌ {s['title']} ({s['assigned_agent_name']}): {reason}")
+    for s in blocked:
+        lines.append(f"⛔ {s['title']} ({s['assigned_agent_name']}) never ran.")
+    if mission["status"] != "CANCELLED":
+        lines.append("Want changes? Write 'revise: …' here and the deliverable gets a new, re-verified version.")
+    return "\n".join(lines)
+
+
+def _wants_3d(text: str) -> bool:
+    t = (text or "").lower()
+    return bool(re.search(r"\b3d\b|3-d|three\.?js|webgl|three-dimensional", t))
+
+
+def _web_kind_from_deliverables(rec: Dict[str, Any]) -> Optional[str]:
+    urls = " ".join(d.get("url") or "" for d in rec.get("deliverables", []))
+    if "/3d_presentations/" in urls:
+        return "3D_PRESENTATION"
+    if "/websites/" in urls:
+        return "WEBSITE"
+    return None
+
+
+def _deliverable_text(rec: Dict[str, Any]) -> str:
+    """Visible text of a web deliverable, for revising older ones whose content JSON was not stored."""
+    for d in rec.get("deliverables", []):
+        url = d.get("url") or ""
+        if "/deliverables/" not in url:
+            continue
+        rel = url.split("/deliverables/", 1)[1].strip("/")
+        f = (config.DELIVERABLES_DIR / rel).resolve()
+        f = f / "index.html" if f.is_dir() else f
+        if f.is_file() and config.DELIVERABLES_DIR.resolve() in f.parents:
+            html = f.read_text(encoding="utf-8", errors="replace")
+            html = re.sub(r"<(script|style)[\s\S]*?</\1>", " ", html, flags=re.IGNORECASE)
+            return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()[:6000]
+    return ""
+
+
+def _topic_from_title(title: str) -> str:
+    t = re.sub(r"\s*\(v\d+\)\s*$", "", title)
+    t = re.sub(r"^(?:3d presentation|website)\s*:\s*", "", t, flags=re.IGNORECASE)
+    m = re.search(r"(?:on|about|for)\s+(.+)", t, re.IGNORECASE)
+    return (m.group(1) if m else t).strip(" .") or t
 
 
 def _extract_json(raw: str) -> Optional[Any]:
@@ -1103,6 +1707,30 @@ def _files_from(parsed: Any) -> List[Dict[str, str]]:
             content = f.get("content")
             if isinstance(path, str) and path.strip() and isinstance(content, str):
                 out.append({"path": path.strip(), "content": content})
+    return out
+
+
+def _files_from_text(raw: str, known_paths: List[str]) -> List[Dict[str, str]]:
+    """Files from a plain reply: '--- path ---' sections, or fenced code blocks labelled with a file name."""
+    text = raw or ""
+    out: List[Dict[str, str]] = []
+    fenced = re.compile(r"```[\w+-]*\n([\s\S]*?)```")
+    sections = re.split(r"^-{3,}\s*([\w./\\-]+\.\w{1,6})\s*-{3,}\s*$", text, flags=re.MULTILINE)
+    if len(sections) > 1:
+        for path, body in zip(sections[1::2], sections[2::2]):
+            fence = fenced.search(body)
+            content = fence.group(1) if fence else body.strip("\n")
+            if content.strip():
+                out.append({"path": path.strip(), "content": content.rstrip() + "\n"})
+        return out
+    for m in re.finditer(r"([\w./\\-]+\.\w{1,6})[`*:\s]*\n+```[\w+-]*\n([\s\S]*?)```", text):
+        path, content = m.group(1).strip("`*: "), m.group(2)
+        if content.strip():
+            out.append({"path": path, "content": content.rstrip() + "\n"})
+    if not out and len(known_paths) == 1:
+        fence = fenced.search(text)
+        if fence and fence.group(1).strip():
+            out.append({"path": known_paths[0], "content": fence.group(1).rstrip() + "\n"})
     return out
 
 

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { History, X, CheckCircle2, XCircle, Ban, Loader2, ExternalLink } from 'lucide-react';
+import { History, X, CheckCircle2, XCircle, Ban, Loader2, ExternalLink, PencilLine } from 'lucide-react';
 import { api, absoluteLink, TaskRecord } from '../../api/client';
+import { REVISABLE, RevisionForm } from './hud/RevisionBox';
 
 const RUNNING: TaskRecord['status'][] = ['QUEUED', 'PLANNING', 'WORKING', 'TESTING', 'VERIFYING', 'REPAIRING'];
 
@@ -90,6 +91,16 @@ export const TaskHistoryPanel: React.FC = () => {
 /** The task list itself (also shown inside the HUD phone). */
 export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [revising, setRevising] = useState<string | null>(null);
+  // a deliverable can only have one revision in progress; its newest finished version is the one to revise
+  const chainBusy = (t: TaskRecord) => {
+    const root = t.root_task_id || t.task_id;
+    return tasks.some(o => (o.root_task_id || o.task_id) === root && RUNNING.includes(o.status));
+  };
+  const isLatest = (t: TaskRecord) => {
+    const root = t.root_task_id || t.task_id;
+    return !tasks.some(o => (o.root_task_id || o.task_id) === root && (o.version || 1) > (t.version || 1));
+  };
   return (
     <div className="space-y-1.5">
       {tasks.length === 0 && <div className="text-[11px] text-slate-500 p-3 text-center">No tasks yet.</div>}
@@ -106,6 +117,7 @@ export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) =>
               <div className="flex items-center gap-2 min-w-0">
                 <StatusIcon status={t.status} />
                 <span className="text-[11px] font-semibold text-slate-100 truncate flex-1">{t.title}</span>
+                {(t.version || 0) > 1 && <span className="text-[9px] font-bold text-amber-300 border border-amber-700 rounded px-1">v{t.version}</span>}
                 <span className={`text-[9px] font-bold border rounded px-1 ${STATUS_STYLE[t.status] || ''}`}>{t.status}</span>
               </div>
               <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
@@ -123,6 +135,11 @@ export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) =>
                 <div className="text-[10px] text-slate-400 mt-0.5 truncate">{t.stage}</div>
               </div>
             )}
+            {t.feedback && (
+              <div className="mt-1 text-[10px] text-amber-200/90 leading-snug line-clamp-2">
+                <PencilLine size={10} className="inline mr-1 -mt-0.5" />Changes asked: {t.feedback}
+              </div>
+            )}
             {t.deliverables.filter(d => d.url).map(d => (
               <a
                 key={d.path}
@@ -132,7 +149,9 @@ export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) =>
                 className="mt-1 flex items-center gap-1 text-[10px] text-cyan-300 hover:text-cyan-200 truncate"
               >
                 <ExternalLink size={10} className="shrink-0" />
-                <span className="truncate">{absoluteLink(d.url!)}</span>
+                <span className="truncate">
+                  {d.url!.includes('/revisions/') ? `v${t.version || 1} · ${d.path}` : absoluteLink(d.url!)}
+                </span>
               </a>
             ))}
             {expanded === t.task_id && (
@@ -155,6 +174,16 @@ export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) =>
                 ))}
                 {t.completed_at && <div className="text-slate-500">Finished {timeOf(t.completed_at)}</div>}
               </div>
+            )}
+            {REVISABLE.includes(t.status) && isLatest(t) && !chainBusy(t) && (
+              revising === t.task_id ? (
+                <div className="mt-1.5"><RevisionForm task={t} autoFocus /></div>
+              ) : (
+                <button type="button" onClick={() => setRevising(t.task_id)}
+                  className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-amber-300 hover:text-amber-200">
+                  <PencilLine size={11} /> Request changes
+                </button>
+              )
             )}
           </div>
         );

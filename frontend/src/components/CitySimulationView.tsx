@@ -431,13 +431,16 @@ export const CitySimulationView: React.FC = () => {
 
   // Publish city-wide public mission (the backend decomposes and runs it; nothing is simulated locally)
   const handlePublishPublicMission = useCallback(async (missionData: { title: string; description: string; category: PublicMission['category'] }) => {
+    setWorkToast(`Sending mission to the city: ${missionData.title}…`);
     try {
-      await api.publishPublicMission({
+      const res = await api.publishPublicMission({
         title: missionData.title,
         description: missionData.description,
         category: missionData.category
       });
-      setWorkToast(`Mission published: ${missionData.title}`);
+      setWorkToast(res?.duplicate
+        ? `Already in progress: ${missionData.title} (no duplicate started)`
+        : `Mission received: ${missionData.title}. The coordinator is splitting it into subtasks.`);
       await refreshFromBackend();
     } catch (err: any) {
       console.error('Failed to publish public mission to backend:', err);

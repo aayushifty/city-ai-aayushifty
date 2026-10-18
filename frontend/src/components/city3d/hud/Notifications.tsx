@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, XCircle, ShieldAlert, Flag, PlayCircle, Ban, X, ExternalLink } from 'lucide-react';
+import { CheckCircle2, XCircle, ShieldAlert, Flag, PlayCircle, Ban, X, ExternalLink, PencilLine, MessagesSquare } from 'lucide-react';
+import { openMissionChannel } from './MissionChannel';
 import { absoluteLink } from '../../../api/client';
 import { CityLiveData, PANEL } from './useCityLiveData';
 
@@ -17,6 +18,8 @@ export interface HudNotice {
   title: string;
   body: string;
   url?: string | null;
+  taskId?: string;             // finished tasks: lets you request changes from the notice
+  missionId?: string;          // mission channel posts: opens the channel
   at: number;
 }
 
@@ -25,8 +28,8 @@ const MAX_HISTORY = 40;
 export function useHudNotifications(live: CityLiveData) {
   const [toasts, setToasts] = useState<HudNotice[]>([]);
   const [history, setHistory] = useState<HudNotice[]>([]);
-  const seen = useRef<{ seeded: boolean; tasks: Map<string, string>; approvals: Set<string>; missions: Map<string, string> }>({
-    seeded: false, tasks: new Map(), approvals: new Set(), missions: new Map(),
+  const seen = useRef<{ seeded: boolean; tasks: Map<string, string>; approvals: Set<string>; missions: Map<string, string>; posts: Set<string> }>({
+    seeded: false, tasks: new Map(), approvals: new Set(), missions: new Map(), posts: new Set(),
   });
 
   useEffect(() => {
@@ -40,8 +43,8 @@ export function useHudNotifications(live: CityLiveData) {
       if (s.seeded && before !== t.status) {
         const who = `${t.agent_name}: ${t.title}`;
         const url = t.deliverables.find(d => d.url)?.url;
-        if (t.status === 'VERIFIED') push({ id: `${t.task_id}:v`, kind: 'verified', title: 'Deliverable verified', body: who, url });
-        else if (t.status === 'FAILED') push({ id: `${t.task_id}:f`, kind: 'failed', title: 'Task failed verification', body: who, url });
+        if (t.status === 'VERIFIED') push({ id: `${t.task_id}:v`, kind: 'verified', title: 'Deliverable verified', body: who, url, taskId: t.task_id });
+        else if (t.status === 'FAILED') push({ id: `${t.task_id}:f`, kind: 'failed', title: 'Task failed verification', body: who, url, taskId: t.task_id });
         else if (t.status === 'BLOCKED') push({ id: `${t.task_id}:b`, kind: 'blocked', title: 'Subtask blocked', body: who });
         else if (before === undefined) push({ id: `${t.task_id}:s`, kind: 'started', title: 'Task started', body: who });
       }
@@ -59,6 +62,15 @@ export function useHudNotifications(live: CityLiveData) {
         push({ id: `${m.id}:${m.status}`, kind: 'mission', title: `Mission ${m.status.toLowerCase()}`, body: m.title });
       }
       s.missions.set(m.id, m.status);
+      // citizens answering in the mission channel, or posting the mission's deliverable
+      for (const p of m.channel || []) {
+        if (s.seeded && !s.posts.has(p.id) && p.author_kind === 'citizen' && (p.kind === 'reply' || p.kind === 'final')) {
+          push({ id: `${p.id}:c`, kind: p.kind === 'final' ? 'verified' : 'mission', missionId: m.id, url: p.url,
+                 title: p.kind === 'final' ? 'Mission deliverable ready' : `${p.author_name} in the mission channel`,
+                 body: p.text.replace(/\s+/g, ' ').slice(0, 160) });
+        }
+        s.posts.add(p.id);
+      }
     }
     s.seeded = true;
 
@@ -91,7 +103,7 @@ export const NOTICE_META: Record<HudNoticeKind, { Icon: typeof CheckCircle2; col
   mission: { Icon: Flag, color: 'text-amber-300', bar: 'bg-amber-400', glow: 'from-amber-400' },
 };
 
-export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compact?: boolean }> = ({ n, onDismiss, compact }) => {
+export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compact?: boolean; onRevise?: (taskId: string) => void }> = ({ n, onDismiss, compact, onRevise }) => {
   const meta = NOTICE_META[n.kind];
   return (
     <div className={`${compact ? 'bg-white/5 rounded-xl' : 'font-sans bg-gradient-to-r from-black/85 via-black/65 to-black/25 border border-white/10 rounded-md shadow-[0_6px_20px_rgba(0,0,0,.5)]'} relative overflow-hidden flex gap-2.5 p-2.5 pl-3.5 pointer-events-auto hud-toast-in`}>
@@ -106,6 +118,18 @@ export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compac
             <ExternalLink size={10} /> Open deliverable
           </a>
         )}
+        {n.missionId && (
+          <button type="button" onClick={() => openMissionChannel(n.missionId!)}
+            className="mt-0.5 ml-3 inline-flex items-center gap-1 text-[10px] text-amber-300 hover:text-amber-200">
+            <MessagesSquare size={10} /> Open channel
+          </button>
+        )}
+        {n.taskId && onRevise && (
+          <button type="button" onClick={() => onRevise(n.taskId!)}
+            className="mt-0.5 ml-3 inline-flex items-center gap-1 text-[10px] text-amber-300 hover:text-amber-200">
+            <PencilLine size={10} /> Request changes
+          </button>
+        )}
         {compact && <div className="text-[9px] text-slate-500 mt-0.5">{new Date(n.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
       </div>
       {onDismiss && (
@@ -115,8 +139,8 @@ export const NoticeCard: React.FC<{ n: HudNotice; onDismiss?: () => void; compac
   );
 };
 
-export const NotificationFeed: React.FC<{ toasts: HudNotice[]; onDismiss: (id: string) => void }> = ({ toasts, onDismiss }) => (
+export const NotificationFeed: React.FC<{ toasts: HudNotice[]; onDismiss: (id: string) => void; onRevise?: (taskId: string) => void }> = ({ toasts, onDismiss, onRevise }) => (
   <div className="flex flex-col-reverse gap-2 w-[min(340px,calc(100vw-32px))]">
-    {toasts.map(n => <NoticeCard key={n.id} n={n} onDismiss={() => onDismiss(n.id)} />)}
+    {toasts.map(n => <NoticeCard key={n.id} n={n} onDismiss={() => onDismiss(n.id)} onRevise={onRevise} />)}
   </div>
 );

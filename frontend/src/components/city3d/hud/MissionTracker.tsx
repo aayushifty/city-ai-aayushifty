@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Flag, ChevronDown, ChevronUp, ExternalLink, ShieldAlert, Activity, CheckCircle2, WifiOff } from 'lucide-react';
+import { Flag, ChevronDown, ChevronUp, ExternalLink, ShieldAlert, Activity, CheckCircle2, WifiOff, MessagesSquare } from 'lucide-react';
+import { openMissionChannel } from './MissionChannel';
 import { absoluteLink } from '../../../api/client';
 import { LiveMission, PANEL, RUNNING_TASK_STATUSES, statusStyle, useLiveData } from './useCityLiveData';
 
@@ -8,7 +9,7 @@ export const MissionTracker: React.FC<{ onOpenMissions: () => void; embedded?: b
   const live = useLiveData();
   const [collapsed, setCollapsed] = useState(false);
 
-  const active = live.missions.filter(m => m.status === 'IN_PROGRESS');
+  const active = live.missions.filter(m => m.status === 'IN_PROGRESS' || m.status === 'PLANNING');
   const finished = live.missions.filter(m => m.status !== 'IN_PROGRESS').slice(0, 1);
   const shown = [...active.slice(0, 2), ...(active.length < 2 ? finished : [])];
 
@@ -69,6 +70,18 @@ const MissionRow: React.FC<{ mission: LiveMission; onOpen: () => void }> = ({ mi
         {counts.running > 0 && <span className="flex items-center gap-1"><Activity size={10} className="text-blue-400" />{counts.running} running</span>}
         {counts.failed > 0 && <span className="text-red-300">{counts.failed} failed</span>}
         {counts.blocked > 0 && <span className="flex items-center gap-1 text-orange-300"><ShieldAlert size={10} />{counts.blocked} blocked</span>}
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={() => openMissionChannel(mission.id)}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-300 hover:text-amber-200">
+          <MessagesSquare size={11} /> Channel{mission.channel?.length ? ` (${mission.channel.length})` : ''}
+        </button>
+        {mission.final_deliverable && (
+          <a href={absoluteLink(mission.final_deliverable.url)} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 hover:text-emerald-200">
+            <ExternalLink size={10} /> Deliverable
+          </a>
+        )}
       </div>
       {current.map(s => (
         <div key={s.id} className="flex items-center gap-1.5 text-[10px] text-slate-200">

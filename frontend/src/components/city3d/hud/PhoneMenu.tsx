@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   Users, Flag, ListChecks, Bell, ShieldAlert, Map as MapIcon, Camera, Settings, ChevronLeft, Plane,
-  MessageSquare, Wifi, WifiOff, Smartphone,
+  MessageSquare, Wifi, WifiOff, Smartphone, BookOpen,
 } from 'lucide-react';
+import { GuideApp } from './GuideApp';
 import { CameraMode } from '../../../simulation/types';
 import { TaskHistoryList } from '../TaskHistoryPanel';
+import { openMissionChannel } from './MissionChannel';
+import { MessagesSquare } from 'lucide-react';
 import { BUSY_CITIZEN_STATUSES, statusStyle, useLiveData } from './useCityLiveData';
 import { HudNotice, NoticeCard } from './Notifications';
 
@@ -18,7 +21,7 @@ export interface HudSettings {
 
 export const DEFAULT_HUD_SETTINGS: HudSettings = { minimap: true, citizens: true, missions: true, notifications: true, fps: true };
 
-type AppId = 'home' | 'contacts' | 'missions' | 'tasks' | 'alerts' | 'approvals' | 'camera' | 'settings';
+type AppId = 'home' | 'contacts' | 'missions' | 'tasks' | 'alerts' | 'approvals' | 'camera' | 'settings' | 'guide';
 
 interface Props {
   open: boolean;
@@ -52,18 +55,19 @@ export const PhoneMenu: React.FC<Props> = (props) => {
     { id: 'contacts', label: 'Contacts', Icon: Users, tint: 'from-cyan-500 to-blue-600',
       badge: live.citizens.filter(c => BUSY_CITIZEN_STATUSES.includes(c.status)).length || undefined },
     { id: 'missions', label: 'Missions', Icon: Flag, tint: 'from-amber-400 to-orange-600',
-      badge: live.missions.filter(m => m.status === 'IN_PROGRESS').length || undefined },
+      badge: live.missions.filter(m => m.status === 'IN_PROGRESS' || m.status === 'PLANNING').length || undefined },
     { id: 'tasks', label: 'Tasks', Icon: ListChecks, tint: 'from-violet-500 to-fuchsia-600' },
     { id: 'alerts', label: 'Alerts', Icon: Bell, tint: 'from-rose-500 to-red-600' },
     { id: 'approvals', label: 'Approvals', Icon: ShieldAlert, tint: 'from-yellow-400 to-amber-600', badge: live.approvals.length || undefined },
     { id: 'map', label: 'Map', Icon: MapIcon, tint: 'from-emerald-500 to-teal-600' },
     { id: 'camera', label: 'Camera', Icon: Camera, tint: 'from-slate-500 to-slate-700' },
     { id: 'settings', label: 'Settings', Icon: Settings, tint: 'from-zinc-500 to-zinc-700' },
+    { id: 'guide', label: 'Guide', Icon: BookOpen, tint: 'from-sky-500 to-indigo-600' },
   ];
 
   const title: Record<AppId, string> = {
     home: '', contacts: 'Contacts', missions: 'Missions', tasks: 'Task history', alerts: 'Alerts',
-    approvals: 'Approvals', camera: 'Camera', settings: 'HUD settings',
+    approvals: 'Approvals', camera: 'Camera', settings: 'HUD settings', guide: 'How City AI works',
   };
 
   return (
@@ -122,6 +126,7 @@ export const PhoneMenu: React.FC<Props> = (props) => {
                     <CameraApp mode={props.cameraMode} onSelect={props.onSelectCameraMode} jet={props.isPilotingJet} onToggleJet={props.onToggleJet} />
                   )}
                   {app === 'settings' && <SettingsApp settings={props.settings} onChange={props.onSettingsChange} />}
+                  {app === 'guide' && <GuideApp />}
                 </div>
               </div>
             )}
@@ -187,6 +192,7 @@ const MissionsApp: React.FC<{ onOpenBoard: () => void }> = ({ onOpenBoard }) => 
               <span className={`text-[9px] font-bold uppercase ${st.text}`}>{st.label}</span>
             </div>
             <div className="mt-1 h-1 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-amber-400" style={{ width: `${m.progress}%` }} /></div>
+            <div className="mt-1"><button type="button" onClick={() => openMissionChannel(m.id)} className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-300 hover:text-amber-200"><MessagesSquare size={11} /> Channel{m.channel && m.channel.length ? ` (${m.channel.length})` : ''}</button></div>
             <div className="mt-1 space-y-0.5">
               {m.subtasks.map(s => (
                 <div key={s.id} className="flex items-center gap-1.5 text-[10px]">

@@ -19,6 +19,17 @@ import { Building } from '../../simulation/types';
  */
 
 export class WorkplaceArchitect {
+  /** Solid parts of the central plaza (dais + holo chamber, kiosks, planters) as world-space footprints. */
+  public static plazaObstacles(b: Building): { minX: number; maxX: number; minZ: number; maxZ: number; height: number }[] {
+    const box = (x: number, z: number, half: number, height: number) =>
+      ({ minX: b.x + x - half, maxX: b.x + x + half, minZ: b.z + z - half, maxZ: b.z + z + half, height });
+    return [
+      box(0, 0, 2.9, 2.8),                                                              // dais + holo chamber
+      ...[[-4.5, -4.5], [4.5, -4.5], [-4.5, 4.5], [4.5, 4.5]].map(([x, z]) => box(x, z, 0.25, 1.8)),   // kiosks
+      ...[[-8.5, -8.5], [8.5, -8.5], [-8.5, 8.5], [8.5, 8.5]].map(([x, z]) => box(x, z, 1.8, 6)),      // planters + trees
+    ];
+  }
+
   private static sharedMaterials: Map<string, THREE.Material> = new Map();
 
   private static getMaterial(key: string, creator: () => THREE.Material): THREE.Material {
@@ -631,7 +642,7 @@ export class WorkplaceArchitect {
   private static buildCitadelSpire(g: THREE.Group, b: Building): void {
     const sapphireSteel = new THREE.MeshStandardMaterial({ color: 0x0F172A, metalness: 0.85, roughness: 0.25 });
     const executiveGlass = new THREE.MeshPhysicalMaterial({ color: 0x38BDF8, transparent: true, opacity: 0.55, roughness: 0.1 });
-    const goldTrim = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.9, roughness: 0.2 });
+    const goldTrim = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.8, roughness: 0.38 });
 
     // Tier 1: Monumental Colonnade Grand Entrance (0-14m)
     const base = new THREE.Mesh(new THREE.BoxGeometry(13, 14, 13), sapphireSteel);

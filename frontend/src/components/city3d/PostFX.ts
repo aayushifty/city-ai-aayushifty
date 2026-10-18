@@ -104,7 +104,7 @@ export function createPostFX(renderer: THREE.WebGLRenderer, scene: THREE.Scene, 
     setQuality: (q) => { quality = q; apply(); },
     setNight: (night) => {
       bloom.strength = 0.18 + 0.75 * night;
-      bloom.threshold = 0.92 - 0.25 * night;
+      bloom.threshold = 1.0 - 0.33 * night;   // by day only genuinely hot pixels bloom
       (grade.uniforms as typeof GradeShader.uniforms).warmth.value = 0.03 * (1 - night);
     },
     dispose: () => {

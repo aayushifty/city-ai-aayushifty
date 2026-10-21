@@ -1,18 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
 import { api } from './api/client';
 import { Project, Task, ApprovalRequest, ProjectMemoryEntry, ForgeTelemetryEvent } from './types';
 import { Navbar } from './components/Navbar';
 import { GlobalStopBanner } from './components/GlobalStopBanner';
-import { DashboardView } from './components/DashboardView';
-import { WorkspaceView } from './components/WorkspaceView';
-import { AgentMonitorView } from './components/AgentMonitorView';
-import { ExecutionTimelineView } from './components/ExecutionTimelineView';
-import { VerificationCenterView } from './components/VerificationCenterView';
-import { ApprovalCenterView } from './components/ApprovalCenterView';
-import { ProjectMemoryView } from './components/ProjectMemoryView';
-import { ModelConfigView } from './components/ModelConfigView';
 
 import { CitySimulationView } from './components/CitySimulationView';
+
+// The city is the start page; the dashboard views load on first use, keeping the first download small
+const DashboardView = lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
+const WorkspaceView = lazy(() => import('./components/WorkspaceView').then(m => ({ default: m.WorkspaceView })));
+const AgentMonitorView = lazy(() => import('./components/AgentMonitorView').then(m => ({ default: m.AgentMonitorView })));
+const ExecutionTimelineView = lazy(() => import('./components/ExecutionTimelineView').then(m => ({ default: m.ExecutionTimelineView })));
+const VerificationCenterView = lazy(() => import('./components/VerificationCenterView').then(m => ({ default: m.VerificationCenterView })));
+const ApprovalCenterView = lazy(() => import('./components/ApprovalCenterView').then(m => ({ default: m.ApprovalCenterView })));
+const ProjectMemoryView = lazy(() => import('./components/ProjectMemoryView').then(m => ({ default: m.ProjectMemoryView })));
+const ModelConfigView = lazy(() => import('./components/ModelConfigView').then(m => ({ default: m.ModelConfigView })));
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('city3d');
@@ -167,6 +169,7 @@ export const App: React.FC = () => {
       />
 
       <main className="flex-1 min-h-0">
+        <Suspense fallback={<div className="p-6 text-xs text-slate-400">Loading…</div>}>
         {activeTab === 'city3d' && (
           <CitySimulationView />
         )}
@@ -216,6 +219,7 @@ export const App: React.FC = () => {
         {activeTab === 'models' && (
           <ModelConfigView />
         )}
+        </Suspense>
       </main>
     </div>
   );

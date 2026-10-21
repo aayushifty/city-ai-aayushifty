@@ -9,6 +9,7 @@ from app.models.schemas import CitizenTaskRequest, PublicMissionCreateRequest
 from app.providers.ollama_provider import OllamaModelProvider
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
+from app.execution.task_history import TaskHistory
 
 @pytest.fixture
 def agent_service(tmp_path):
@@ -17,6 +18,7 @@ def agent_service(tmp_path):
     svc = CitizenExecutionService(db)
     svc.workspaces_root = tmp_path / "workspaces"
     svc.workspaces_root.mkdir(parents=True, exist_ok=True)
+    svc.history = TaskHistory(tmp_path / "task_history.json")  # never write test tasks into the real history
     return svc
 
 @pytest.mark.asyncio
@@ -41,11 +43,11 @@ async def test_model_registry_snapshot():
     assert "ollama_online" in snapshot
     assert "available_providers" in snapshot
     assert "active_default_provider" in snapshot
-    assert snapshot["concurrency_limit"] == 2
+    assert snapshot["concurrency_limit"] == 1  # one local GPU: Ollama calls are serialized
 
 def test_citizen_registry_initialization(agent_service):
     citizens = agent_service.list_citizens()
-    assert len(citizens) == 10
+    assert len(citizens) == 15
     agent_ids = [c.id for c in citizens]
     assert "agent-coordinator" in agent_ids
     assert "agent-engineer" in agent_ids
@@ -61,7 +63,7 @@ async def test_chat_with_citizen(agent_service):
         "Governor here. What is your primary objective today?"
     )
     assert response.agent_id == "agent-analyst"
-    assert response.agent_name == "Dr. Maya Lin"
+    assert response.agent_name == "Rajib Karki"
     assert len(response.reply) > 0
     assert response.model_used is not None
 
@@ -143,15 +145,13 @@ async def test_chat_3d_presentation_synthesis(agent_service):
 
 @pytest.mark.asyncio
 async def test_chat_website_synthesis(agent_service):
+    # websites are built as real multi-file projects in the background (minutes with real models): the chat
+    # reply confirms the build started; the build itself is covered by test_project_builder.py
     res = await agent_service.chat_with_citizen("agent-engineer", "Make a website for a Cybernetic Space Port")
-    assert res.action_taken == "CREATED_WEBSITE"
-    assert res.deliverable_type == "WEBSITE"
-    assert res.deliverable_path is not None
-    assert Path(res.deliverable_path).exists()
-    assert res.deliverable_url is not None
-    assert res.artifact_id is not None
-    art = agent_service.get_artifact(res.artifact_id)
-    assert art is not None
+    assert res.action_taken == "PROJECT_STARTED"
+    rec = next(r for r in agent_service.history.list() if r["kind"] == "TASK")
+    assert rec["agent_id"] == "agent-engineer" and "Cybernetic Space Port" in rec["title"]
+    assert await agent_service.cancel_task(rec["task_id"]) is True
 
 @pytest.mark.asyncio
 async def test_chat_greeting_human_language_not_json(agent_service):
@@ -178,10 +178,14 @@ async def test_assign_task_3d_presentation_guaranteed_success(agent_service):
     task_id = dispatch_res["task_id"]
     assert task_id is not None
 
-    # Wait for completion
-    for _ in range(60):
+    # Wait for completion: writing the slides on the local GPU takes about 80 s, so allow up to 4 minutes
+    # (stop early if the task ends without a deliverable)
+    for _ in range(480):
         artifact = agent_service.get_artifact(task_id)
         if artifact:
+            break
+        rec = agent_service.history.get(task_id)
+        if rec and rec.get("status") in ("FAILED", "CANCELLED"):
             break
         await asyncio.sleep(0.5)
 

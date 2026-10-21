@@ -42,14 +42,28 @@ city_ai_aayushifty / FORGE AI
 
 ## 🚀 Quick Start
 
-### Option 1: One-Click Windows Launcher (Recommended)
+### Option 1: Windows Desktop App (Recommended)
+City AI runs as its own window on Windows: the backend runs inside the app and the 3D city is shown in a
+native window (Edge WebView2), no browser or terminal needed.
+
+One-time setup:
+```cmd
+pip install pywebview
+cd frontend && npm install && npm run build && cd ..
+powershell -ExecutionPolicy Bypass -File desktop\install_shortcuts.ps1
+```
+Then open **City AI** from your Desktop or Start Menu. The app starts Ollama if it is installed but not
+running, and closing the window stops the backend. Logs go to `backend/data/desktop.log`.
+After changing frontend code, start it once with `python desktop\city_ai_desktop.py --rebuild`.
+
+### Option 2: Console Launcher (development)
 Double-click `city_ai_aayushifty.bat` in the root folder, or run:
 ```cmd
 city_ai_aayushifty.bat
 ```
 This automatically initializes the Ollama daemon, verifies the Python backend, launches Vite frontend dev server, and opens the 3D Metropolis in your default browser.
 
-### Option 2: Manual Start
+### Option 3: Manual Start
 
 #### 1. Backend
 ```bash

@@ -23,10 +23,13 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Reset kept in the base layer so Tailwind spacing utilities (p-*, m-*) still apply */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 body {
@@ -152,4 +155,15 @@ code, pre {
   background: #EF4444;
   color: white;
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+}
+
+/* --- City AI HUD animations --- */
+@keyframes hud-fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes hud-toast-in { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+@keyframes hud-phone-in { from { opacity: 0; transform: translateY(24px) scale(0.97); } to { opacity: 1; transform: none; } }
+.hud-fade-in { animation: hud-fade-in 220ms ease-out both; }
+.hud-toast-in { animation: hud-toast-in 260ms cubic-bezier(.2,.8,.2,1) both; }
+.hud-phone-in { animation: hud-phone-in 240ms cubic-bezier(.2,.8,.2,1) both; transform-origin: bottom right; }
+@media (prefers-reduced-motion: reduce) {
+  .hud-fade-in, .hud-toast-in, .hud-phone-in { animation: none; }
 }

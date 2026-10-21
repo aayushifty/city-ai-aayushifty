@@ -1,0 +1,8 @@
+Poly Haven assets (https://polyhaven.com), licensed CC0 1.0 Universal (public domain):
+https://creativecommons.org/publicdomain/zero/1.0/
+
+- kloofendal_48d_partly_cloudy_puresky_2k.hdr  https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+- clean_asphalt_{diff,nor_gl,rough}_1k.jpg       https://polyhaven.com/a/clean_asphalt
+- leafy_grass_{diff,nor_gl,rough}_1k.jpg         https://polyhaven.com/a/leafy_grass
+
+Downloaded on 2026-10-17 for City AI. No attribution is required; credit to Poly Haven is appreciated.

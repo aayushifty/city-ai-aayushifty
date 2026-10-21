@@ -1,22 +1,28 @@
 """FORGE AI Local Ollama Provider Adapter with Dynamic Model Detection & Streaming."""
 
+import asyncio
 import json
 import logging
+import re
 import time
 from typing import AsyncGenerator, Dict, List, Optional, Any
 import httpx
 from app.providers.base import ModelProviderAdapter, ModelCompletionRequest, ModelCompletionResponse
 from app.core.security import SecurityEngine
+from app.config import config
+
+_THINK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 
 logger = logging.getLogger("city_ai.ollama_provider")
 
 class OllamaModelProvider(ModelProviderAdapter):
     """Adapter for locally hosted Ollama instances with automatic model discovery and streaming."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: Optional[str] = None):
+        self.base_url = (base_url or config.OLLAMA_BASE_URL).rstrip("/")
         self._cached_models: List[Dict[str, Any]] = []
         self._last_models_fetch: float = 0.0
+        self._available_until: float = 0.0
 
     @property
     def provider_name(self) -> str:
@@ -41,11 +47,15 @@ class OllamaModelProvider(ModelProviderAdapter):
             logger.warning(f"Could not auto-start Ollama daemon: {e}")
 
     async def is_available(self) -> bool:
+        # Cache a positive probe briefly so every completion doesn't pay an extra round trip.
+        if time.time() < self._available_until:
+            return True
         for attempt in range(2):
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     res = await client.get(f"{self.base_url}/api/tags")
                     if res.status_code == 200:
+                        self._available_until = time.time() + 10.0
                         return True
             except Exception:
                 if attempt == 0:
@@ -123,28 +133,36 @@ class OllamaModelProvider(ModelProviderAdapter):
 
         return requested_model or "llama3.2:latest"
 
+    def _chat_payload(self, request: ModelCompletionRequest, model: str, stream: bool) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": request.chat_messages(),
+            "stream": stream,
+            "keep_alive": config.OLLAMA_KEEP_ALIVE,
+            "options": {
+                "temperature": request.temperature,
+                "num_predict": request.max_tokens,
+                "num_ctx": config.OLLAMA_NUM_CTX,
+            },
+        }
+        if request.json_mode:
+            payload["format"] = "json"
+        if request.stop_sequences:
+            payload["options"]["stop"] = request.stop_sequences
+        return payload
+
     async def generate(self, request: ModelCompletionRequest) -> ModelCompletionResponse:
         start = time.perf_counter()
         target_model = await self.resolve_model(request.model_name)
-        url = f"{self.base_url}/api/generate"
+        payload = self._chat_payload(request, target_model, stream=False)
 
-        payload = {
-            "model": target_model,
-            "prompt": f"{request.system_prompt}\n\n{request.prompt}" if request.system_prompt else request.prompt,
-            "stream": False,
-            "options": {
-                "temperature": request.temperature,
-                "num_predict": request.max_tokens
-            }
-        }
-
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            resp = await client.post(f"{self.base_url}/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()
 
-        content = data.get("response", "")
-        p_tokens = data.get("prompt_eval_count", len(request.prompt.split()))
+        content = _THINK_RE.sub("", data.get("message", {}).get("content", "")).strip()
+        p_tokens = data.get("prompt_eval_count", 0)
         c_tokens = data.get("eval_count", len(content.split()))
         latency = (time.perf_counter() - start) * 1000.0
 
@@ -162,29 +180,28 @@ class OllamaModelProvider(ModelProviderAdapter):
     async def generate_stream(self, request: ModelCompletionRequest) -> AsyncGenerator[str, None]:
         """Streams generated tokens directly from local Ollama runtime."""
         target_model = await self.resolve_model(request.model_name)
-        url = f"{self.base_url}/api/generate"
+        payload = self._chat_payload(request, target_model, stream=True)
 
-        payload = {
-            "model": target_model,
-            "prompt": f"{request.system_prompt}\n\n{request.prompt}" if request.system_prompt else request.prompt,
-            "stream": True,
-            "options": {
-                "temperature": request.temperature,
-                "num_predict": request.max_tokens
-            }
-        }
-
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            async with client.stream("POST", url, json=payload) as resp:
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
-                    if line:
-                        try:
-                            chunk = json.loads(line)
-                            token = chunk.get("response", "")
-                            if token:
-                                yield SecurityEngine.redact_secrets(token)
-                            if chunk.get("done", False):
-                                break
-                        except Exception:
-                            continue
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except Exception:
+                        continue
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield SecurityEngine.redact_secrets(token)
+                    if chunk.get("done", False):
+                        break
+
+    async def pull_model(self, model: str) -> Dict[str, Any]:
+        """Downloads a model into the local Ollama library (blocking until finished)."""
+        async with httpx.AsyncClient(timeout=None) as client:
+            resp = await client.post(f"{self.base_url}/api/pull", json={"model": model, "stream": False})
+            resp.raise_for_status()
+            self._last_models_fetch = 0.0
+            return resp.json()

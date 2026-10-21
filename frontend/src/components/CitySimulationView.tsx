@@ -25,6 +25,8 @@ function mapBackendStatus(backendStatus: string): AgentCharacter['status'] {
     case 'working': return 'WORKING';
     case 'testing': return 'VERIFYING';
     case 'completed': return 'COMPLETED';
+    case 'verifying':
+    case 'repairing': return 'VERIFYING';
     case 'failed':
     case 'blocked': return 'BLOCKED';
     default: return 'IDLE';
@@ -40,10 +42,94 @@ function mapTaskStatus(taskStatus: string): AgentTask['status'] {
     case 'working': return 'WORKING';
     case 'testing': return 'VERIFYING';
     case 'completed': return 'COMPLETED';
-    case 'failed':
+    case 'verified': return 'COMPLETED';
+    case 'verifying':
+    case 'repairing': return 'VERIFYING';
+    case 'failed': return 'FAILED';
     case 'blocked': return 'BLOCKED';
     default: return 'ASSIGNED';
   }
+}
+
+const BUSY = ['PLANNING', 'WORKING', 'TESTING', 'VERIFYING'];
+
+/**
+ * Writes the backend's citizen state (/api/agents) into the 3D characters. This is the only source of
+ * status, current task, progress, model and thoughts; when the backend is unreachable every citizen is
+ * marked offline instead of keeping (or inventing) activity.
+ */
+function applyBackendCitizens(engine: CitySimulationEngine, list: any[] | null, showThoughts: boolean): void {
+  const online = Array.isArray(list);
+  for (const ag of engine.agentCharacters) {
+    const bc = online ? list!.find((x: any) => x.id === ag.id) : null;
+    if (!bc) {
+      ag.live = { online: false, status: 'OFFLINE', task: null, progress: 0, thought: null };
+      ag.activeTask = null;
+      ag.thoughtBubble = undefined;
+      continue;
+    }
+    const status = String(bc.status || 'IDLE').toUpperCase();
+    const thought: string | null = bc.thought || null;
+    const progress = Math.max(0, Math.min(100, Number(bc.work_progress) || 0));
+    if (!showThoughts && !ag.live) ag.thoughtBubble = undefined;   // first sync: nothing that did not come from the backend
+    if ((showThoughts || BUSY.includes(status)) && thought && thought !== ag.live?.thought) {
+      ag.thoughtBubble = thought;
+      ag.speechTimer = 9;
+    }
+    ag.live = { online: true, status, task: bc.current_task || null, progress, thought };
+    if (bc.assigned_model) ag.aiModel = bc.assigned_model;
+    if (bc.provider) ag.aiProvider = bc.provider;
+    ag.activeTask = BUSY.includes(status) && bc.current_task ? {
+      id: bc.active_task_id || `live-${ag.id}`,
+      title: bc.current_task,
+      description: '',
+      expectedDeliverable: '',
+      priority: 'HIGH',
+      status: mapTaskStatus(status),
+      progress,
+      assignedAgentId: ag.id,
+      assignedAgentName: ag.name,
+      source: 'INDIVIDUAL',
+      requiredSkills: [],
+      dependencies: [],
+      createdAt: '',
+    } : null;
+  }
+}
+
+/** Backend missions (/api/missions) in the shape the 3D view uses. */
+function mapBackendMissions(list: any[]): PublicMission[] {
+  return list.map((bm: any) => ({
+    id: bm.id,
+    title: bm.title,
+    description: bm.description,
+    category: (bm.category || 'SOFTWARE') as PublicMission['category'],
+    status: (bm.status === 'IN_PROGRESS' || bm.status === 'COMPLETED' || bm.status === 'PARTIAL' || bm.status === 'FAILED' || bm.status === 'CANCELLED' ? bm.status : 'IN_PROGRESS') as PublicMission['status'],
+    progress: bm.progress || 0,
+    subtasks: (bm.subtasks || []).map((st: any) => ({
+      id: st.id,
+      title: st.title,
+      description: st.error || '',
+      expectedDeliverable: st.expected_deliverable || '',
+      priority: 'HIGH',
+      status: mapTaskStatus(st.status),
+      progress: st.progress || 0,
+      assignedAgentId: st.assigned_agent_id,
+      assignedAgentName: st.assigned_agent_name,
+      source: 'PUBLIC_MISSION',
+      publicMissionId: bm.id,
+      requiredSkills: [],
+      dependencies: st.dependencies || [],
+      createdAt: '',
+      deliverableResult: Array.isArray(st.deliverable_result) ? st.deliverable_result.join(', ') : undefined,
+    })),
+    participatingAgentIds: bm.participating_agent_ids || (bm.subtasks || []).map((st: any) => st.assigned_agent_id),
+    blockers: (bm.subtasks || []).filter((st: any) => st.status === 'BLOCKED' || st.status === 'FAILED').map((st: any) => st.error || st.title),
+    acceptanceCriteria: [],
+    deliverables: bm.deliverables || [],
+    publishedAt: bm.published_at || '',
+    completedAt: bm.completed_at || undefined,
+  }));
 }
 
 export const CitySimulationView: React.FC = () => {
@@ -51,7 +137,8 @@ export const CitySimulationView: React.FC = () => {
   const councilRef = useRef<CityGovernmentCouncil>(new CityGovernmentCouncil());
 
   // Primary First-Person exploration & simulation state
-  const [cameraMode, setCameraMode] = useState<CameraMode>('FPV');
+  // Street-level third-person camera by default (GTA style); V toggles first person
+  const [cameraMode, setCameraMode] = useState<CameraMode>('TPV');
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('NONE');
   const [metrics, setMetrics] = useState<CityMetrics>(engineRef.current.metrics);
   const [simulationTime, setSimulationTime] = useState<number>(engineRef.current.simulationTime);
@@ -115,139 +202,28 @@ export const CitySimulationView: React.FC = () => {
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Periodic synchronization with authoritative backend CitizenExecutionService
+  // Periodic synchronization with the backend: the only source of citizen activity and missions
   useEffect(() => {
     let isMounted = true;
+    let first = true;
 
     const syncWithBackend = async () => {
+      const engine = engineRef.current;
+      let citizens: any[] | null = null;
+      let missions: any[] | null = null;
       try {
-        const [backendCitizens, backendMissions] = await Promise.all([
-          api.listAgents().catch(() => null),
-          api.listPublicMissions().catch(() => null)
-        ]);
-
-        if (!isMounted) return;
-
-        const engine = engineRef.current;
-        let stateChanged = false;
-
-        if (backendCitizens && Array.isArray(backendCitizens)) {
-          backendCitizens.forEach((bc: any) => {
-            const ag = engine.agentCharacters.find(a => a.id === bc.id);
-            if (ag) {
-              const mappedStatus = mapBackendStatus(bc.status);
-              if (ag.status !== mappedStatus) {
-                ag.status = mappedStatus;
-                stateChanged = true;
-              }
-
-              if (bc.resolved_model && ag.aiModel !== bc.resolved_model) {
-                ag.aiModel = bc.resolved_model;
-                stateChanged = true;
-              }
-
-              if (bc.last_thought && ag.thoughtBubble !== bc.last_thought) {
-                ag.thoughtBubble = bc.last_thought;
-                ag.currentThought = bc.last_thought;
-                ag.speechTimer = 8.0;
-                stateChanged = true;
-              }
-
-              // Update active task & progress from real backend state
-              if (bc.current_task) {
-                const bTask = bc.current_task;
-                const newProgress = bTask.progress !== undefined 
-                  ? bTask.progress 
-                  : (bc.status === 'testing' ? 85 : bc.status === 'working' ? 60 : 15);
-
-                if (!ag.activeTask || ag.activeTask.id !== bTask.id) {
-                  ag.activeTask = {
-                    id: bTask.id,
-                    title: bTask.title,
-                    description: bTask.description,
-                    expectedDeliverable: bTask.expected_deliverable || '',
-                    priority: bTask.priority || 'HIGH',
-                    status: mapTaskStatus(bTask.status),
-                    progress: newProgress,
-                    assignedAgentId: ag.id,
-                    assignedAgentName: ag.name,
-                    source: 'INDIVIDUAL',
-                    requiredSkills: ag.skills,
-                    dependencies: [],
-                    createdAt: bTask.created_at || new Date().toLocaleTimeString()
-                  };
-                  ag.workProgress = newProgress;
-                  stateChanged = true;
-                } else if (ag.workProgress !== newProgress) {
-                  ag.workProgress = newProgress;
-                  ag.activeTask.progress = newProgress;
-                  stateChanged = true;
-                }
-              } else if (bc.status === 'idle' && ag.activeTask && !ag.activeTask.publicMissionId) {
-                ag.activeTask = null;
-                ag.workProgress = 0;
-                stateChanged = true;
-              }
-
-              // Update task history with verified deliverables
-              if (bc.task_history && Array.isArray(bc.task_history)) {
-                const newHistory = bc.task_history.map((th: any) => ({
-                  id: th.id,
-                  title: th.title,
-                  completedAt: th.completed_at ? new Date(th.completed_at).toLocaleTimeString() : 'Recent',
-                  deliverable: th.deliverable || 'Verified Deliverable'
-                }));
-                if (newHistory.length !== ag.taskHistory.length || (newHistory[0] && ag.taskHistory[0] && newHistory[0].id !== ag.taskHistory[0].id)) {
-                  ag.taskHistory = newHistory;
-                  stateChanged = true;
-                }
-              }
-            }
-          });
-        }
-
-        if (backendMissions && Array.isArray(backendMissions) && backendMissions.length > 0) {
-          const mappedMissions: PublicMission[] = backendMissions.map((bm: any) => ({
-            id: bm.id,
-            title: bm.title,
-            description: bm.description,
-            category: (bm.category || 'SOFTWARE') as PublicMission['category'],
-            status: bm.status as PublicMission['status'],
-            progress: bm.progress || 0,
-            subtasks: (bm.subtasks || []).map((st: any) => ({
-              id: st.id,
-              title: st.title,
-              description: st.description || '',
-              expectedDeliverable: st.expected_deliverable || '',
-              priority: st.priority || 'HIGH',
-              status: mapTaskStatus(st.status),
-              progress: st.progress || 0,
-              assignedAgentId: st.assigned_agent_id,
-              assignedAgentName: st.assigned_agent_name,
-              source: 'PUBLIC_MISSION',
-              publicMissionId: bm.id,
-              requiredSkills: [],
-              dependencies: st.dependencies || [],
-              createdAt: st.created_at || ''
-            })),
-            participatingAgentIds: (bm.subtasks || []).map((st: any) => st.assigned_agent_id),
-            blockers: bm.blockers || [],
-            acceptanceCriteria: bm.acceptance_criteria || [],
-            deliverables: bm.deliverables || [],
-            publishedAt: bm.created_at ? new Date(bm.created_at).toLocaleTimeString() : 'Today'
-          }));
-
-          engine.publicMissions = mappedMissions;
-          setPublicMissions(mappedMissions);
-          stateChanged = true;
-        }
-
-        if (stateChanged) {
-          setAgentCharacters([...engine.agentCharacters]);
-        }
-      } catch (err) {
-        // Retain current visual state on network hiccup
+        [citizens, missions] = await Promise.all([api.listAgents(), api.listPublicMissions()]);
+      } catch {
+        citizens = null;   // offline: shown as offline, nothing is simulated in its place
       }
+      if (!isMounted) return;
+      applyBackendCitizens(engine, citizens, !first);
+      first = false;
+      if (Array.isArray(missions)) {
+        engine.publicMissions = mapBackendMissions(missions);
+        setPublicMissions(engine.publicMissions);
+      }
+      setAgentCharacters([...engine.agentCharacters]);
     };
 
     syncWithBackend();
@@ -256,6 +232,20 @@ export const CitySimulationView: React.FC = () => {
       isMounted = false;
       clearInterval(interval);
     };
+  }, []);
+
+  // After any action, pull the real state right away instead of guessing it locally
+  const refreshFromBackend = useCallback(async () => {
+    const engine = engineRef.current;
+    try {
+      const [citizens, missions] = await Promise.all([api.listAgents(), api.listPublicMissions()]);
+      applyBackendCitizens(engine, citizens, true);
+      engine.publicMissions = mapBackendMissions(missions);
+      setPublicMissions(engine.publicMissions);
+    } catch {
+      applyBackendCitizens(engine, null, false);
+    }
+    setAgentCharacters([...engine.agentCharacters]);
   }, []);
 
   // Player position update handler from CityScene controls
@@ -283,7 +273,7 @@ export const CitySimulationView: React.FC = () => {
     setShowPublicMissionsModal(false);
   }, []);
 
-  // Direct Work Command ([F] Key or Interface Button)
+  // Direct Work Command ([F] Key or Interface Button): sends the citizen's standard role task to the backend
   const handleDirectWorkCommand = useCallback(async (agentId: string) => {
     const engine = engineRef.current;
     const ag = engine.agentCharacters.find(a => a.id === agentId);
@@ -336,15 +326,6 @@ export const CitySimulationView: React.FC = () => {
       expectedDeliverable = 'mission_dag_plan.json';
     }
 
-    ag.status = 'WORKING';
-    ag.workProgress = 20;
-    ag.thoughtBubble = `⚡ [F] Executing: ${title}...`;
-    ag.speechTimer = 8.0;
-    setAgentCharacters([...engine.agentCharacters]);
-
-    setWorkToast(`⚡ Direct Work Order dispatched to ${ag.name}! Local inference started.`);
-    setTimeout(() => setWorkToast(null), 4500);
-
     try {
       await api.assignAgentTask(agentId, {
         title,
@@ -352,22 +333,13 @@ export const CitySimulationView: React.FC = () => {
         expectedDeliverable,
         priority: 'CRITICAL'
       });
-      const backendCitizens = await api.listAgents();
-      if (backendCitizens && Array.isArray(backendCitizens)) {
-        backendCitizens.forEach((bc: any) => {
-          const a = engine.agentCharacters.find(x => x.id === bc.id);
-          if (a) {
-            a.status = mapBackendStatus(bc.status);
-            if (bc.last_thought) a.thoughtBubble = bc.last_thought;
-          }
-        });
-        setAgentCharacters([...engine.agentCharacters]);
-      }
+      setWorkToast(`⚡ Work order sent to ${ag.name}: ${title}`);
+      await refreshFromBackend();
     } catch (err: any) {
       console.error('Failed to dispatch direct work command to backend:', err);
-      engine.directWorkCommand(agentId);
-      setAgentCharacters([...engine.agentCharacters]);
+      setWorkToast(`⚠️ Could not reach the backend: the work order for ${ag.name} was not sent.`);
     }
+    setTimeout(() => setWorkToast(null), 4500);
   }, []);
 
   // 2-Way Conversational Chat with Local Model
@@ -385,12 +357,23 @@ export const CitySimulationView: React.FC = () => {
       timestamp: new Date().toLocaleTimeString()
     };
     ag.chatHistory.push(playerMsg);
+    // Visible "thinking" line in the chat until the local model answers (can take a while on first load).
+    const pendingId = `pending-${Date.now()}`;
+    ag.chatHistory.push({
+      id: pendingId,
+      sender: 'AGENT' as const,
+      senderName: ag.name,
+      text: `${ag.name} is thinking…`,
+      timestamp: new Date().toLocaleTimeString()
+    });
     ag.thoughtBubble = 'Thinking via local Ollama model...';
     ag.speechTimer = 10.0;
     setAgentCharacters([...engine.agentCharacters]);
+    const dropPending = () => { ag.chatHistory = (ag.chatHistory || []).filter(m => m.id !== pendingId); };
 
     try {
       const response = await api.chatWithAgent(agentId, message);
+      dropPending();
       ag.chatHistory.push({
         id: response.message_id || `amsg-${Date.now()}`,
         sender: 'AGENT' as const,
@@ -414,8 +397,16 @@ export const CitySimulationView: React.FC = () => {
 
       setAgentCharacters([...engine.agentCharacters]);
     } catch (err: any) {
-      // Fallback to local heuristic response if server is offline
-      engine.interactWithAgent(agentId, message);
+      // Say what went wrong instead of inventing a reply.
+      dropPending();
+      ag.chatHistory.push({
+        id: `err-${Date.now()}`,
+        sender: 'AGENT' as const,
+        senderName: ag.name,
+        text: `⚠️ ${ag.name} could not answer: ${err?.message || 'the City AI backend is not reachable'}. Check that the app (or backend) and Ollama are running, then try again.`,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      ag.thoughtBubble = 'Could not reach my model.';
       setAgentCharacters([...engine.agentCharacters]);
     }
   }, []);
@@ -427,81 +418,44 @@ export const CitySimulationView: React.FC = () => {
   ) => {
     const engine = engineRef.current;
     const ag = engine.agentCharacters.find(a => a.id === agentId);
-    if (ag) {
-      ag.status = 'WORKING';
-      ag.workProgress = 15;
-      ag.thoughtBubble = `Synthesizing ${taskData.title.slice(0, 24)}...`;
-      ag.speechTimer = 8.0;
-      setAgentCharacters([...engine.agentCharacters]);
-    }
-
-    setWorkToast(`Task assigned to ${ag?.name || agentId}. Real local execution started...`);
-    setTimeout(() => setWorkToast(null), 4500);
-
     try {
       await api.assignAgentTask(agentId, taskData);
-      const backendCitizens = await api.listAgents();
-      if (backendCitizens && Array.isArray(backendCitizens)) {
-        backendCitizens.forEach((bc: any) => {
-          const a = engine.agentCharacters.find(x => x.id === bc.id);
-          if (a) {
-            a.status = mapBackendStatus(bc.status);
-            if (bc.last_thought) a.thoughtBubble = bc.last_thought;
-          }
-        });
-        setAgentCharacters([...engine.agentCharacters]);
-      }
+      setWorkToast(`Task assigned to ${ag?.name || agentId}: ${taskData.title}`);
+      await refreshFromBackend();
     } catch (err: any) {
       console.error('Failed to assign task to backend:', err);
-      engine.assignIndividualTask(agentId, taskData);
-      setAgentCharacters([...engine.agentCharacters]);
+      setWorkToast(`⚠️ Could not reach the backend: the task for ${ag?.name || agentId} was not assigned.`);
     }
+    setTimeout(() => setWorkToast(null), 4500);
   }, []);
 
-  // Publish city-wide public mission
+  // Publish city-wide public mission (the backend decomposes and runs it; nothing is simulated locally)
   const handlePublishPublicMission = useCallback(async (missionData: { title: string; description: string; category: PublicMission['category'] }) => {
-    setWorkToast(`Publishing National Mission to all citizens...`);
-    setTimeout(() => setWorkToast(null), 4500);
-
+    setWorkToast(`Sending mission to the city: ${missionData.title}…`);
     try {
-      await api.publishPublicMission({
+      const res = await api.publishPublicMission({
         title: missionData.title,
         description: missionData.description,
         category: missionData.category
       });
-      const [backendCitizens, backendMissions] = await Promise.all([
-        api.listAgents(),
-        api.listPublicMissions()
-      ]);
-      const engine = engineRef.current;
-      if (backendCitizens && Array.isArray(backendCitizens)) {
-        backendCitizens.forEach((bc: any) => {
-          const a = engine.agentCharacters.find(x => x.id === bc.id);
-          if (a) {
-            a.status = mapBackendStatus(bc.status);
-            if (bc.last_thought) a.thoughtBubble = bc.last_thought;
-          }
-        });
-        setAgentCharacters([...engine.agentCharacters]);
-      }
-      if (backendMissions && Array.isArray(backendMissions)) {
-        setPublicMissions(backendMissions);
-      }
+      setWorkToast(res?.duplicate
+        ? `Already in progress: ${missionData.title} (no duplicate started)`
+        : `Mission received: ${missionData.title}. The coordinator is splitting it into subtasks.`);
+      await refreshFromBackend();
     } catch (err: any) {
       console.error('Failed to publish public mission to backend:', err);
-      const engine = engineRef.current;
-      engine.publishPublicMission(missionData);
-      setPublicMissions([...engine.publicMissions]);
-      setAgentCharacters([...engine.agentCharacters]);
+      setWorkToast('⚠️ Could not reach the backend: the mission was not published.');
     }
-  }, []);
+    setTimeout(() => setWorkToast(null), 4500);
+  }, [refreshFromBackend]);
 
   // Request status report from agent
   const handleRequestAgentStatus = useCallback((agentId: string) => {
     const agent = engineRef.current.agentCharacters.find(a => a.id === agentId);
     if (!agent) return 'Agent not found in registry.';
-    if (agent.activeTask) {
-      return `Currently ${agent.status}: "${agent.activeTask.title}" (${agent.workProgress.toFixed(0)}% complete). Deliverable: ${agent.activeTask.expectedDeliverable}`;
+    if (!agent.live || !agent.live.online) return 'Backend offline: status unknown.';
+    if (agent.live.task) {
+      return `Currently ${agent.live.status}: "${agent.live.task}" (${agent.live.progress.toFixed(0)}% complete).`;
     }
     return `Currently ${agent.status}. Status: ${agent.thoughtBubble || 'Available'}. Skills: ${agent.skills.join(', ')}.`;
   }, []);
@@ -567,7 +521,7 @@ export const CitySimulationView: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden bg-[#06080E]">
+    <div className="relative w-full h-full overflow-hidden bg-[#06080E]">
       {/* Floating Work Order Notification Toast */}
       {workToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#070D1A]/95 border-2 border-amber-500 text-amber-200 px-6 py-3 rounded-2xl shadow-2xl text-xs font-mono font-bold flex items-center gap-3 animate-bounce">
@@ -603,6 +557,8 @@ export const CitySimulationView: React.FC = () => {
       {/* First-Person HUD, Interaction Prompts, Agent Profile Modal, and Public Missions */}
       <CityHUD
         metrics={metrics}
+        buildings={engineRef.current.buildings}
+        roads={engineRef.current.roads}
         agentCharacters={agentCharacters}
         publicMissions={publicMissions}
         activeMissionId={activeMissionId}

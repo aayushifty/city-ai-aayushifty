@@ -12,6 +12,11 @@ backend/data/*.db-wal
 backend/data/workspaces/
 backend/data/deliverables/
 backend/data/artifacts/
+backend/data/task_history.json
+backend/data/desktop.log
+backend/data/webview/
+backend/data/backups/
+backend/data/edge-app-profile/
 .venv/
 env/
 dist/

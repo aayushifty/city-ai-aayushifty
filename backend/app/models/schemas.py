@@ -143,6 +143,9 @@ class CitizenProfile(BaseModel):
     color: str
     assigned_model: str
     provider: str
+    provider_key: str = "ollama"  # router key: freellm, ollama, groq, openrouter, gemini, openai
+    local_model: Optional[str] = None   # the citizen's own Ollama model (used whenever the gateway is unreachable)
+    model_pinned: bool = False          # True after you pick a model by hand: automatic switching leaves it alone
     capabilities: List[str] = Field(default_factory=list)
     tools: List[str] = Field(default_factory=list)
     status: str = "IDLE"  # IDLE, PLANNING, WORKING, TESTING, VERIFYING, BLOCKED, COMPLETED, FAILED
@@ -173,11 +176,13 @@ class CitizenChatResponse(BaseModel):
     deliverable_path: Optional[str] = None
     deliverable_type: Optional[str] = None
     artifact_id: Optional[str] = None
+    deliverables: List[Dict[str, Any]] = Field(default_factory=list)
+    steps_used: int = 0
 
 class CitizenTaskRequest(BaseModel):
     title: str
-    description: str
-    expected_deliverable: str
+    description: str = ""
+    expected_deliverable: str = ""
     priority: str = "HIGH"
     workspace_name: Optional[str] = None
     timeout_seconds: int = 240
@@ -200,3 +205,4 @@ class DeliverableArtifact(BaseModel):
     verification_exit_code: int = 0
     verification_summary: str = ""
     created_at: str
+    url: Optional[str] = None  # direct browser link served by the backend

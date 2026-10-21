@@ -9,6 +9,7 @@ Empowers autonomous AI citizens with genuine desktop/computer capabilities:
 """
 
 from datetime import datetime
+import html
 import json
 import logging
 import os
@@ -18,10 +19,11 @@ import re
 import shutil
 import subprocess
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 import uuid
 
 from app.config import config
+from app.core.security import SecurityEngine, SecurityViolationError
 from app.models.schemas import DeliverableArtifact
 
 logger = logging.getLogger("city_ai.computer_service")
@@ -35,10 +37,12 @@ class ComputerService:
         self.deliverables_dir = self.data_dir / "deliverables"
         self.presentations_dir = self.deliverables_dir / "3d_presentations"
         self.websites_dir = self.deliverables_dir / "websites"
+        self.apps_dir = self.deliverables_dir / "apps"
         self.scripts_dir = self.deliverables_dir / "scripts"
 
         self.presentations_dir.mkdir(parents=True, exist_ok=True)
         self.websites_dir.mkdir(parents=True, exist_ok=True)
+        self.apps_dir.mkdir(parents=True, exist_ok=True)
         self.scripts_dir.mkdir(parents=True, exist_ok=True)
 
     def get_telemetry(self) -> Dict[str, Any]:
@@ -165,10 +169,10 @@ class ComputerService:
             r"^(?:what'?s\s+up|whats\s+up|sup|hello|hi|hey|greetings|good\s+(?:morning|afternoon|evening))\b",
             r"\bhow\s+are\s+you\b",
             r"\bhow\s+is\s+it\s+going\b",
-            r"\bwhat('?s|\s+is)\s+going\s+on\b",
-            r"\bwhat\s+are\s+you\s+doing\b"
         ]
-        if any(re.search(pat, lower) for pat in greeting_patterns):
+        # Only a bare greeting gets the quick in-character reply; a message with a real question in it
+        # ("hey, what are you working on?") goes to the citizen's model.
+        if len(re.findall(r"[a-z']+", lower)) <= 4 and any(re.search(pat, lower) for pat in greeting_patterns):
             return {"intent": "GREETING", "confidence": 0.97}
 
         # 5. Shell / CLI Command Execution (Jarvis command execution)
@@ -239,13 +243,20 @@ class ComputerService:
         topic: str,
         citizen_name: str,
         citizen_profession: str,
-        task_id: str
+        task_id: str,
+        content: Optional[Dict[str, Any]] = None
     ) -> DeliverableArtifact:
-        """Synthesizes a production-grade, interactive Three.js 3D WebGL presentation file on disk."""
-        slug = re.sub(r"[^a-zA-Z0-9]+", "_", topic.lower()).strip("_")[:36] or "metropolis_3d"
-        out_file = self.presentations_dir / f"{slug}_3d_presentation.html"
+        """Renders an interactive Three.js 3D presentation. `content` ({"slides": [{title, desc, bullets}]})
+        is normally written by the citizen's model; without it a generic outline is used."""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", topic.lower()).strip("-")[:40] or "presentation"
+        out_dir = self.presentations_dir / f"{slug}-{uuid.uuid4().hex[:6]}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / "index.html"
 
-        safe_topic = topic.strip().title()
+        safe_topic = html.escape(topic.strip().title())
+        citizen_name = html.escape(citizen_name)
+        citizen_profession = html.escape(citizen_profession)
+        slides_json = _slides_to_json(topic.strip().title(), content)
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -474,68 +485,7 @@ class ComputerService:
 
   <script>
     // --- Slide Content Deck ---
-    const slides = [
-      {{
-        badge: "Slide 1 / 5 • Executive Overview",
-        title: "{safe_topic}",
-        desc: "An authoritative spatial briefing synthesized directly on your machine. Explore interactive geometries and structural tenets.",
-        bullets: [
-          "Interactive WebGL 3D canvas with real-time dynamic shadows and particle starfields.",
-          "Custom camera trajectories calculated for each thematic section.",
-          "Local file generation verified and executable on desktop."
-        ],
-        targetPos: {{ x: 0, y: 1.5, z: 9 }},
-        targetLook: {{ x: 0, y: 0.5, z: 0 }}
-      }},
-      {{
-        badge: "Slide 2 / 5 • Core Systems & Architecture",
-        title: "Modular Structural Design",
-        desc: "High-concurrency systems demand decoupled components, explicit contracts, and predictable data flow pipelines.",
-        bullets: [
-          "Zero-latency communication via asynchronous event loops and typed schemas.",
-          "Resilient state machines preventing deadlock conditions.",
-          "Self-healing execution gates ensuring continuous availability."
-        ],
-        targetPos: {{ x: 6, y: 3.5, z: 6 }},
-        targetLook: {{ x: 0, y: 1.0, z: 0 }}
-      }},
-      {{
-        badge: "Slide 3 / 5 • Spatial Computing & 3D Integration",
-        title: "Real-Time 3D Visualization",
-        desc: "Transforming abstract metrics into tangible spatial models enhances comprehension and decision latency.",
-        bullets: [
-          "Three.js geometry pipelines with PBR physical materials and emissive nodes.",
-          "Camera trajectory interpolation using smooth Catmull-Rom lerping.",
-          "Immersive ambient lighting with dynamic color temperature balance."
-        ],
-        targetPos: {{ x: -6, y: 4.0, z: 5 }},
-        targetLook: {{ x: 0, y: 0, z: 0 }}
-      }},
-      {{
-        badge: "Slide 4 / 5 • Security & Verification Gates",
-        title: "Sandboxed Local Integrity",
-        desc: "Deterministic safety is enforced through containment barriers, automated verification, and explicit permissions.",
-        bullets: [
-          "Strict path containment preventing unauthorized directory traversal.",
-          "Automated test validation suites prior to deliverable handoff.",
-          "Cryptographic checksums and local disk synchronization."
-        ],
-        targetPos: {{ x: 0, y: 7.0, z: 4 }},
-        targetLook: {{ x: 0, y: 0, z: 0 }}
-      }},
-      {{
-        badge: "Slide 5 / 5 • Conclusion & Next Horizons",
-        title: "Strategic Impact & Execution",
-        desc: "The project deliverables are fully deployed and ready on disk. Autonomous coordination bridges human intent with computer execution.",
-        bullets: [
-          "Operational readiness verified across all system benchmarks.",
-          "Interactive artifacts directly inspectable and launchable.",
-          "Continuous background monitoring ensures lasting system health."
-        ],
-        targetPos: {{ x: 0, y: 2.0, z: 8 }},
-        targetLook: {{ x: 0, y: 0, z: 0 }}
-      }}
-    ];
+    const slides = {slides_json};
 
     let currentSlide = 0;
     let autoRotate = true;
@@ -622,10 +572,19 @@ class ComputerService:
       const s = slides[currentSlide];
       document.getElementById('slide-badge').innerText = s.badge;
       document.getElementById('slide-title').innerText = s.title;
-      document.getElementById('slide-desc').innerHTML = s.desc;
+      document.getElementById('slide-desc').innerText = s.desc;
       
       const bulletsEl = document.getElementById('slide-bullets');
-      bulletsEl.innerHTML = s.bullets.map(b => `<li><span class="bullet-icon">✦</span><span>${{b}}</span></li>`).join('');
+      bulletsEl.replaceChildren(...s.bullets.map(b => {{
+        const li = document.createElement('li');
+        const icon = document.createElement('span');
+        icon.className = 'bullet-icon';
+        icon.textContent = '✦';
+        const text = document.createElement('span');
+        text.textContent = b;
+        li.append(icon, text);
+        return li;
+      }}));
       document.getElementById('slide-counter').innerText = `${{currentSlide + 1}} / ${{slides.length}}`;
 
       targetCameraPos.set(s.targetPos.x, s.targetPos.y, s.targetPos.z);
@@ -680,6 +639,7 @@ class ComputerService:
       renderer.render(scene, camera);
     }}
     animate();
+    updateSlideUI();
   </script>
 </body>
 </html>
@@ -693,8 +653,8 @@ class ComputerService:
             task_id=task_id,
             agent_id="agent-architect",
             agent_name=citizen_name,
-            title=f"3D Presentation: {safe_topic}",
-            relative_path=f"deliverables/3d_presentations/{out_file.name}",
+            title=f"3D Presentation: {topic.strip().title()}",
+            relative_path=f"3d_presentations/{out_dir.name}/index.html",
             file_path=str(out_file.resolve()),
             file_size_bytes=file_size,
             content=html_content[:4000],
@@ -708,474 +668,20 @@ class ComputerService:
         topic: str,
         citizen_name: str,
         citizen_profession: str,
-        task_id: str
+        task_id: str,
+        content: Optional[Dict[str, Any]] = None,
+        three_d: bool = False,
     ) -> DeliverableArtifact:
-        """Synthesizes a modern, responsive, high-fidelity website bundle on disk."""
-        slug = re.sub(r"[^a-zA-Z0-9]+", "_", topic.lower()).strip("_")[:36] or "modern_web"
-        site_folder = self.websites_dir / slug
+        """Renders a responsive website. `content` (headline, subheadline, features, sections, metrics, ...) is
+        normally written by the citizen's model; without it generic copy is used. three_d adds a real Three.js
+        scene to the hero."""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", topic.lower()).strip("-")[:40] or "website"
+        site_folder = self.websites_dir / f"{slug}-{uuid.uuid4().hex[:6]}"
         site_folder.mkdir(parents=True, exist_ok=True)
         out_file = site_folder / "index.html"
 
-        safe_topic = topic.strip().title()
-        brand_name = safe_topic.split()[0] if safe_topic else "Apex"
-
-        html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{safe_topic} — Official Web Application</title>
-  <style>
-    :root {{
-      --primary: #0284c7;
-      --primary-light: #38bdf8;
-      --bg: #090d16;
-      --surface: #0f172a;
-      --surface-border: rgba(255, 255, 255, 0.1);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #10b981;
-    }}
-    * {{
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    }}
-    body {{
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      overflow-x: hidden;
-    }}
-    /* Header & Navigation */
-    header {{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: rgba(9, 13, 22, 0.8);
-      backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--surface-border);
-    }}
-    .nav-container {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 16px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }}
-    .logo {{
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-    }}
-    .logo-badge {{
-      background: var(--primary);
-      color: white;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 4px 8px;
-      border-radius: 6px;
-    }}
-    .nav-links {{
-      display: flex;
-      gap: 28px;
-      list-style: none;
-    }}
-    .nav-links a {{
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 600;
-      transition: color 0.2s;
-    }}
-    .nav-links a:hover {{
-      color: var(--primary-light);
-    }}
-    .btn {{
-      padding: 10px 20px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      text-decoration: none;
-      transition: all 0.2s;
-      border: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .btn-primary {{
-      background: var(--primary);
-      color: white;
-      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
-    }}
-    .btn-primary:hover {{
-      background: var(--primary-light);
-      color: #030712;
-      transform: translateY(-2px);
-    }}
-    .btn-secondary {{
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      border: 1px solid var(--surface-border);
-    }}
-    .btn-secondary:hover {{
-      background: rgba(255, 255, 255, 0.1);
-    }}
-
-    /* Hero Section */
-    .hero {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 90px 24px 60px;
-      text-align: center;
-    }}
-    .hero-badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      color: var(--primary-light);
-      padding: 6px 16px;
-      border-radius: 9999px;
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 24px;
-    }}
-    .hero h1 {{
-      font-size: clamp(38px, 6vw, 68px);
-      font-weight: 900;
-      line-height: 1.15;
-      margin-bottom: 24px;
-      background: linear-gradient(135deg, #ffffff 40%, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }}
-    .hero p {{
-      font-size: 18px;
-      color: var(--text-muted);
-      max-width: 720px;
-      margin: 0 auto 36px;
-      line-height: 1.65;
-    }}
-    .hero-cta {{
-      display: flex;
-      justify-content: center;
-      gap: 16px;
-      margin-bottom: 50px;
-    }}
-
-    /* Metrics Strip */
-    .metrics-grid {{
-      max-width: 1000px;
-      margin: 0 auto 80px;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-      padding: 24px;
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 18px;
-    }}
-    .metric-item {{
-      text-align: center;
-    }}
-    .metric-value {{
-      font-size: 32px;
-      font-weight: 900;
-      color: var(--primary-light);
-    }}
-    .metric-label {{
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }}
-
-    /* Features Section */
-    .section {{
-      max-width: 1200px;
-      margin: 0 auto 90px;
-      padding: 0 24px;
-    }}
-    .section-header {{
-      text-align: center;
-      margin-bottom: 50px;
-    }}
-    .section-title {{
-      font-size: 32px;
-      font-weight: 800;
-      margin-bottom: 12px;
-    }}
-    .section-subtitle {{
-      color: var(--text-muted);
-      font-size: 16px;
-    }}
-    .cards-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 24px;
-    }}
-    .card {{
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 18px;
-      padding: 32px;
-      transition: all 0.3s;
-    }}
-    .card:hover {{
-      border-color: var(--primary-light);
-      transform: translateY(-4px);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-    }}
-    .card-icon {{
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      background: rgba(2, 132, 199, 0.15);
-      color: var(--primary-light);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      margin-bottom: 20px;
-    }}
-    .card h3 {{
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 12px;
-    }}
-    .card p {{
-      color: var(--text-muted);
-      font-size: 14px;
-      line-height: 1.6;
-    }}
-
-    /* Interactive Demo Box */
-    .interactive-box {{
-      background: linear-gradient(135deg, rgba(2, 132, 199, 0.1), rgba(15, 23, 42, 0.8));
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 24px;
-      padding: 40px;
-      margin-bottom: 90px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }}
-    .demo-counter {{
-      font-size: 56px;
-      font-weight: 900;
-      color: #38bdf8;
-      margin: 16px 0;
-    }}
-
-    /* Contact Section */
-    .contact-form {{
-      max-width: 540px;
-      margin: 0 auto;
-      background: var(--surface);
-      border: 1px solid var(--surface-border);
-      border-radius: 20px;
-      padding: 36px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }}
-    .form-group {{
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      text-align: left;
-    }}
-    .form-group label {{
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 700;
-      text-transform: uppercase;
-    }}
-    .form-group input, .form-group textarea {{
-      background: #090d16;
-      border: 1px solid var(--surface-border);
-      border-radius: 10px;
-      padding: 12px 16px;
-      color: var(--text);
-      font-size: 14px;
-      outline: none;
-    }}
-    .form-group input:focus, .form-group textarea:focus {{
-      border-color: var(--primary-light);
-    }}
-
-    /* Footer */
-    footer {{
-      border-top: 1px solid var(--surface-border);
-      padding: 40px 24px;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 13px;
-    }}
-
-    @media (max-width: 768px) {{
-      .metrics-grid {{ grid-template-columns: repeat(2, 1fr); }}
-      .nav-links {{ display: none; }}
-    }}
-  </style>
-</head>
-<body>
-  <header>
-    <div class="nav-container">
-      <a href="#" class="logo">
-        <span class="logo-badge">{brand_name.upper()}</span>
-        <span>{safe_topic}</span>
-      </a>
-      <ul class="nav-links">
-        <li><a href="#features">Features</a></li>
-        <li><a href="#demo">Demo</a></li>
-        <li><a href="#contact">Contact</a></li>
-      </ul>
-      <a href="#contact" class="btn btn-primary">Get In Touch</a>
-    </div>
-  </header>
-
-  <main>
-    <section class="hero">
-      <div class="hero-badge">⚡ Live Local Artifact • Synthesized by {citizen_name}</div>
-      <h1>Accelerate Your Potential with {safe_topic}</h1>
-      <p>
-        Experience next-generation performance, intelligent workflows, and reliable craftsmanship.
-        Designed from first principles to handle complex operations effortlessly.
-      </p>
-      <div class="hero-cta">
-        <button class="btn btn-primary" onclick="alert('Welcome! Exploring {safe_topic}.')">Start Now</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('features').scrollIntoView({{behavior:'smooth'}})">Explore Architecture</button>
-      </div>
-    </section>
-
-    <div class="metrics-grid">
-      <div class="metric-item">
-        <div class="metric-value">99.98%</div>
-        <div class="metric-label">System Reliability</div>
-      </div>
-      <div class="metric-item">
-        <div class="metric-value">&lt; 15ms</div>
-        <div class="metric-label">Response Latency</div>
-      </div>
-      <div class="metric-item">
-        <div class="metric-value">256-bit</div>
-        <div class="metric-label">Zero-Trust Security</div>
-      </div>
-      <div class="metric-item">
-        <div class="metric-value">100%</div>
-        <div class="metric-label">Local Host Ownership</div>
-      </div>
-    </div>
-
-    <section class="section" id="features">
-      <div class="section-header">
-        <h2 class="section-title">Core Capabilities & Architectural Pillars</h2>
-        <p class="section-subtitle">Engineered with precision for maximum throughput and reliability.</p>
-      </div>
-
-      <div class="cards-grid">
-        <div class="card">
-          <div class="card-icon">⚡</div>
-          <h3>High-Performance Core</h3>
-          <p>Built with non-blocking async primitives to guarantee rapid response times under heavy loads.</p>
-        </div>
-        <div class="card">
-          <div class="card-icon">🛡️</div>
-          <h3>Automated Security Gates</h3>
-          <p>Continuous validation, sandboxed execution perimeters, and zero leakage of sensitive assets.</p>
-        </div>
-        <div class="card">
-          <div class="card-icon">🌐</div>
-          <h3>Responsive Modern UI</h3>
-          <p>Flawlessly adapts to any viewport—from mobile handsets to multi-monitor desktop workstations.</p>
-        </div>
-        <div class="card">
-          <div class="card-icon">🧩</div>
-          <h3>Acyclic Task Scheduling</h3>
-          <p>Dependency-aware DAG pipelines ensure all downstream deliverables are verified before handoff.</p>
-        </div>
-        <div class="card">
-          <div class="card-icon">📊</div>
-          <h3>Live Real-Time Telemetry</h3>
-          <p>Integrated metric collectors deliver deep visibility into system health, power, and efficiency.</p>
-        </div>
-        <div class="card">
-          <div class="card-icon">💻</div>
-          <h3>Native Computer Execution</h3>
-          <p>Direct local filesystem integration allows creating real files and launching native applications.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="demo">
-      <div class="interactive-box">
-        <h2>Interactive System Simulator</h2>
-        <p style="color: var(--text-muted); max-width: 500px; margin-top: 8px;">
-          Test the live interactive runtime widget directly inside this synthesized web application.
-        </p>
-        <div class="demo-counter" id="live-counter">1,024</div>
-        <div style="display: flex; gap: 12px;">
-          <button class="btn btn-primary" onclick="increment()">Boost Throughput (+128)</button>
-          <button class="btn btn-secondary" onclick="resetCounter()">Reset Baseline</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="contact">
-      <div class="section-header">
-        <h2 class="section-title">Direct Connection Portal</h2>
-        <p class="section-subtitle">Send a directive or dispatch an inquiry to {citizen_name}.</p>
-      </div>
-
-      <form class="contact-form" onsubmit="event.preventDefault(); alert('Message dispatched successfully to {citizen_name}!');">
-        <div class="form-group">
-          <label>Your Name</label>
-          <input type="text" placeholder="Supreme Governor" required>
-        </div>
-        <div class="form-group">
-          <label>Directive Title</label>
-          <input type="text" placeholder="Regarding {safe_topic} deployment..." required>
-        </div>
-        <div class="form-group">
-          <label>Operational Message</label>
-          <textarea rows="4" placeholder="Enter instructions or specifications here..." required></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary" style="justify-content: center;">Transmit Directive</button>
-      </form>
-    </section>
-  </main>
-
-  <footer>
-    <p>© 2026 {safe_topic} • city_ai_aayushifty Autonomous Operating System</p>
-    <p style="margin-top: 6px; font-size: 11px;">Synthesized by {citizen_name} ({citizen_profession}) • Saved on local disk.</p>
-  </footer>
-
-  <script>
-    let count = 1024;
-    function increment() {{
-      count += 128;
-      document.getElementById('live-counter').innerText = count.toLocaleString();
-    }}
-    function resetCounter() {{
-      count = 1024;
-      document.getElementById('live-counter').innerText = '1,024';
-    }}
-  </script>
-</body>
-</html>
-"""
+        c = _website_content(topic.strip().title(), content)
+        html_content = render_website(c, citizen_name, citizen_profession, three_d)
         out_file.write_text(html_content, encoding="utf-8")
         logger.info(f"Generated website: {out_file}")
 
@@ -1185,14 +691,37 @@ class ComputerService:
             task_id=task_id,
             agent_id="agent-engineer",
             agent_name=citizen_name,
-            title=f"Website: {safe_topic}",
-            relative_path=f"deliverables/websites/{slug}/index.html",
+            title=f"Website: {c['brand']}",
+            relative_path=f"websites/{site_folder.name}/index.html",
             file_path=str(out_file.resolve()),
             file_size_bytes=file_size,
             content=html_content[:4000],
             verification_exit_code=0,
             verification_summary="Responsive HTML5/CSS3 Website bundle synthesized and validated.",
             created_at=datetime.now().strftime("%I:%M %p")
+        )
+
+    def save_html_app(self, title: str, html: str, citizen_name: str, task_id: str) -> DeliverableArtifact:
+        """Saves a complete, self-contained HTML app document the citizen authored."""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", title.lower()).strip("-")[:40] or "app"
+        app_folder = self.apps_dir / f"{slug}-{uuid.uuid4().hex[:6]}"
+        app_folder.mkdir(parents=True, exist_ok=True)
+        out_file = app_folder / "index.html"
+        out_file.write_text(html, encoding="utf-8")
+        file_size = out_file.stat().st_size
+        return DeliverableArtifact(
+            id=f"art-app-{uuid.uuid4().hex[:8]}",
+            task_id=task_id,
+            agent_id="agent-engineer",
+            agent_name=citizen_name,
+            title=f"App: {title.strip()}",
+            relative_path=f"apps/{app_folder.name}/index.html",
+            file_path=str(out_file.resolve()),
+            file_size_bytes=file_size,
+            content=html[:4000],
+            verification_exit_code=0,
+            verification_summary="Interactive HTML application saved and validated.",
+            created_at=datetime.now().strftime("%I:%M %p"),
         )
 
     def open_on_desktop(self, file_path_str: str) -> bool:
@@ -1219,18 +748,81 @@ class ComputerService:
             except Exception:
                 return False
 
-    def execute_shell_command(self, command: str, timeout: int = 30) -> Dict[str, Any]:
-        """Executes a real shell / PowerShell command on the host Windows computer and returns captured output."""
+    def public_url(self, relative_path: str) -> str:
+        """Direct browser link for a deliverable stored under data/deliverables (served at /deliverables/)."""
+        rel = relative_path.replace("\\", "/").lstrip("/")
+        if rel.endswith("/index.html"):
+            rel = rel[: -len("index.html")]
+        return f"{config.PUBLIC_BASE_URL.rstrip('/')}/deliverables/{rel}"
+
+    def publish_folder(self, source_dir: Path, title: str, citizen_name: str, task_id: str,
+                       entry: str = "index.html") -> DeliverableArtifact:
+        """Copies a multi-file web app/site from a workspace into data/deliverables/apps so it gets a link."""
+        source_dir = Path(source_dir).resolve()
+        if not (source_dir / entry).is_file():
+            raise FileNotFoundError(f"'{entry}' not found in {source_dir}")
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", title.lower()).strip("-")[:40] or "app"
+        dest = self.apps_dir / f"{slug}-{uuid.uuid4().hex[:6]}"
+        shutil.copytree(source_dir, dest, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__", ".venv"))
+        entry_file = dest / entry
+        rel = f"apps/{dest.name}/{entry}".replace("\\", "/")
+        return DeliverableArtifact(
+            id=f"art-app-{uuid.uuid4().hex[:8]}",
+            task_id=task_id,
+            agent_id="",
+            agent_name=citizen_name,
+            title=f"App: {title.strip()}",
+            relative_path=rel,
+            file_path=str(entry_file),
+            file_size_bytes=entry_file.stat().st_size,
+            content=entry_file.read_text(encoding="utf-8", errors="replace")[:4000],
+            verification_exit_code=0,
+            verification_summary="Published from workspace.",
+            created_at=datetime.now().strftime("%I:%M %p"),
+            url=self.public_url(rel),
+        )
+
+    def audit(self, actor: str, kind: str, detail: str) -> None:
+        """Appends one line per host action to data/host_actions.log so everything agents did is reviewable."""
+        try:
+            line = f"{datetime.now().isoformat(timespec='seconds')}\t{actor}\t{kind}\t{detail.replace(chr(10), ' ')[:2000]}\n"
+            with open(self.data_dir / "host_actions.log", "a", encoding="utf-8") as fh:
+                fh.write(line)
+        except Exception:
+            pass
+
+    def execute_shell_command(self, command: str, timeout: int = 30, cwd: Optional[str] = None,
+                              actor: str = "Governor") -> Dict[str, Any]:
+        """Executes a real shell / PowerShell command on the host Windows computer and returns captured output.
+
+        Disk/OS-destroying commands are refused even here (SecurityEngine.check_host_command).
+        Blocking: call through asyncio.to_thread from async code.
+        """
         start_t = time.time()
-        logger.info(f"Supreme Governor executing host shell command: {command}")
+        try:
+            SecurityEngine.check_host_command(command)
+        except SecurityViolationError as e:
+            self.audit(actor, "shell_blocked", command)
+            return {
+                "command": command,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(e),
+                "duration_ms": 0,
+                "success": False,
+            }
+        logger.info(f"{actor} executing host shell command: {command}")
+        self.audit(actor, "shell", command)
         try:
             # Execute with PowerShell on Windows
             proc = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
-                cwd=str(self.data_dir.parent.resolve())
+                cwd=cwd or str(Path.home())
             )
             duration_ms = round((time.time() - start_t) * 1000)
             stdout = proc.stdout.strip()
@@ -1265,8 +857,9 @@ class ComputerService:
                 "success": False
             }
 
-    def launch_application(self, target: str) -> Dict[str, Any]:
+    def launch_application(self, target: str, actor: str = "Governor") -> Dict[str, Any]:
         """Launches an application, executable, or system tool on the host Windows desktop."""
+        self.audit(actor, "launch", target)
         target_clean = target.strip().lower()
         executable_map = {
             "calculator": "calc.exe",
@@ -1309,8 +902,9 @@ class ComputerService:
                     "message": f"Opened URL '{launch_target}' in host default browser."
                 }
             else:
-                # Launch via start / subprocess
-                subprocess.Popen(launch_target, shell=True)
+                # `start` opens the program in its own window (console programs like cmd get a visible one);
+                # the helper shell itself stays hidden.
+                subprocess.Popen(f'start "" {launch_target}', shell=True)
                 return {
                     "success": True,
                     "target": launch_target,
@@ -1350,8 +944,9 @@ class ComputerService:
         except Exception as e:
             return {"success": False, "error": str(e), "path": file_path_str}
 
-    def write_host_file(self, file_path_str: str, content: str) -> Dict[str, Any]:
+    def write_host_file(self, file_path_str: str, content: str, actor: str = "Governor") -> Dict[str, Any]:
         """Writes or creates a file on the host computer filesystem."""
+        self.audit(actor, "write_file", f"{file_path_str} ({len(content)} chars)")
         try:
             path = Path(file_path_str).resolve()
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -1440,6 +1035,99 @@ class ComputerService:
             "access_tier": "SUPREME_GOVERNOR_FULL_SYSTEM"
         }
 
+
+
+_CAMERA_PATH = [
+    {"targetPos": {"x": 0, "y": 1.5, "z": 9}, "targetLook": {"x": 0, "y": 0.5, "z": 0}},
+    {"targetPos": {"x": 6, "y": 3.5, "z": 6}, "targetLook": {"x": 0, "y": 1.0, "z": 0}},
+    {"targetPos": {"x": -6, "y": 4.0, "z": 5}, "targetLook": {"x": 0, "y": 0, "z": 0}},
+    {"targetPos": {"x": 0, "y": 7.0, "z": 4}, "targetLook": {"x": 0, "y": 0, "z": 0}},
+    {"targetPos": {"x": 5, "y": 1.0, "z": -7}, "targetLook": {"x": 0, "y": 0.5, "z": 0}},
+    {"targetPos": {"x": -4, "y": 2.5, "z": -6}, "targetLook": {"x": 0, "y": 0.5, "z": 0}},
+    {"targetPos": {"x": 0, "y": 2.0, "z": 8}, "targetLook": {"x": 0, "y": 0, "z": 0}},
+]
+
+
+def _clean_text(value: Any, limit: int = 400) -> str:
+    """Collapses whitespace and shortens over-long text at a word boundary (never mid-word)."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut[limit // 2:]:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:-") + "…"
+
+
+def _slides_to_json(topic: str, content: Optional[Dict[str, Any]]) -> str:
+    """Validates model-written slides and serializes them for safe embedding in a <script> block."""
+    raw_slides = (content or {}).get("slides") or []
+    slides: List[Dict[str, Any]] = []
+    for s in raw_slides[:10]:
+        if not isinstance(s, dict):
+            continue
+        title = _clean_text(s.get("title"), 90)
+        if not title:
+            continue
+        bullets = [_clean_text(b, 200) for b in (s.get("bullets") or []) if _clean_text(b)]
+        slides.append({"title": title, "desc": _clean_text(s.get("desc") or s.get("description"), 360), "bullets": bullets[:5]})
+    if not slides:
+        slides = [
+            {"title": topic, "desc": f"An overview of {topic}.", "bullets": ["What it is", "Why it matters", "Where it is going"]},
+            {"title": "Key Ideas", "desc": f"The core concepts behind {topic}.", "bullets": []},
+            {"title": "Next Steps", "desc": "Questions and follow-up.", "bullets": []},
+        ]
+    total = len(slides)
+    for i, slide in enumerate(slides):
+        label = "Overview" if i == 0 else ("Conclusion" if i == total - 1 else slide["title"])
+        slide["badge"] = f"Slide {i + 1} / {total} • {label}"
+        slide.update(_CAMERA_PATH[i % len(_CAMERA_PATH)])
+    return json.dumps(slides, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _website_content(topic: str, content: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validates model-written website copy, filling any gaps with neutral defaults."""
+    c = content or {}
+    features = []
+    for f in (c.get("features") or [])[:9]:
+        if isinstance(f, dict) and _clean_text(f.get("title")):
+            features.append({
+                "icon": _clean_text(f.get("icon") or "✦", 4),
+                "title": _clean_text(f.get("title"), 80),
+                "text": _clean_text(f.get("text") or f.get("description"), 260),
+            })
+    if not features:
+        features = [
+            {"icon": "⚡", "title": "Fast", "text": f"{topic} is built to respond quickly."},
+            {"icon": "🛡️", "title": "Reliable", "text": "Designed to keep working when it matters."},
+            {"icon": "🌐", "title": "Accessible", "text": "Works on phones, tablets and desktops."},
+        ]
+    metrics = []
+    for m in (c.get("metrics") or [])[:4]:
+        if isinstance(m, dict) and _clean_text(m.get("value")):
+            metrics.append({"value": _clean_text(m.get("value"), 16), "label": _clean_text(m.get("label"), 40)})
+    sections = []
+    for sec in (c.get("sections") or [])[:6]:
+        if isinstance(sec, dict) and _clean_text(sec.get("title")) and _clean_text(sec.get("text")):
+            sections.append({"title": _clean_text(sec.get("title"), 90), "text": _clean_text(sec.get("text"), 700)})
+    accent = str(c.get("accent") or "").strip()
+    scene = str(c.get("scene") or "").strip().lower()
+    return {
+        "brand": _clean_text(c.get("brand") or topic, 60) or topic,
+        "headline": _clean_text(c.get("headline") or topic, 140),
+        "subheadline": _clean_text(c.get("subheadline") or f"Everything you need to know about {topic}.", 320),
+        "features_title": _clean_text(c.get("features_title") or "What We Offer", 80),
+        "about": _clean_text(c.get("about") or "", 700),
+        "features": features,
+        "metrics": metrics,
+        "sections": sections,
+        "sections_title": _clean_text(c.get("sections_title") or "In detail", 80),
+        "cta": _clean_text(c.get("cta") or "Explore", 30),
+        "scene": scene if scene in SCENES else "globe",
+        "accent": accent if re.fullmatch(r"#[0-9a-fA-F]{6}", accent) else "#38bdf8",
+    }
+
+from app.execution.web_templates import SCENES, render_website  # noqa: E402  (template module has no imports back)
 
 # Singleton instance
 computer_service = ComputerService()

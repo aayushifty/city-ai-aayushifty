@@ -4,21 +4,32 @@ import { Building } from '../../simulation/types';
 /**
  * Architectural Builder for Genuine Character Workplaces in city_ai_aayushifty.
  * Replaces generic extruded boxes with specialized, character-tailored facilities:
- * - Fabrication Foundry (Devon Cross - Software Engineer)
- * - QA Bastion (Elena Rostova - Automated Verification Lead)
- * - Blueprint Complex (Marcus Vance - Software Architect)
- * - Vision Lab (Dr. Maya Lin - Product Requirements Analyst)
- * - Security Citadel (Kaelen Voss - Security Sentinel)
- * - Cloud Release Dock (Sora Takahashi - DevOps & SRE Lead)
- * - Civic Trauma Center (Dr. Sarah Miller - Medical Director)
- * - Diagnostic Core (Dr. Aaron Chen - Root Cause Specialist)
- * - Citadel Spire (Alex Vance - Master Orchestrator)
- * - Civic Construction Yard (Harlan Drake - Civil Construction Lead)
+ * - Fabrication Foundry (Drishya Adhikari - Software Engineer)
+ * - QA Bastion (Johan Karki - Automated Verification Lead)
+ * - Blueprint Complex (Prasanna Basyal - Software Architect)
+ * - Vision Lab (Rajib Karki - Product Requirements Analyst)
+ * - Security Citadel (Safal Sharma - Security Sentinel)
+ * - Cloud Release Dock (Santosh Yadav - DevOps & SRE Lead)
+ * - Civic Trauma Center (Anuj Neupane - Medical Director)
+ * - Diagnostic Core (Bidheyak Bhattarai - Root Cause Specialist)
+ * - Citadel Spire (Sahas Lamichhane - Master Orchestrator)
+ * - Civic Construction Yard (Hemanta Bhatta - Civil Construction Lead)
  * - Innovation Plaza (Public Mission Forum)
  * - Detailed Urban Storefronts & Townhouses
  */
 
 export class WorkplaceArchitect {
+  /** Solid parts of the central plaza (dais + holo chamber, kiosks, planters) as world-space footprints. */
+  public static plazaObstacles(b: Building): { minX: number; maxX: number; minZ: number; maxZ: number; height: number }[] {
+    const box = (x: number, z: number, half: number, height: number) =>
+      ({ minX: b.x + x - half, maxX: b.x + x + half, minZ: b.z + z - half, maxZ: b.z + z + half, height });
+    return [
+      box(0, 0, 2.9, 2.8),                                                              // dais + holo chamber
+      ...[[-4.5, -4.5], [4.5, -4.5], [-4.5, 4.5], [4.5, 4.5]].map(([x, z]) => box(x, z, 0.25, 1.8)),   // kiosks
+      ...[[-8.5, -8.5], [8.5, -8.5], [-8.5, 8.5], [8.5, 8.5]].map(([x, z]) => box(x, z, 1.8, 6)),      // planters + trees
+    ];
+  }
+
   private static sharedMaterials: Map<string, THREE.Material> = new Map();
 
   private static getMaterial(key: string, creator: () => THREE.Material): THREE.Material {
@@ -179,7 +190,7 @@ export class WorkplaceArchitect {
     });
   }
 
-  // --- 2. Fabrication Foundry (Devon Cross - Software Engineer) ---
+  // --- 2. Fabrication Foundry (Drishya Adhikari - Software Engineer) ---
   private static buildFabricationFoundry(g: THREE.Group, b: Building): void {
     const steelMat = new THREE.MeshStandardMaterial({ color: 0x27272A, metalness: 0.8, roughness: 0.3 });
     const bronzeMat = new THREE.MeshStandardMaterial({ color: 0x78350F, metalness: 0.6, roughness: 0.4 });
@@ -262,7 +273,7 @@ export class WorkplaceArchitect {
     });
   }
 
-  // --- 3. QA Bastion (Elena Rostova - Automated Verification Lead) ---
+  // --- 3. QA Bastion (Johan Karki - Automated Verification Lead) ---
   private static buildQABastion(g: THREE.Group, b: Building): void {
     const titanMat = new THREE.MeshStandardMaterial({ color: 0x064E3B, metalness: 0.75, roughness: 0.3 });
     const emeraldGlass = new THREE.MeshPhysicalMaterial({ color: 0x10B981, transparent: true, opacity: 0.6 });
@@ -312,7 +323,7 @@ export class WorkplaceArchitect {
     g.add(laserBeam);
   }
 
-  // --- 4. Blueprint Complex (Marcus Vance - Software Architect) ---
+  // --- 4. Blueprint Complex (Prasanna Basyal - Software Architect) ---
   private static buildBlueprintComplex(g: THREE.Group, b: Building): void {
     const navySteel = new THREE.MeshStandardMaterial({ color: 0x1E3A8A, metalness: 0.7, roughness: 0.3 });
     const blueprintGlass = new THREE.MeshPhysicalMaterial({ color: 0x38BDF8, transparent: true, opacity: 0.55, roughness: 0.1 });
@@ -359,7 +370,7 @@ export class WorkplaceArchitect {
     g.add(archModel);
   }
 
-  // --- 5. Product Vision Lab (Dr. Maya Lin - PRD Analyst) ---
+  // --- 5. Product Vision Lab (Rajib Karki - PRD Analyst) ---
   private static buildVisionLab(g: THREE.Group, b: Building): void {
     const purpleMat = new THREE.MeshStandardMaterial({ color: 0x581C87, metalness: 0.6, roughness: 0.35 });
     const chromeMat = new THREE.MeshStandardMaterial({ color: 0xE2E8F0, metalness: 0.9, roughness: 0.1 });
@@ -410,7 +421,7 @@ export class WorkplaceArchitect {
     g.add(orbitRing);
   }
 
-  // --- 6. Security Citadel (Kaelen Voss - Security Sentinel) ---
+  // --- 6. Security Citadel (Safal Sharma - Security Sentinel) ---
   private static buildSecurityCitadel(g: THREE.Group, b: Building): void {
     const stealthArmor = new THREE.MeshStandardMaterial({ color: 0x09090B, metalness: 0.85, roughness: 0.3 });
     const redHazard = new THREE.MeshBasicMaterial({ color: 0xEF4444 });
@@ -454,7 +465,7 @@ export class WorkplaceArchitect {
     g.add(shieldRing);
   }
 
-  // --- 7. Cloud Release Dock (Sora Takahashi - DevOps & SRE Lead) ---
+  // --- 7. Cloud Release Dock (Santosh Yadav - DevOps & SRE Lead) ---
   private static buildReleaseDock(g: THREE.Group, b: Building): void {
     const concrete = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9 });
     const yellowCrane = new THREE.MeshStandardMaterial({ color: 0xEAB308, metalness: 0.7, roughness: 0.4 });
@@ -522,7 +533,7 @@ export class WorkplaceArchitect {
     g.add(dish);
   }
 
-  // --- 8. Civic Medical Trauma Center (Dr. Sarah Miller - Medical Director) ---
+  // --- 8. Civic Medical Trauma Center (Anuj Neupane - Medical Director) ---
   private static buildTraumaCenter(g: THREE.Group, b: Building): void {
     const surgicalWhite = new THREE.MeshStandardMaterial({ color: 0xF8FAFC, metalness: 0.3, roughness: 0.3 });
     const hospitalGlass = new THREE.MeshPhysicalMaterial({ color: 0x38BDF8, transparent: true, opacity: 0.6, roughness: 0.1 });
@@ -580,7 +591,7 @@ export class WorkplaceArchitect {
     g.add(hMid);
   }
 
-  // --- 9. Diagnostic Core (Dr. Aaron Chen - Root Cause Specialist) ---
+  // --- 9. Diagnostic Core (Bidheyak Bhattarai - Root Cause Specialist) ---
   private static buildDiagnosticCore(g: THREE.Group, b: Building): void {
     const graphiteMat = new THREE.MeshStandardMaterial({ color: 0x18181B, metalness: 0.8, roughness: 0.3 });
     const reactorGlass = new THREE.MeshPhysicalMaterial({ color: 0xF472B6, transparent: true, opacity: 0.45, roughness: 0.1 });
@@ -627,11 +638,11 @@ export class WorkplaceArchitect {
     }
   }
 
-  // --- 10. Citadel Spire (Alex Vance - Master Orchestrator) ---
+  // --- 10. Citadel Spire (Sahas Lamichhane - Master Orchestrator) ---
   private static buildCitadelSpire(g: THREE.Group, b: Building): void {
     const sapphireSteel = new THREE.MeshStandardMaterial({ color: 0x0F172A, metalness: 0.85, roughness: 0.25 });
     const executiveGlass = new THREE.MeshPhysicalMaterial({ color: 0x38BDF8, transparent: true, opacity: 0.55, roughness: 0.1 });
-    const goldTrim = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.9, roughness: 0.2 });
+    const goldTrim = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.8, roughness: 0.38 });
 
     // Tier 1: Monumental Colonnade Grand Entrance (0-14m)
     const base = new THREE.Mesh(new THREE.BoxGeometry(13, 14, 13), sapphireSteel);
@@ -675,7 +686,7 @@ export class WorkplaceArchitect {
     g.add(masterRing);
   }
 
-  // --- 11. Civic Construction Yard (Harlan Drake - Construction Lead) ---
+  // --- 11. Civic Construction Yard (Hemanta Bhatta - Construction Lead) ---
   private static buildConstructionYard(g: THREE.Group, b: Building): void {
     const rawConcrete = new THREE.MeshStandardMaterial({ color: 0x64748B, roughness: 0.95 });
     const craneYellow = new THREE.MeshStandardMaterial({ color: 0xFACC15, metalness: 0.6, roughness: 0.4 });

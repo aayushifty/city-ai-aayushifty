@@ -11,6 +11,22 @@ class ModelCompletionRequest(BaseModel):
     max_tokens: int = 4096
     model_name: Optional[str] = None
     stop_sequences: List[str] = Field(default_factory=list)
+    # Optional multi-turn chat transcript ([{"role": "user"|"assistant", "content": ...}]).
+    # When set, it replaces `prompt`; `system_prompt` is still sent first.
+    messages: Optional[List[Dict[str, str]]] = None
+    # Ask the provider to constrain output to a single JSON object.
+    json_mode: bool = False
+
+    def chat_messages(self) -> List[Dict[str, str]]:
+        """Returns the full message list in OpenAI chat format."""
+        msgs: List[Dict[str, str]] = []
+        if self.system_prompt:
+            msgs.append({"role": "system", "content": self.system_prompt})
+        if self.messages:
+            msgs.extend(self.messages)
+        else:
+            msgs.append({"role": "user", "content": self.prompt})
+        return msgs
 
 class ModelCompletionResponse(BaseModel):
     content: str

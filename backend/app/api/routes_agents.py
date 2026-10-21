@@ -15,6 +15,8 @@ from app.models.schemas import (
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
 from app.execution.computer_service import computer_service
+from app.execution.approvals import approval_broker
+from app.config import FREE_MODEL_CATALOG
 
 router = APIRouter(prefix="/api", tags=["agents_and_missions"])
 db = Database(config.DB_PATH)
@@ -29,9 +31,56 @@ async def get_model_registry():
 
 # --- 2. Persistent AI Citizens ---
 
+class ModelAssignment(BaseModel):
+    provider: str = "ollama"
+    model: str
+
+@router.put("/agents/{agent_id}/model", response_model=CitizenProfile)
+async def assign_agent_model(agent_id: str, payload: ModelAssignment):
+    """Switches the model a citizen thinks with (any entry of the free model catalog, or any installed Ollama model)."""
+    c = agent_service.get_citizen(agent_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if payload.provider == "auto":
+        # back to automatic: FreeLLM gateway while it is reachable, the citizen's local model otherwise
+        c.model_pinned = False
+        c.provider_key, c.assigned_model, c.provider = "ollama", c.local_model or c.assigned_model, "Ollama (Local)"
+        c.thought = "Back on automatic model choice."
+        return c
+    if model_router.get_provider(payload.provider) is None or payload.provider == "mock":
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{payload.provider}'")
+    c.provider_key = payload.provider
+    c.assigned_model = payload.model
+    c.model_pinned = True
+    label = next((m["label"] for m in FREE_MODEL_CATALOG if m["model"] == payload.model), payload.model)
+    c.provider = ("Ollama (Local)" if payload.provider == "ollama" else
+                  "FreeLLM Gateway" if payload.provider == "freellm" else f"{payload.provider} (free tier)")
+    c.thought = f"Now thinking with {label}."
+    return c
+
+@router.get("/providers/freellm")
+async def freellm_status():
+    """Gateway status (reachable, model count, key configured — never the key itself)."""
+    return await agent_service.sync_providers(force=True)
+
+# --- Host action approvals (Approve/Deny in the 3D HUD) ---
+
+class ApprovalDecision(BaseModel):
+    approved: bool
+
+@router.get("/host-approvals")
+def list_host_approvals():
+    return {"pending": approval_broker.list_pending(), "recent": approval_broker.list_recent()}
+
+@router.post("/host-approvals/{request_id}/decide")
+def decide_host_approval(request_id: str, payload: ApprovalDecision):
+    if not approval_broker.decide(request_id, payload.approved):
+        raise HTTPException(status_code=404, detail="Approval request not found or already decided")
+    return {"id": request_id, "approved": payload.approved}
+
 @router.get("/agents", response_model=List[CitizenProfile])
 def list_agents():
-    """Returns all 10 persistent AI citizens with real status and deliverables."""
+    """Returns all 15 persistent AI citizens with real status and deliverables."""
     return agent_service.list_citizens()
 
 @router.get("/agents/{agent_id}", response_model=CitizenProfile)
@@ -119,11 +168,35 @@ def get_host_telemetry():
 
 @router.post("/missions")
 async def publish_public_mission(payload: PublicMissionCreateRequest):
-    """Publishes a city-wide national mission, auto-decomposing into multi-agent DAG subtasks."""
+    """Publishes a city-wide mission. Answers at once (status PLANNING); the coordinator decomposes it into
+    a dependency graph of subtasks in the background, then the citizens run it."""
     try:
-        return await agent_service.publish_public_mission(payload)
+        return agent_service.submit_public_mission(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to publish mission: {str(e)}")
+
+class ChannelMessage(BaseModel):
+    text: str
+
+@router.get("/missions/{mission_id}/channel")
+def mission_channel(mission_id: str):
+    """The mission's shared thread: the Governor's briefings and messages, each citizen's progress,
+    questions, deliverables and the final report."""
+    mission = agent_service.get_mission(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return {"mission_id": mission_id, "posts": mission.get("channel", [])}
+
+@router.post("/missions/{mission_id}/channel")
+async def post_to_mission_channel(mission_id: str, payload: ChannelMessage):
+    """Write once to everyone on the mission. Steps that have not started are given the message, @Name asks one
+    citizen, and 'revise: ...' after the mission requests a new verified version of its deliverable."""
+    try:
+        return agent_service.post_to_mission(mission_id, payload.text)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/missions")
 def list_public_missions():
@@ -131,6 +204,46 @@ def list_public_missions():
     return agent_service.list_public_missions()
 
 # --- 5. Cancellation & Task Management ---
+
+@router.get("/guide")
+def app_guide():
+    """The user guide (docs/USER_GUIDE.md) as Markdown, shown in the phone's Guide app."""
+    guide = config.BASE_DIR.parent / "docs" / "USER_GUIDE.md"
+    if not guide.is_file():
+        raise HTTPException(status_code=404, detail="Guide not found")
+    return {"markdown": guide.read_text(encoding="utf-8")}
+
+@router.get("/task-history")
+def get_task_history(limit: int = Query(100, ge=1, le=500), agent_id: Optional[str] = None,
+                     mission_id: Optional[str] = None):
+    """Every citizen task (chat deliverables, assigned tasks, mission subtasks), newest first, with live
+    status/progress, deliverable links and the verification result."""
+    return {"tasks": agent_service.list_task_history(limit=limit, agent_id=agent_id, mission_id=mission_id)}
+
+class RevisionRequest(BaseModel):
+    feedback: str
+
+@router.post("/tasks/{task_id}/revise")
+async def revise_task(task_id: str, payload: RevisionRequest):   # async: the revision runs on the server's event loop
+    """Request changes on a finished task: the same citizen edits its previous deliverable (same workspace)
+    according to the feedback, the result is verified again (with repair attempts), and it is saved as the next
+    version. Earlier versions keep their own links."""
+    try:
+        return agent_service.revise_task(task_id, payload.feedback)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+@router.get("/tasks/{task_id}/versions")
+def task_versions(task_id: str):
+    """Every version of a deliverable, the original first."""
+    chain = agent_service.revision_chain(task_id)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"versions": chain}
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):

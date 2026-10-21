@@ -2,6 +2,73 @@ import { Project, Task, ApprovalRequest, ProjectMemoryEntry, BudgetStatus } from
 
 const API_BASE = '/api';
 
+export interface ModelCatalogEntry {
+  provider: string;
+  model: string;
+  label: string;
+  strength: string;
+  size_gb: number;
+  installed: boolean;
+  ready: boolean;
+}
+
+export interface HostApproval {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  kind: 'command' | 'launch' | 'write_file';
+  summary: string;
+  detail: { command?: string; cwd?: string; target?: string; path?: string; preview?: string };
+  task_id?: string;
+  status: 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED';
+  requested_at: string;
+}
+
+/** Turns a backend-relative link (/api/..., /deliverables/...) into a full URL you can open or share. */
+export interface TaskRecord {
+  task_id: string;
+  agent_id: string;
+  agent_name: string;
+  title: string;
+  kind: 'TASK' | 'CHAT' | 'MISSION_SUBTASK' | 'REVISION';
+  mission_id: string | null;
+  status: 'QUEUED' | 'PLANNING' | 'WORKING' | 'TESTING' | 'VERIFYING' | 'REPAIRING' | 'VERIFIED' | 'FAILED' | 'BLOCKED' | 'CANCELLED';
+  progress: number;
+  stage: string;
+  deliverables: { path: string; url: string | null; title: string | null }[];
+  verification: {
+    verified: boolean;
+    suite: string;
+    exit_code: number;
+    passed: number;
+    failed: number;
+    repair_attempts: number;
+    output: string;
+  } | null;
+  notes: string[];
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  // revisions ("Request changes"): every version of a deliverable shares root_task_id; the original is v1
+  version?: number;
+  revision_of?: string;
+  root_task_id?: string;
+  base_title?: string;
+  feedback?: string;
+  // real projects: every requested element as a checked requirement, and the second citizen's review
+  requirements?: { id: string; kind: string; text: string; name: string; status: 'pass' | 'fail' | 'pending'; evidence: string }[];
+  review?: { reviewer: string | null; approved: boolean | null; summary?: string; issues: { requirement?: string; file?: string; problem: string }[]; fixed_after_review?: boolean };
+  project_files?: string[];
+  browser?: { rendered: boolean | null; objects: string[]; geometries: string[];
+              pages: Record<string, { errors: string[]; frames: number; meshes: number; error?: string | null }> } | null;
+}
+
+export function absoluteLink(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('/deliverables/')) return `http://127.0.0.1:8000${url}`;
+  return `${window.location.origin}${url}`;
+}
+
 export const api = {
   // Projects
   async listProjects(): Promise<Project[]> {
@@ -91,6 +158,47 @@ export const api = {
     const res = await fetch(`${API_BASE}/models`);
     if (!res.ok) throw new Error('Failed to fetch model registry snapshot');
     return res.json();
+  },
+
+  async getModelCatalog(): Promise<{ ollama_online: boolean; installed_models: { name: string }[]; free_model_catalog: ModelCatalogEntry[];
+    freellm?: { online: boolean; model_count: number; error?: string | null } }> {
+    const res = await fetch(`${API_BASE}/models`);
+    if (!res.ok) throw new Error('Failed to fetch model catalog');
+    return res.json();
+  },
+
+  async setAgentModel(agentId: string, provider: string, model: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Model change failed' }));
+      throw new Error(err.detail || 'Model change failed');
+    }
+    return res.json();
+  },
+
+  async listHostApprovals(): Promise<{ pending: HostApproval[]; recent: HostApproval[] }> {
+    const res = await fetch(`${API_BASE}/host-approvals`);
+    if (!res.ok) throw new Error('Failed to list approvals');
+    return res.json();
+  },
+
+  async getTaskHistory(limit: number = 100): Promise<TaskRecord[]> {
+    const res = await fetch(`${API_BASE}/task-history?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to load task history');
+    return (await res.json()).tasks;
+  },
+
+  async decideHostApproval(id: string, approved: boolean): Promise<void> {
+    const res = await fetch(`${API_BASE}/host-approvals/${id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved })
+    });
+    if (!res.ok) throw new Error('Failed to record decision');
   },
 
   async listAgents(): Promise<any[]> {
@@ -195,6 +303,42 @@ export const api = {
   async listPublicMissions(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/missions`);
     if (!res.ok) throw new Error('Failed to list public missions');
+    return res.json();
+  },
+
+  /** The user guide (docs/USER_GUIDE.md) as Markdown. */
+  async getGuide(): Promise<string> {
+    const res = await fetch(`${API_BASE}/guide`);
+    if (!res.ok) throw new Error('Guide not available');
+    return (await res.json()).markdown;
+  },
+
+  /** Write once to everyone on a mission (its shared channel). */
+  async postToMission(missionId: string, text: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/missions/${missionId}/channel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      let detail = `Request failed (${res.status})`;
+      try { detail = (await res.json()).detail || detail; } catch { /* keep the status text */ }
+      throw new Error(detail);
+    }
+  },
+
+  /** Request changes on a finished task: the same citizen edits its deliverable into the next version. */
+  async reviseTask(taskId: string, feedback: string): Promise<{ task_id: string; version: number; title: string; agent_name: string }> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/revise`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback }),
+    });
+    if (!res.ok) {
+      let detail = `Request failed (${res.status})`;
+      try { detail = (await res.json()).detail || detail; } catch { /* keep the status text */ }
+      throw new Error(detail);
+    }
     return res.json();
   },
 

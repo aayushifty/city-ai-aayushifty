@@ -45,6 +45,8 @@ def get_project_budget(project_id: str):
 def toggle_emergency_stop(active: bool):
     if active:
         budget_mgr.trigger_emergency_stop()
+        from app.execution.approvals import approval_broker
+        approval_broker.deny_all()
     else:
         budget_mgr.resume_emergency_stop()
     return {"is_emergency_stopped": active}

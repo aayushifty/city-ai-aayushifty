@@ -143,7 +143,9 @@ class CitizenProfile(BaseModel):
     color: str
     assigned_model: str
     provider: str
-    provider_key: str = "ollama"  # router key: ollama, groq, openrouter, gemini, openai
+    provider_key: str = "ollama"  # router key: freellm, ollama, groq, openrouter, gemini, openai
+    local_model: Optional[str] = None   # the citizen's own Ollama model (used whenever the gateway is unreachable)
+    model_pinned: bool = False          # True after you pick a model by hand: automatic switching leaves it alone
     capabilities: List[str] = Field(default_factory=list)
     tools: List[str] = Field(default_factory=list)
     status: str = "IDLE"  # IDLE, PLANNING, WORKING, TESTING, VERIFYING, BLOCKED, COMPLETED, FAILED

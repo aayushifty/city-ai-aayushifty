@@ -6,7 +6,7 @@ City AI is a 3D city where 15 AI citizens do real work on your computer with loc
 
 - **Desktop app:** double-click the **City AI** shortcut (created once with `powershell -ExecutionPolicy Bypass -File desktop\install_shortcuts.ps1`). It starts the backend and opens the app in its own window.
 - **Browser:** run `python run.py` in `backend/`, then open http://127.0.0.1:8000.
-- Ollama must be running with at least one model (the citizens use `qwen3:4b-instruct`, `gemma3:4b` and `qwen2.5-coder:7b`).
+- Models: with the **FreeLLM gateway** running (http://localhost:3001) and `FREELLM_API_KEY` set in `backend/.env` (copy `backend/.env.example`), every citizen automatically uses a strong gateway model for its role — coder models for engineers, web developers and designers. Without it, citizens use their local Ollama models (`qwen3:4b-instruct`, `gemma3:4b`, `qwen2.5-coder:7b`), and they switch back automatically whenever the gateway stops answering.
 
 ## Controls
 
@@ -32,7 +32,7 @@ The key hints on the left of the screen are clickable too.
 
 Walk up to a citizen (the card at the bottom shows who) and press **E**. Ask anything; replies come from the citizen's own model and are kept short. Chat goes ahead of queued background work, but a reply can still wait for the generation that is already running on the GPU.
 
-**Change a citizen's model:** in the talk window, use the model picker next to their name.
+**Change a citizen's model:** in the talk window, use the model picker next to their name. It lists the gateway's models (with a filter), your local models, and **Automatic** (the default: gateway when reachable, local otherwise). A model you pick by hand stays until you choose Automatic again; the picker also shows whether the gateway is online.
 
 ## Tasks
 
@@ -43,11 +43,21 @@ Press **T** next to a citizen (or use the Assign tab in the talk window). Give a
 3. repairs failures, up to 3 attempts, using the real error output,
 4. reports **VERIFIED** or **FAILED** honestly.
 
-Websites and 3D presentations get a link (`http://127.0.0.1:8000/deliverables/...`). Ask for a "3D website" and the hero gets a real Three.js scene.
+### Websites and 3D websites are real projects
+
+Ask for a website (with **T**, in chat, or as a mission) and the citizen builds a full project, not a one-page template:
+
+1. **Checklist:** every element you name becomes a requirement — each 3D object separately (a rocket, a launch tower, a planet…), each page, section and feature.
+2. **Plan:** a static project with several pages, `css/`, `js/` modules and one module per 3D object (Three.js from a CDN, no build step).
+3. **Write and check:** HTML structure, JavaScript syntax (Node), broken links, every requirement implemented where it should be, and 3D objects that are genuinely different from each other. Failures are repaired with the real errors (up to 3 rounds).
+4. **Review:** a second citizen reviews the project against the checklist; its findings are fixed before delivery.
+5. **Link:** the project is published at `http://127.0.0.1:8000/deliverables/projects/...`. **Phone → Tasks** shows every requirement with ✓ / ✗ and where it was implemented.
+
+3D presentations still use the slide template, with a link under `/deliverables/3d_presentations/`.
 
 ### Request changes (revisions)
 
-On any finished task, open **Phone → Tasks → Request changes** (or the button on its notification), or tell the citizen *"revise that: …"*. The same citizen edits its previous work in the same workspace, the result is verified again (with repairs), and it is saved as **v2, v3 …**. Every version keeps its own link.
+For projects, your feedback becomes new checklist items that are checked like the rest. On any finished task, open **Phone → Tasks → Request changes** (or the button on its notification), or tell the citizen *"revise that: …"*. The same citizen edits its previous work in the same workspace, the result is verified again (with repairs), and it is saved as **v2, v3 …**. Every version keeps its own link.
 
 ## Missions and the mission channel
 

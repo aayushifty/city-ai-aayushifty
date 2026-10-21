@@ -88,6 +88,45 @@ export const TaskHistoryPanel: React.FC = () => {
   );
 };
 
+/** Requirements checklist of a real project: one line per requested element, pass/fail with where it is. */
+const RequirementSummary: React.FC<{ t: TaskRecord; open: boolean }> = ({ t, open }) => {
+  const reqs = t.requirements || [];
+  const passed = reqs.filter(r => r.status === 'pass').length;
+  const kindLabel: Record<string, string> = { '3d_object': '3D', '3d_scene': 'scene', page: 'page', section: 'section',
+    feature: 'feature', interaction: 'interaction', content: 'content', style: 'style' };
+  return (
+    <div className="mt-1 text-[10px]">
+      <div className={passed === reqs.length ? 'text-emerald-300' : 'text-amber-300'}>
+        {passed}/{reqs.length} requirements implemented
+        {t.project_files ? ` · ${t.project_files.length} files` : ''}
+        {t.review?.reviewer ? ` · reviewed by ${t.review.reviewer}${t.review.approved ? ' ✓' : t.review.issues?.length ? ` (${t.review.issues.length} fixed)` : ''}` : ''}
+        {!open && <span className="text-slate-500"> — tap for the checklist</span>}
+      </div>
+      {open && (
+        <div className="mt-1 space-y-0.5">
+          {reqs.map(r => (
+            <div key={r.id} className="flex gap-1.5 leading-snug">
+              <span className={r.status === 'pass' ? 'text-emerald-400' : 'text-red-400'}>{r.status === 'pass' ? '✓' : '✗'}</span>
+              <span className="text-slate-500 shrink-0">{r.id}</span>
+              <span className="text-[9px] px-1 rounded bg-white/5 text-slate-400 shrink-0 self-start">{kindLabel[r.kind] || r.kind}</span>
+              <span className="text-slate-300">{r.text}<span className="text-slate-500"> — {r.evidence}</span></span>
+            </div>
+          ))}
+          {t.review?.summary && <div className="text-slate-400 mt-1">Review: {t.review.summary}</div>}
+          {t.browser && (
+            <div className="mt-1 text-slate-400">
+              Browser run: {t.browser.rendered ? `3D scene rendered (${t.browser.objects.length} named objects, ${t.browser.geometries.length} geometry types)` : 'no 3D scene rendered'}
+              {Object.entries(t.browser.pages).map(([page, r]) => (r.errors.length || r.error) ? (
+                <div key={page} className="text-red-300">{page}: {r.error || r.errors[0]}</div>
+              ) : null)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** The task list itself (also shown inside the HUD phone). */
 export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -134,6 +173,9 @@ export const TaskHistoryList: React.FC<{ tasks: TaskRecord[] }> = ({ tasks }) =>
                 </div>
                 <div className="text-[10px] text-slate-400 mt-0.5 truncate">{t.stage}</div>
               </div>
+            )}
+            {t.requirements && t.requirements.length > 0 && (
+              <RequirementSummary t={t} open={expanded === t.task_id} />
             )}
             {t.feedback && (
               <div className="mt-1 text-[10px] text-amber-200/90 leading-snug line-clamp-2">

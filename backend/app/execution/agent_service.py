@@ -22,6 +22,7 @@ from app.execution.workspace import WorkspaceManager
 from app.execution.runner import ProcessRunner
 from app.execution.verifier import VerifierEngine, verify_deliverables
 from app.execution.task_history import TERMINAL_STATUSES, TaskHistory
+from app.execution import project_builder
 from app.models.database import Database
 from app.models.schemas import (
     CitizenProfile, CitizenChatResponse, CitizenTaskRequest,
@@ -70,6 +71,7 @@ class CitizenExecutionService:
                 department=c["department"],
                 color=c["color"],
                 assigned_model=model_pref,
+                local_model=model_pref,
                 provider="Ollama (Local)",
                 capabilities=c["capabilities"],
                 tools=c["tools"],
@@ -82,6 +84,31 @@ class CitizenExecutionService:
                 workspace_dir=str(self.workspaces_root / c["id"])
             )
             self.citizens[profile.id] = profile
+
+    async def sync_providers(self, force: bool = False) -> Dict[str, Any]:
+        """Puts every citizen on the FreeLLM gateway (a strong model for its role) while the gateway is reachable,
+        and back on its own local Ollama model when it is not. Models you picked by hand are left alone."""
+        freellm = model_router.get_provider("freellm")
+        online = bool(freellm) and await freellm.refresh(force)
+        if online:   # tested chains: only models that really answered are handed out
+            online = bool(await freellm.choose(True)) | bool(await freellm.choose(False))
+        for c in self.citizens.values():
+            if c.model_pinned:
+                continue
+            if online:
+                role = c.id.split("-", 1)[-1]
+                best = freellm.best_model(coding=role in CODING_ROLES)
+                if best and (c.provider_key != "freellm" or c.assigned_model != best):
+                    c.provider_key, c.assigned_model, c.provider = "freellm", best, "FreeLLM Gateway"
+            elif c.provider_key == "freellm":
+                c.provider_key, c.assigned_model, c.provider = "ollama", c.local_model or config.DEFAULT_OLLAMA_MODEL, "Ollama (Local)"
+        return freellm.status() if freellm else {"online": False}
+
+    async def _route(self, citizen: CitizenProfile, req: ModelCompletionRequest, interactive: bool = False):
+        """One place where citizens call their model: preferred provider first, their own local model as fallback."""
+        return await model_router.route_completion(
+            req, preferred_provider=citizen.provider_key or "ollama", interactive=interactive,
+            fallback_models={"ollama": citizen.local_model or config.DEFAULT_OLLAMA_MODEL})
 
     def list_citizens(self) -> List[CitizenProfile]:
         """Returns all persistent AI citizens with live status."""
@@ -395,7 +422,25 @@ class CitizenExecutionService:
                 action_taken="SYSTEM_DIAGNOSTICS_REPORT"
             )
 
-        # --- 4/5. AI-written 3D presentation or website ---
+        # --- 4. Website -> a real multi-file project, built in the background ---
+        if intent == "WEBSITE":
+            topic = intent_data.get("topic") or "the requested website"
+            three = _wants_3d(message)
+            started = await self.dispatch_individual_task(citizen.id, CitizenTaskRequest(
+                title=f"{'3D website' if three else 'Website'}: {topic}"[:120], description=message[:3000],
+                expected_deliverable="index.html"))
+            reply_content = (
+                f"Supreme Governor, I'm building **{topic}** as a full project: first a checklist of every element you "
+                f"asked for{', each 3D object as its own module' if three else ''}, then the pages, styles and scripts, real "
+                "checks with repairs, and a review by a colleague. You'll get the link with a pass/fail line for every "
+                "requirement in Phone → Tasks when it's done.")
+            citizen.thought = f"Building {topic[:50]}"
+            return CitizenChatResponse(
+                message_id=msg_id, agent_id=agent_id, agent_name=citizen.name, reply=reply_content,
+                model_used=citizen.assigned_model, provider=citizen.provider, timestamp=telemetry["system_clock"],
+                action_taken="PROJECT_STARTED", deliverable_title=topic)
+
+        # --- 5. AI-written 3D presentation ---
         if intent in ("3D_PRESENTATION", "WEBSITE"):
             default_topic = "Next-Gen Autonomous AI & Spatial Computing" if intent == "3D_PRESENTATION" else "Modern AI Enterprise & Innovation"
             topic = intent_data.get("topic", default_topic)
@@ -484,7 +529,7 @@ class CitizenExecutionService:
         )
 
         # interactive: a reply you are waiting for goes ahead of queued background task/mission work
-        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama", interactive=True)
+        resp = await self._route(citizen, req, interactive=True)
         reply_content = resp.content.strip()
 
         # Sanitize any accidental raw JSON / mock engine code structures into articulate human dialogue
@@ -542,10 +587,10 @@ class CitizenExecutionService:
     # --- Helpers shared by chat deliverables, tasks and missions ---
 
     async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2,
-                          json_mode: bool = False) -> str:
-        req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt,
+                          json_mode: bool = False, max_tokens: int = 4096) -> str:
+        req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt, max_tokens=max_tokens,
                                      model_name=citizen.assigned_model, temperature=temperature, json_mode=json_mode)
-        resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama")
+        resp = await self._route(citizen, req)
         return resp.content or ""
 
     async def _progress(self, citizen: CitizenProfile, task_id: str, status: str, progress: float,
@@ -747,6 +792,8 @@ class CitizenExecutionService:
 
         if web_kind and not allow_web:
             web_kind = None      # a supporting mission step: it writes content/specs, the assembly step builds the page
+        if (web_kind == "WEBSITE" and not revision) or (revision and revision.get("project")):
+            return await self._execute_project_task(citizen, task_id, req, workspace_dir, context, revision)
         if web_kind and not revision:
             return await self._execute_web_task(citizen, task_id, req, web_kind, workspace_dir, ws_manager, context)
 
@@ -939,6 +986,58 @@ class CitizenExecutionService:
                 "summary": artifact.verification_summary, "url": artifact.url,
                 "error": None if verified else evidence.output_snippet}
 
+    async def _execute_project_task(self, citizen: CitizenProfile, task_id: str, req: CitizenTaskRequest,
+                                    workspace_dir: Path, context: str, revision: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """A real multi-file project: requirements checklist, plan, files, verification, repair, peer review, link."""
+        reviewer = self.citizens["agent-architect" if citizen.id == "agent-qa" else "agent-qa"]
+
+        def model_for(c: CitizenProfile):
+            async def call(prompt: str, system: str, json_mode: bool, max_tokens: int) -> str:
+                return await self._model_call(c, prompt, system, temperature=0.25, json_mode=json_mode, max_tokens=max_tokens)
+            return call
+
+        async def progress(message: str, pct: float) -> None:
+            await self._progress(citizen, task_id, "TESTING" if pct >= 60 else "WORKING", pct, message[:160])
+
+        builder = project_builder.ProjectBuilder(model_for(citizen), model_for(reviewer), progress,
+                                                 lambda text: self.history.update(task_id, note=text))
+        request = f"{req.title}\n{req.description}".strip()
+        result = await builder.build(request, context, workspace_dir, reviewer.name, revision=revision)
+        WorkspaceManager(workspace_dir).commit_changes(
+            f"{'revise' if revision else 'feat'}: {req.title} by {citizen.name}")
+
+        dest, rel = await asyncio.to_thread(project_builder.publish, workspace_dir, result["plan"]["name"], task_id)
+        url = computer_service.public_url(rel)
+        verified = result["verified"]
+        report = (f"Requirements: {result['passed']}/{result['total']} implemented and checked. "
+                  + (f"Review by {result['review']['reviewer']}: "
+                     + ("approved" if result["review"].get("approved") else
+                        f"{len(result['review'].get('issues') or [])} issue(s) found and sent back for fixing"
+                        if result["review"].get("issues") else "no usable verdict") + ". " if result["review"].get("reviewer") else "")
+                  + (f"Open problems: " + "; ".join(result["problems"][:8]) if result["problems"] else "All checks pass."))
+        evidence = VerificationEvidence(test_suite="project checks (HTML, JS syntax, links, requirements) + peer review",
+                                        exit_code=0 if verified else 1, passed_tests=result["passed"],
+                                        failed_tests=(result["total"] - result["passed"]) + len(result["problems"]),
+                                        output_snippet=report[:3000])
+        artifact = DeliverableArtifact(
+            id=f"art-{uuid.uuid4().hex[:8]}", task_id=task_id, agent_id=citizen.id, agent_name=citizen.name,
+            title=result["plan"]["name"][:120], relative_path=rel, file_path=str(dest / "index.html"),
+            file_size_bytes=sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()),
+            content=(dest / "index.html").read_text(encoding="utf-8", errors="replace")[:4000] if (dest / "index.html").is_file() else "",
+            verification_exit_code=evidence.exit_code, verification_summary=report[:1000],
+            created_at=datetime.now().strftime("%I:%M %p"), url=url)
+        self._record_artifact(citizen, task_id, artifact, verified)
+        self.history.update(task_id, project=result["plan"], requirements=result["requirements"], review=result["review"],
+                            three_d=result["three_d"], project_files=result["files"],
+                            browser=_browser_summary(result.get("runtime")))
+        self._finish_history(task_id, verified, evidence, attempts=result["repair_rounds"])
+        await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
+                             f"{result['plan']['name'][:60]}: {result['passed']}/{result['total']} requirements"
+                             + ("" if verified else " — open problems remain"),
+                             history_status="VERIFIED" if verified else "FAILED")
+        return {"verified": verified, "files": result["files"], "evidence": evidence, "attempts": result["repair_rounds"],
+                "summary": report, "url": url, "error": None if verified else report}
+
     def _write_files(self, ws_manager: WorkspaceManager, files: List[Dict[str, str]], written: List[Path], task_id: str) -> None:
         for f in files:
             try:
@@ -982,7 +1081,7 @@ class CitizenExecutionService:
         if any(r["status"] not in TERMINAL_STATUSES for r in chain):
             raise RuntimeError("A revision of this deliverable is already in progress.")
 
-        web_kind = orig.get("web_kind") or _web_kind_from_deliverables(orig)
+        web_kind = None if orig.get("project") else (orig.get("web_kind") or _web_kind_from_deliverables(orig))
         workspace = Path(orig["workspace"]) if orig.get("workspace") else None
         if not web_kind and not (workspace and workspace.is_dir()):
             raise RuntimeError("The original workspace no longer exists, so there is nothing to edit.")
@@ -990,7 +1089,7 @@ class CitizenExecutionService:
         root = orig.get("root_task_id") or orig["task_id"]
         version = max((r.get("version") or 1) for r in chain) + 1
         base_title = orig.get("base_title") or orig["title"]
-        if not web_kind:
+        if not web_kind and not orig.get("project"):
             self._snapshot_version(orig, root)     # keep the version being revised viewable as it is now
 
         new_id = f"task-{uuid.uuid4().hex[:8]}"
@@ -1013,6 +1112,13 @@ class CitizenExecutionService:
         req = CitizenTaskRequest(title=brief.get("title") or orig.get("base_title") or orig["title"],
                                  description=brief.get("description") or "",
                                  expected_deliverable=brief.get("expected_deliverable") or "")
+        if orig.get("project"):
+            project = orig["project"]
+            revision = {"feedback": feedback, "version": version, "project": True, "requirements": orig.get("requirements") or [],
+                        "files": project.get("files") or [], "name": project.get("name"), "summary": project.get("summary"),
+                        "three_d": orig.get("three_d")}
+            return await self._run_task_execution_loop(citizen, task_id, req, workspace_dir=workspace,
+                                                       mission_id=orig.get("mission_id"), revision=revision)
         if not web_kind:
             revision = {"feedback": feedback, "version": version,
                         "files": [d["path"] for d in orig.get("deliverables", []) if not d.get("url") or "/revisions/" in d["url"]]}
@@ -1441,6 +1547,14 @@ class CitizenExecutionService:
         else:
             reason = re.sub(r"\s+", " ", str(result.get("error") or "verification failed"))[:300]
             text = f"❌ {st['title']} did not pass verification: {reason}"
+        reqs = rec.get("requirements") or []
+        if reqs:     # a real project: say how much of the checklist is done and who reviewed it
+            review = rec.get("review") or {}
+            text += (f"\nRequirements: {sum(1 for r in reqs if r.get('status') == 'pass')}/{len(reqs)} implemented"
+                     + (f" · reviewed by {review['reviewer']}" + (" (approved)" if review.get("approved") else
+                        f" ({len(review.get('issues') or [])} finding(s) fixed)" if review.get("issues") else "")
+                        if review.get("reviewer") else "")
+                     + "".join(f"\n✗ {r['id']} {r['text'][:90]}" for r in reqs if r.get("status") != "pass")[:900])
         self._post(mission, "citizen", text, kind="deliverable" if verified else "failed",
                    author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], url=url, task_id=st["task_id"])
         if st.get("final") and verified and url:
@@ -1554,7 +1668,7 @@ class CitizenExecutionService:
                                          max_tokens=CHAT_MAX_TOKENS,
                                          system_prompt=f"You are {citizen.name}, {citizen.profession}, posting in a shared mission channel.")
             try:
-                resp = await model_router.route_completion(req, preferred_provider=citizen.provider_key or "ollama", interactive=True)
+                resp = await self._route(citizen, req, interactive=True)
                 reply = (resp.content or "").strip()
             except Exception as ex:
                 reply = ""
@@ -1569,6 +1683,7 @@ class CitizenExecutionService:
 
 
 MAX_REPAIR_ATTEMPTS = 3
+CODING_ROLES = {"engineer", "webdev", "designer", "devops", "qa", "architect"}
 MAX_CHANNEL_POSTS = 300
 REVISABLE_STATUSES = {"VERIFIED", "FAILED"}
 MAX_HISTORY_SCAN = 500
@@ -1626,6 +1741,17 @@ def _mission_report(mission: Dict[str, Any]) -> str:
     if mission["status"] != "CANCELLED":
         lines.append("Want changes? Write 'revise: …' here and the deliverable gets a new, re-verified version.")
     return "\n".join(lines)
+
+
+def _browser_summary(runtime: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """What the headless browser saw, kept small for the task history."""
+    if not runtime:
+        return None
+    pages = {p: {"errors": (r.get("errors") or [])[:5], "frames": r.get("frames", 0),
+                 "meshes": (r.get("scene") or {}).get("meshes", 0), "error": r.get("error")}
+             for p, r in (runtime.get("pages") or {}).items()}
+    return {"rendered": runtime.get("rendered"), "objects": sorted(set(runtime.get("names") or []))[:30],
+            "geometries": runtime.get("geometries") or [], "pages": pages}
 
 
 def _wants_3d(text: str) -> bool:

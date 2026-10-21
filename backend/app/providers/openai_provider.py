@@ -17,6 +17,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
     price_in_per_m = 0.15
     price_out_per_m = 0.60
     supports_json_mode = True
+    request_timeout = 120.0
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, default_model: Optional[str] = None):
         self.api_key = api_key or os.getenv(self.api_key_env)
@@ -39,6 +40,12 @@ class OpenAIModelProvider(ModelProviderAdapter):
     def _extra_headers(self) -> dict:
         return {}
 
+    def _client(self, timeout: float) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=timeout)
+
+    def _model_for(self, request: ModelCompletionRequest) -> str:
+        return request.model_name or self.default_model
+
     async def generate(self, request: ModelCompletionRequest) -> ModelCompletionResponse:
         if not self.api_key:
             raise ValueError(f"{self.api_key_env} is not configured")
@@ -51,7 +58,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
         }
 
         payload = {
-            "model": request.model_name or self.default_model,
+            "model": self._model_for(request),
             "messages": request.chat_messages(),
             "temperature": request.temperature,
             "max_tokens": request.max_tokens
@@ -59,7 +66,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
         if request.json_mode and self.supports_json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with self._client(self.request_timeout) as client:
             resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if resp.status_code == 400 and "response_format" in payload:
                 # Some hosted models reject JSON mode; retry without it and parse leniently.

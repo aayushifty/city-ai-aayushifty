@@ -10,6 +10,7 @@ from app.providers.mock_provider import MockModelProvider
 from app.providers.openai_provider import OpenAIModelProvider, GroqModelProvider, OpenRouterModelProvider
 from app.providers.gemini_provider import GeminiModelProvider
 from app.providers.ollama_provider import OllamaModelProvider
+from app.providers.freellm_provider import FreeLLMModelProvider
 
 logger = logging.getLogger("city_ai.model_router")
 
@@ -58,6 +59,7 @@ class ModelRouter:
 
     def __init__(self):
         self._providers: Dict[str, ModelProviderAdapter] = {
+            "freellm": FreeLLMModelProvider(),
             "ollama": OllamaModelProvider(),
             "groq": GroqModelProvider(),
             "openrouter": OpenRouterModelProvider(),
@@ -65,11 +67,13 @@ class ModelRouter:
             "openai": OpenAIModelProvider(),
             "mock": MockModelProvider(),
         }
-        self.fallback_chain = ["ollama", "groq", "openrouter", "gemini", "openai", "mock"]
+        # The FreeLLM gateway leads when it is reachable; the local GPU is the safety net.
+        self.fallback_chain = ["freellm", "ollama", "groq", "openrouter", "gemini", "openai", "mock"]
         # Local GPU work is serialized (one generation at a time, interactive first); cloud providers get
         # a little parallelism.
         self._semaphores: Dict[str, PriorityGate] = {
             "ollama": PriorityGate(1),
+            "freellm": PriorityGate(2),     # free upstreams rate-limit bursts: two requests at a time
         }
         self._waiting: Dict[str, int] = {}
 
@@ -116,7 +120,19 @@ class ModelRouter:
                 item["ready"] = entry["provider"] in available_providers
             catalog.append(item)
 
+        freellm_p: FreeLLMModelProvider = self._providers["freellm"]  # type: ignore
+        freellm_models = await freellm_p.list_models()
+        status = freellm_p.status()
+        tested = status.get("coding_chain", []) + status.get("general_chain", [])
+        for model_id in sorted(freellm_models, key=lambda m: (m not in tested, not freellm_p.is_ready(m), m.lower())):
+            ready = freellm_p.is_ready(model_id)
+            catalog.append({"provider": "freellm", "model": model_id, "label": model_id,
+                            "strength": ("tested, recommended" if model_id in tested else
+                                         "available" if ready else "needs a provider key in the gateway"),
+                            "size_gb": 0, "installed": True, "ready": ready})
+
         return {
+            "freellm": freellm_p.status(),
             "ollama_online": ollama_online,
             "installed_models": installed_models,
             "available_providers": available_providers,
@@ -131,6 +147,7 @@ class ModelRouter:
         request: ModelCompletionRequest,
         preferred_provider: Optional[str] = None,
         interactive: bool = False,
+        fallback_models: Optional[Dict[str, str]] = None,
     ) -> ModelCompletionResponse:
         """Tries the preferred provider, then falls back down the chain. Each provider gets its own default
         model when it isn't the one the request's model name was chosen for."""
@@ -152,7 +169,9 @@ class ModelRouter:
 
             req = request
             if preferred_provider and provider_name != preferred_provider:
-                req = request.model_copy(update={"model_name": config.PROVIDER_DEFAULT_MODELS.get(provider_name)})
+                # a fallback uses the citizen's own model for that provider when it has one
+                req = request.model_copy(update={"model_name": (fallback_models or {}).get(provider_name)
+                                                 or config.PROVIDER_DEFAULT_MODELS.get(provider_name)})
 
             self._waiting[provider_name] = self._waiting.get(provider_name, 0) + 1
             acquired = False

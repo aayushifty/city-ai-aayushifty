@@ -21,6 +21,21 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def read_env_value(key: str):
+    """Reads one value from the real environment or, if missing there, straight from backend/.env (so a key added
+    while the app is running is picked up without a restart)."""
+    value = os.getenv(key)
+    if value:
+        return value
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            k, sep, v = line.strip().partition("=")
+            if sep and k.strip() == key and not line.strip().startswith("#"):
+                return v.strip().strip('"').strip("'") or None
+    return None
+
+
 # Free model catalog shown in the UI. Local models run on your GPU through Ollama with no account;
 # cloud entries use free-tier API keys (set GROQ_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY in backend/.env).
 FREE_MODEL_CATALOG: list[dict] = [
@@ -79,6 +94,7 @@ class ForgeConfig(BaseModel):
     OLLAMA_NUM_CTX: int = 8192
     DEFAULT_OLLAMA_MODEL: str = "qwen3:4b-instruct"
     PROVIDER_DEFAULT_MODELS: dict[str, str] = Field(default_factory=lambda: {
+        "freellm": "",              # empty: the gateway's best listed model is used
         "ollama": "qwen3:4b-instruct",
         "groq": "llama-3.3-70b-versatile",
         "openrouter": "deepseek/deepseek-chat-v3-0324:free",

@@ -36,19 +36,32 @@ class ModelAssignment(BaseModel):
     model: str
 
 @router.put("/agents/{agent_id}/model", response_model=CitizenProfile)
-def assign_agent_model(agent_id: str, payload: ModelAssignment):
+async def assign_agent_model(agent_id: str, payload: ModelAssignment):
     """Switches the model a citizen thinks with (any entry of the free model catalog, or any installed Ollama model)."""
     c = agent_service.get_citizen(agent_id)
     if not c:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if payload.provider == "auto":
+        # back to automatic: FreeLLM gateway while it is reachable, the citizen's local model otherwise
+        c.model_pinned = False
+        c.provider_key, c.assigned_model, c.provider = "ollama", c.local_model or c.assigned_model, "Ollama (Local)"
+        c.thought = "Back on automatic model choice."
+        return c
     if model_router.get_provider(payload.provider) is None or payload.provider == "mock":
         raise HTTPException(status_code=400, detail=f"Unknown provider '{payload.provider}'")
     c.provider_key = payload.provider
     c.assigned_model = payload.model
+    c.model_pinned = True
     label = next((m["label"] for m in FREE_MODEL_CATALOG if m["model"] == payload.model), payload.model)
-    c.provider = "Ollama (Local)" if payload.provider == "ollama" else f"{payload.provider} (free tier)"
+    c.provider = ("Ollama (Local)" if payload.provider == "ollama" else
+                  "FreeLLM Gateway" if payload.provider == "freellm" else f"{payload.provider} (free tier)")
     c.thought = f"Now thinking with {label}."
     return c
+
+@router.get("/providers/freellm")
+async def freellm_status():
+    """Gateway status (reachable, model count, key configured — never the key itself)."""
+    return await agent_service.sync_providers(force=True)
 
 # --- Host action approvals (Approve/Deny in the 3D HUD) ---
 

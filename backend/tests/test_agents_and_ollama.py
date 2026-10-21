@@ -145,15 +145,13 @@ async def test_chat_3d_presentation_synthesis(agent_service):
 
 @pytest.mark.asyncio
 async def test_chat_website_synthesis(agent_service):
+    # websites are built as real multi-file projects in the background (minutes with real models): the chat
+    # reply confirms the build started; the build itself is covered by test_project_builder.py
     res = await agent_service.chat_with_citizen("agent-engineer", "Make a website for a Cybernetic Space Port")
-    assert res.action_taken == "CREATED_WEBSITE"
-    assert res.deliverable_type == "WEBSITE"
-    assert res.deliverable_path is not None
-    assert Path(res.deliverable_path).exists()
-    assert res.deliverable_url is not None
-    assert res.artifact_id is not None
-    art = agent_service.get_artifact(res.artifact_id)
-    assert art is not None
+    assert res.action_taken == "PROJECT_STARTED"
+    rec = next(r for r in agent_service.history.list() if r["kind"] == "TASK")
+    assert rec["agent_id"] == "agent-engineer" and "Cybernetic Space Port" in rec["title"]
+    assert await agent_service.cancel_task(rec["task_id"]) is True
 
 @pytest.mark.asyncio
 async def test_chat_greeting_human_language_not_json(agent_service):

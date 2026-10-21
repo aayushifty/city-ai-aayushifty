@@ -1,5 +1,7 @@
 """FORGE AI FastAPI Application Entrypoint."""
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +22,20 @@ config.ensure_directories()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config.ensure_directories()
+    from app.api.routes_agents import agent_service
+
+    async def keep_providers_current():
+        # FreeLLM gateway when reachable, local Ollama otherwise; re-checked every minute
+        while True:
+            try:
+                await agent_service.sync_providers(force=True)
+            except Exception as ex:  # never let this loop die
+                logging.getLogger("city_ai").warning(f"Provider sync failed: {ex}")
+            await asyncio.sleep(60)
+
+    sync_task = asyncio.create_task(keep_providers_current())
     yield
+    sync_task.cancel()
 
 app = FastAPI(
     title="city_ai_aayushifty — Local-First Autonomous AI Metropolis",

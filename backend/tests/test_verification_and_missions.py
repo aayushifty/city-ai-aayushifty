@@ -32,7 +32,7 @@ class ScriptedModel:
         self.replies = list(replies)
         self.prompts = []
 
-    async def __call__(self, request, preferred_provider=None, interactive=False):
+    async def __call__(self, request, preferred_provider=None, interactive=False, **kwargs):
         self.prompts.append(request.prompt)
         self.interactive = getattr(self, "interactive", []) + [interactive]
         reply = self.replies[min(len(self.prompts) - 1, len(self.replies) - 1)]
@@ -150,12 +150,13 @@ async def test_presentation_uses_model_written_slides(svc, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_website_falls_back_to_template_and_says_so(svc, monkeypatch):
-    monkeypatch.setattr(model_router, "route_completion", ScriptedModel(["Sure! Here is a great website."]))
-    res = await svc.chat_with_citizen("agent-webdev", "Make a website for a bakery")
-    assert res.action_taken == "CREATED_WEBSITE"
+async def test_presentation_falls_back_to_template_and_says_so(svc, monkeypatch):
+    # (websites are built as real projects now; 3D presentations still use the slide template)
+    monkeypatch.setattr(model_router, "route_completion", ScriptedModel(["Sure! Here is a great presentation."]))
+    res = await svc.chat_with_citizen("agent-designer", "Make a 3D presentation about bakeries")
+    assert res.action_taken == "CREATED_3D_PRESENTATION"
     assert "template" in res.reply.lower()
-    assert "/deliverables/websites/" in res.deliverable_url
+    assert "/deliverables/3d_presentations/" in res.deliverable_url
     assert svc.get_artifact(res.artifact_id).url == res.deliverable_url
 
 
@@ -273,7 +274,7 @@ async def test_chat_remembers_the_conversation_and_current_task(svc, monkeypatch
     model = ScriptedModel(["I am reviewing the firewall rules.", "Yes, the firewall review I mentioned."])
     seen = []
 
-    async def spy(request, preferred_provider=None, interactive=False):
+    async def spy(request, preferred_provider=None, interactive=False, **kwargs):
         seen.append(request.system_prompt)
         return await model(request, preferred_provider)
 
@@ -294,7 +295,7 @@ async def test_chat_remembers_the_conversation_and_current_task(svc, monkeypatch
 async def test_mission_submit_returns_immediately_and_plans_in_background(svc, monkeypatch):
     gate = asyncio.Event()
 
-    async def slow_planner(request, preferred_provider=None, interactive=False):
+    async def slow_planner(request, preferred_provider=None, interactive=False, **kwargs):
         await gate.wait()                      # the GPU is busy: planning takes a while
         return SimpleNamespace(content=json.dumps(plan(("A", "agent-analyst", []))), model_name="s", provider_name="t")
 
@@ -372,7 +373,7 @@ async def test_chat_is_interactive_and_short(svc, monkeypatch):
     captured = {}
     orig = scripted.__call__
 
-    async def spy(request, preferred_provider=None, interactive=False):
+    async def spy(request, preferred_provider=None, interactive=False, **kwargs):
         captured["max_tokens"] = request.max_tokens
         return await orig(request, preferred_provider, interactive)
 

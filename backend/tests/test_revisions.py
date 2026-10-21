@@ -25,7 +25,7 @@ class ScriptedModel:
         self.replies = list(replies)
         self.prompts = []
 
-    async def __call__(self, request, preferred_provider=None, interactive=False):
+    async def __call__(self, request, preferred_provider=None, interactive=False, **kwargs):
         self.prompts.append(request.prompt)
         reply = self.replies[min(len(self.prompts) - 1, len(self.replies) - 1)]
         if not isinstance(reply, str):
@@ -140,7 +140,7 @@ async def test_revision_guards(svc, monkeypatch):
 
     gate = asyncio.Event()
 
-    async def slow(request, preferred_provider=None, interactive=False):
+    async def slow(request, preferred_provider=None, interactive=False, **kwargs):
         await gate.wait()
         return SimpleNamespace(content=json.dumps(files_reply({"greet.py": GREET_V2})), model_name="s", provider_name="t")
 
@@ -161,6 +161,19 @@ async def test_revision_guards(svc, monkeypatch):
     assert [r["version"] for r in svc.revision_chain("task-orig1")] == [1, 2, 3]
 
 
+async def old_template_site(svc, monkeypatch, content):
+    """A website made before projects existed (the one-page template): it must stay revisable."""
+    monkeypatch.setattr(model_router, "route_completion", ScriptedModel([content]))
+    citizen = svc.get_citizen("agent-webdev")
+    tid = "task-oldsite"
+    svc.history.start(tid, citizen.id, citizen.name, "Website: a bakery", kind="CHAT", status="WORKING")
+    res = await svc._produce_web_deliverable(citizen, tid, "WEBSITE", "a bakery", context="Make a website for a bakery")
+    svc._record_artifact(citizen, tid, res["artifact"], res["evidence"].exit_code == 0)
+    svc._finish_history(tid, True, res["evidence"], 0)
+    svc.history.update(tid, status="VERIFIED")
+    return tid, res["artifact"].url
+
+
 SITE_V1 = {"brand": "Sunrise Bakery", "headline": "Fresh bread every morning", "subheadline": "Since 1998.",
            "features_title": "Why us", "about": "A family bakery in Patan.",
            "features": [{"icon": "🥖", "title": "Sourdough", "text": "Baked daily."},
@@ -172,11 +185,7 @@ SITE_V2 = {**SITE_V1, "headline": "Warm bread before sunrise", "features": SITE_
 
 @pytest.mark.asyncio
 async def test_website_revision_edits_the_previous_content_and_gets_a_new_link(svc, monkeypatch):
-    monkeypatch.setattr(model_router, "route_completion", ScriptedModel([SITE_V1]))
-    res = await svc.chat_with_citizen("agent-webdev", "Make a website for a bakery")
-    assert res.action_taken == "CREATED_WEBSITE"
-    orig_id = next(r["task_id"] for r in svc.history.list() if r["kind"] == "CHAT")
-    v1_url = res.deliverable_url
+    orig_id, v1_url = await old_template_site(svc, monkeypatch, SITE_V1)
 
     model = ScriptedModel([SITE_V2])
     monkeypatch.setattr(model_router, "route_completion", model)
@@ -197,9 +206,7 @@ async def test_website_revision_edits_the_previous_content_and_gets_a_new_link(s
 
 @pytest.mark.asyncio
 async def test_website_revision_is_not_faked_when_the_model_fails(svc, monkeypatch):
-    monkeypatch.setattr(model_router, "route_completion", ScriptedModel([SITE_V1]))
-    await svc.chat_with_citizen("agent-webdev", "Make a website for a bakery")
-    orig_id = next(r["task_id"] for r in svc.history.list() if r["kind"] == "CHAT")
+    orig_id, _ = await old_template_site(svc, monkeypatch, SITE_V1)
     monkeypatch.setattr(model_router, "route_completion", ScriptedModel(["I changed it for you!"]))
     started = svc.revise_task(orig_id, "New headline")
     await svc._active_tasks[started["task_id"]]

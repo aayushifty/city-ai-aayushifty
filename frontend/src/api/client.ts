@@ -55,6 +55,12 @@ export interface TaskRecord {
   root_task_id?: string;
   base_title?: string;
   feedback?: string;
+  // real projects: every requested element as a checked requirement, and the second citizen's review
+  requirements?: { id: string; kind: string; text: string; name: string; status: 'pass' | 'fail' | 'pending'; evidence: string }[];
+  review?: { reviewer: string | null; approved: boolean | null; summary?: string; issues: { requirement?: string; file?: string; problem: string }[]; fixed_after_review?: boolean };
+  project_files?: string[];
+  browser?: { rendered: boolean | null; objects: string[]; geometries: string[];
+              pages: Record<string, { errors: string[]; frames: number; meshes: number; error?: string | null }> } | null;
 }
 
 export function absoluteLink(url: string): string {
@@ -154,7 +160,8 @@ export const api = {
     return res.json();
   },
 
-  async getModelCatalog(): Promise<{ ollama_online: boolean; installed_models: { name: string }[]; free_model_catalog: ModelCatalogEntry[] }> {
+  async getModelCatalog(): Promise<{ ollama_online: boolean; installed_models: { name: string }[]; free_model_catalog: ModelCatalogEntry[];
+    freellm?: { online: boolean; model_count: number; error?: string | null } }> {
     const res = await fetch(`${API_BASE}/models`);
     if (!res.ok) throw new Error('Failed to fetch model catalog');
     return res.json();

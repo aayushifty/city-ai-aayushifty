@@ -17,6 +17,10 @@ from app.execution.task_history import TaskHistory
 from app.models.database import Database
 from app.models.schemas import PublicMissionCreateRequest
 from app.providers.router import model_router
+from tests.fake_project import FakeProjectModel
+
+BUILDER_PROMPTS = ("requirements checklist", "Plan the file structure", "WRITE THIS FILE:",
+                   "reviewing a teammate's web project", "Which ONE file")
 
 
 class Router:
@@ -25,10 +29,13 @@ class Router:
     def __init__(self, plan, site=None, reply="Understood, the team will follow that."):
         self.plan, self.site, self.reply = plan, site, reply
         self.calls = []
+        self.builder = FakeProjectModel()      # the final assembly step builds a real multi-file project
 
-    async def __call__(self, request, preferred_provider=None, interactive=False):
+    async def __call__(self, request, preferred_provider=None, interactive=False, **kwargs):
         self.calls.append((request.prompt, interactive))
         p = request.prompt
+        if any(k in p for k in BUILDER_PROMPTS):
+            return await self.builder(request, preferred_provider, interactive)
         if "Decompose this mission" in p:
             out = self.plan
         elif "one-page website" in p or "5-7 slide" in p:
@@ -111,10 +118,11 @@ async def test_website_mission_builds_one_coherent_3d_site_from_everyones_work(s
 
     assert mission["status"] == "COMPLETED"
     fd = mission["final_deliverable"]
-    assert fd and "/websites/" in fd["url"]
-    html = (config.DELIVERABLES_DIR / fd["url"].split("/deliverables/")[1] / "index.html").read_text(encoding="utf-8")
-    assert "three.min.js" in html and verifier.check_html(html) == []
-    assert 'class="metrics"' not in html, "a single metric does not get an empty-looking strip"
+    assert fd and "/projects/" in fd["url"], "the final step builds a real project, not a template page"
+    site = config.DELIVERABLES_DIR / fd["url"].split("/deliverables/")[1]
+    html = (site / "index.html").read_text(encoding="utf-8")
+    assert "importmap" in html and verifier.check_html(html) == []
+    assert sorted(p.name for p in (site / "js" / "objects").iterdir()) == ["launch_tower.js", "planet.js", "rocket.js"]
 
     k = kinds(mission)
     assert k[0] == "brief" and "plan" in k and "final" in k and k[-1] == "report"
@@ -206,7 +214,7 @@ async def test_at_mention_asks_one_citizen(svc, monkeypatch):
 async def test_revise_from_the_channel_makes_a_new_verified_version(svc, monkeypatch):
     mission, _, router = await run(svc, monkeypatch)
     v1 = mission["final_deliverable"]
-    router.site = {**SITE, "headline": "Your seat to the stars"}
+    router.builder.headline = "Your seat to the stars"
     svc.post_to_mission(mission["id"], "revise: make the headline about seats to the stars")
     rev = next(r for r in svc.history.list() if r["kind"] == "REVISION")
     await svc._active_tasks[rev["task_id"]]
@@ -218,7 +226,7 @@ async def test_revise_from_the_channel_makes_a_new_verified_version(svc, monkeyp
     assert v2["version"] == 2 and v2["url"] != v1["url"]
     assert "Version 2 is ready and verified" in mission["channel"][-1]["text"]
     html = (config.DELIVERABLES_DIR / v2["url"].split("/deliverables/")[1] / "index.html").read_text(encoding="utf-8")
-    assert "Your seat to the stars" in html and "three.min.js" in html, "the revision keeps the 3D scene"
+    assert "Your seat to the stars" in html and "importmap" in html, "the revision keeps the 3D project"
 
 
 def test_channel_routes(monkeypatch):

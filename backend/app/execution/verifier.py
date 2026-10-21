@@ -179,7 +179,7 @@ async def run_pytest(workspace: Path, timeout_seconds: int = 120) -> Tuple[int, 
         ini_path = ini.name
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--import-mode=importlib",
             "-c", ini_path, "--rootdir", str(workspace), "--confcutdir", str(workspace),
             cwd=str(workspace),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -197,6 +197,10 @@ async def run_pytest(workspace: Path, timeout_seconds: int = 120) -> Tuple[int, 
             os.unlink(ini_path)
         except OSError:
             pass
+
+
+_BINARY_SIGNATURES = {".pdf": b"%PDF", ".png": b"\x89PNG", ".jpg": b"\xff\xd8", ".jpeg": b"\xff\xd8", ".gif": b"GIF8",
+                      ".zip": b"PK", ".docx": b"PK", ".xlsx": b"PK", ".pptx": b"PK", ".fig": b"fig-kiwi", ".glb": b"glTF"}
 
 
 async def verify_deliverables(workspace: Path | str, files: List[Path]) -> VerificationEvidence:
@@ -224,6 +228,9 @@ async def verify_deliverables(workspace: Path | str, files: List[Path]) -> Verif
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
         suffix = f.suffix.lower()
+        if suffix in _BINARY_SIGNATURES and not f.read_bytes().startswith(_BINARY_SIGNATURES[suffix]):
+            failed.append(f"{name} [format]: not a real {suffix} file (text pretending to be {suffix})")
+            continue
         if suffix == ".py":
             errs, kind = check_python_compiles(text, name), "compile"
         elif suffix in (".html", ".htm"):
@@ -252,7 +259,7 @@ async def verify_deliverables(workspace: Path | str, files: List[Path]) -> Verif
         else:
             failed.append(f"pytest exited {code}: {summary_line}")
 
-    lines = [f"PASS {p}" for p in passed] + [f"FAIL {x}" for x in failed]
+    lines = [f"FAIL {x}" for x in failed] + [f"PASS {p}" for p in passed]
     if pytest_out and failed:
         lines.append("--- pytest output ---\n" + pytest_out)
     return VerificationEvidence(

@@ -40,6 +40,7 @@ IMPORT_MAP = (
 )
 MAX_FILES = 16
 MAIN_JS = "js/main.js"
+PROFILE_JSON = "content/profile.json"
 EXTRAS_JS = "js/scene-extras.js"
 MAX_REPAIR_ROUNDS = 3
 REQ_KINDS = {"3d_object", "3d_scene", "page", "section", "feature", "interaction", "content", "style"}
@@ -102,6 +103,10 @@ def _safe_rel(path: str) -> Optional[str]:
     return p
 
 
+def wants_profile(text: str) -> bool:
+    return bool(re.search(r"portfolio|resume|\bcv\b|personal (?:site|website|page)|about me", text or "", re.IGNORECASE))
+
+
 def wants_3d(text: str) -> bool:
     return bool(re.search(r"\b3d\b|3-d|three\.?js|webgl|three-dimensional", (text or "").lower()))
 
@@ -123,11 +128,13 @@ class ProjectBuilder:
             f"REQUEST:\n{request[:4000]}\n"
             + (f"\nCONTEXT (team notes, earlier work, the Governor's instructions):\n{context[:6000]}\n" if context else "")
             + "\nList EVERY distinct element the request names or clearly implies — never merge them:\n"
-            "- each 3D object as its own item (kind 3d_object, e.g. a rocket, a launch tower, a planet with rings),\n"
+            "- each 3D object as its own item (kind 3d_object), named after what it is,\n"
             "- the 3D scene itself (kind 3d_scene: camera, lights, controls, animation),\n"
             "- each page (kind page), each section (kind section), each feature or interaction (feature / interaction),\n"
             "- specific content the user asked for (content) and visual style requests (style).\n"
-            + ("This is a 3D project: list at least 4 different 3D objects that fit the topic, each different in shape.\n" if three_d else "")
+            + ("This is a 3D project: list at least 4 different 3D objects that come from THIS request's own subject "
+               "(for a portfolio: things that represent the owner and their work, such as their workspace, tools, skills or "
+               "projects), each different in shape. Never use objects that belong to a different topic.\n" if three_d else "")
             + "Give each a short snake_case name. 8 to 24 items.\n"
             'Reply with ONLY JSON: {"project_name": "...", "summary": "one paragraph", '
             '"requirements": [{"id": "R1", "kind": "3d_object", "name": "launch_tower", "text": "What exactly must exist"}]}'
@@ -152,6 +159,11 @@ class ProjectBuilder:
             if three_d:
                 reqs.append(Requirement("R3", "3d_scene", "An interactive Three.js scene", "scene"))
             self.note("The model did not return a requirements list; a minimal checklist was used.")
+        # personal sites: everything about the owner lives in one file they can fill in
+        if not existing and wants_profile(request):
+            reqs.append(Requirement(f"R{start + len(reqs)}", "content",
+                                    f"All personal content (name, role, bio, skills, projects, experience, contact links) is "
+                                    f"read from {PROFILE_JSON}, so the owner fills in one file", "profile_json"))
         # always: a responsive, navigable result
         if not existing and not any(r.kind == "style" and "responsive" in r.text.lower() for r in reqs):
             reqs.append(Requirement(f"R{start + len(reqs)}", "style", "Responsive layout (phone to desktop)", "responsive"))
@@ -206,6 +218,17 @@ class ProjectBuilder:
             if r.kind == "3d_object" and not any(r.id in f["requirements"] and f["path"].startswith("js/objects/") for f in files):
                 files.append({"path": f"js/objects/{r.name or r.id.lower()}.js",
                               "purpose": f"Builds the 3D object: {r.text}", "requirements": [r.id]})
+        profile_req = next((r for r in reqs if r.name == "profile_json"), None)
+        if profile_req:
+            prof = next((f for f in files if f["path"] == PROFILE_JSON), None)
+            if prof is None:
+                prof = {"path": PROFILE_JSON, "purpose": "All personal content of the site owner (sample values to replace)",
+                        "requirements": []}
+                files.insert(0, prof)
+            for f in files:
+                if profile_req.id in f["requirements"] and f is not prof:
+                    f["requirements"].remove(profile_req.id)
+            prof["requirements"] = [profile_req.id]
         # every requirement lives somewhere
         for r in reqs:
             if not any(r.id in f["requirements"] for f in files):
@@ -241,6 +264,11 @@ class ProjectBuilder:
                       + (f"Put this import map in <head> before any module script: {IMPORT_MAP} " if three_d else "")
                       + "Every page has the same navigation linking all pages. Tag each element that implements a "
                       'requirement with data-req="R<n>". Real, specific content (no lorem ipsum, no fake forms that pretend to send).'),
+            ".json": ("content/profile.json: the site owner's personal content as clean JSON with clearly marked SAMPLE values "
+                      "they will replace (\"name\": \"Your Name\" ...): name, title, tagline, bio, location, email, photo_url, "
+                      "links [{label, url}], skills [], projects [{title, description, tech [], url}], experience "
+                      "[{role, company, period, summary}]. No comments (JSON has none)." if path == PROFILE_JSON else
+                      "Valid JSON."),
             ".css": "Modern responsive CSS (custom properties, flex/grid, a mobile breakpoint). Mark styles for a requirement with /* REQ:R<n> */.",
             ".js": ("Modern ES module JavaScript. Import Three.js ONLY as `import * as THREE from 'three'` and addons ONLY as "
                     "'three/addons/<real path>' (e.g. three/addons/controls/OrbitControls.js) — never by full URL, and only "
@@ -262,6 +290,9 @@ class ProjectBuilder:
                        "file) and use element ids that exist on the pages that load it. " if path.endswith("main.js") and three_d else "")),
         }
         rule = rules.get(Path(path).suffix if Path(path).suffix != ".mjs" else ".js", "")
+        if any(r.name == "profile_json" for r in reqs) and path.endswith((".js", ".mjs", ".html")) and path != MAIN_JS:
+            rule += (f" All personal content (name, bio, skills, projects, experience, links) must come from {PROFILE_JSON} — "
+                     f"load it with fetch('{PROFILE_JSON}') (relative to the page) and render it; never hard-code it.")
         return (
             f"PROJECT: {plan.name}\n{plan.summary[:1200]}\n\nALL FILES:\n{tree}\n\n"
             f"WRITE THIS FILE: {path}\nPurpose: {f['purpose']}\n"
@@ -433,6 +464,9 @@ class ProjectBuilder:
                 norm = _normalize(target)
                 if norm not in files and not (norm + "/index.html") in files:
                     add(rel, f"broken link: '{ref}' does not exist in the project")
+                    if _safe_rel(norm) and norm.endswith((".js", ".mjs", ".css", ".html")):
+                        add(norm, f"this file is referenced by {rel} but does not exist yet: write it so that "
+                                  f"{rel} works (or it must be removed from {rel})")
             # asset paths in scripts (models, textures, sounds, data) resolve against the page: they must exist too
             if rel.endswith((".js", ".mjs")):
                 for ref in re.findall(r"['\"`]((?:\.{1,2}/)?[\w\-./]+\.(?:glb|gltf|obj|fbx|png|jpe?g|webp|gif|svg|hdr|mp3|wav|ogg|json))['\"`]", text):
@@ -472,6 +506,24 @@ class ProjectBuilder:
                                and re.search(r"requestAnimationFrame|setAnimationLoop", js_texts[p])]
                 r.status, r.evidence = ("pass", scene_files[0]) if scene_files else (
                     "fail", "no tagged module creates a WebGLRenderer with an animation loop")
+            elif r.name == "profile_json":
+                prof = texts.get(PROFILE_JSON)
+                loaders = [p for p, t in texts.items() if p.endswith((".js", ".mjs", ".html")) and "profile.json" in t]
+                try:
+                    data = json.loads(prof) if prof else None
+                except Exception:
+                    data = None
+                missing = [k for k in ("name", "bio", "projects") if not _has_key(data, k)]
+                if prof is None:
+                    r.status, r.evidence = "fail", f"{PROFILE_JSON} does not exist"
+                elif data is None:
+                    r.status, r.evidence = "fail", f"{PROFILE_JSON} is not valid JSON"
+                elif missing:
+                    r.status, r.evidence = "fail", f"{PROFILE_JSON} has no {', '.join(missing)}"
+                elif not loaders:
+                    r.status, r.evidence = "fail", f"no page or script loads {PROFILE_JSON} (fetch it and render its content)"
+                else:
+                    r.status, r.evidence = "pass", f"{PROFILE_JSON} · loaded by {', '.join(loaders[:3])}"
             elif r.kind == "page":
                 pages = [p for p in hits if p.endswith(".html")]
                 # if the project has a page named for this requirement (tours -> tours.html, home -> index.html), it is that page
@@ -825,6 +877,16 @@ def fix_relative_links(ws: Path) -> int:
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
     return count
+
+
+def _has_key(data: Any, key: str, depth: int = 0) -> bool:
+    if depth > 4:
+        return False
+    if isinstance(data, dict):
+        return key in data or any(_has_key(v, key, depth + 1) for v in data.values())
+    if isinstance(data, list):
+        return any(_has_key(v, key, depth + 1) for v in data[:20])
+    return False
 
 
 def _normalize(path: str) -> str:

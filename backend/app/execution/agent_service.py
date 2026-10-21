@@ -787,7 +787,7 @@ class CitizenExecutionService:
             or (req.expected_deliverable.lower().endswith(".html") and "presentation" in task_text)
         ):
             web_kind = "3D_PRESENTATION"
-        elif "website" in task_text or "landing page" in task_text or "web app" in task_text:
+        elif _is_web_request(task_text):
             web_kind = "WEBSITE"
 
         if web_kind and not allow_web:
@@ -1040,6 +1040,10 @@ class CitizenExecutionService:
 
     def _write_files(self, ws_manager: WorkspaceManager, files: List[Dict[str, str]], written: List[Path], task_id: str) -> None:
         for f in files:
+            problem = _unwritable(str(f.get("path") or ""))
+            if problem:
+                self.history.update(task_id, note=f"Refused to write '{str(f.get('path'))[:80]}': {problem}")
+                continue
             try:
                 p = ws_manager.write_file(f["path"], f["content"])
             except Exception as ex:  # path outside the workspace, invalid name, ...
@@ -1299,6 +1303,8 @@ class CitizenExecutionService:
             f"CATEGORY: {req.category}\n\n"
             "Decompose this mission into 2-5 subtasks. Subtasks that do not need each other's output must not "
             "depend on each other, so they can run in parallel.\n"
+            "Each subtask delivers ONE text file the citizen can write and check (md, json, py, js, css, html, csv) — "
+            "never design or binary files (.fig, .pdf, images, videos) and no build pipelines, servers or hosting.\n"
             + (f"The mission's result is ONE {'3D ' if mission.get('three_d') else ''}"
                f"{'website' if mission.get('web_kind') == 'WEBSITE' else 'presentation'}. Your subtasks must NOT build it: they "
                "research and write the content, copy, data and design notes (markdown or JSON). A final assembly step, "
@@ -1557,10 +1563,16 @@ class CitizenExecutionService:
                      + "".join(f"\n✗ {r['id']} {r['text'][:90]}" for r in reqs if r.get("status") != "pass")[:900])
         self._post(mission, "citizen", text, kind="deliverable" if verified else "failed",
                    author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], url=url, task_id=st["task_id"])
-        if st.get("final") and verified and url:
-            mission["final_deliverable"] = {"title": st["title"], "url": url, "task_id": st["task_id"], "version": 1}
-            self._post(mission, "citizen", f"🎯 The mission's deliverable is ready: {url}", kind="final", url=url,
-                       author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], task_id=st["task_id"])
+        if st.get("final") and url:
+            mission["final_deliverable"] = {"title": st["title"], "url": url, "task_id": st["task_id"], "version": 1,
+                                            "verified": verified}
+            if verified:
+                self._post(mission, "citizen", f"🎯 The mission's deliverable is ready: {url}", kind="final", url=url,
+                           author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], task_id=st["task_id"])
+            else:
+                self._post(mission, "citizen", f"⚠️ Draft — it did not pass every check (see above), but you can open it: {url}\n"
+                           "Write 'revise: …' here to fix what is missing.", kind="failed", url=url,
+                           author_id=st["assigned_agent_id"], author_name=st["assigned_agent_name"], task_id=st["task_id"])
 
     def get_mission(self, mission_id: str) -> Optional[Dict[str, Any]]:
         return next((m for m in self.public_missions if m["id"] == mission_id), None)
@@ -1711,14 +1723,45 @@ _WEBSITE_SCHEMA = (
 )
 
 
+FAKE_FORMATS = {".fig", ".pdf", ".psd", ".sketch", ".xd", ".ai", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp",
+                ".mp4", ".mov", ".webm", ".mp3", ".wav", ".ogg", ".zip", ".rar", ".7z", ".glb", ".fbx", ".blend", ".docx",
+                ".xlsx", ".pptx", ".exe", ".dll", ".woff", ".woff2", ".ttf"}
+
+
+def _unwritable(path: str) -> Optional[str]:
+    """Why a model-written file cannot be accepted (None = fine)."""
+    suffix = Path(path).suffix.lower()
+    if suffix in FAKE_FORMATS:
+        return f"{suffix} is a binary/design format; a model can only write text, so this would be a fake file"
+    if len(path) > 120 or re.search(r"[(),;]|\s", path.strip()):
+        return "that is a description, not a file name"
+    return None
+
+
 def _mission_web_kind(text: str) -> Optional[str]:
     """Missions that ask for one website / presentation get a single final assembly step."""
     t = (text or "").lower()
     if re.search(r"\bpresentation\b|\bslides?\b|\bslide deck\b|\bdeck\b", t):
         return "3D_PRESENTATION"
-    if re.search(r"\bwebsite\b|\bweb ?site\b|\blanding page\b|\bweb page\b|\bhomepage\b", t):
+    if _is_web_request(t):
         return "WEBSITE"
     return None
+
+
+_WEB_RE = re.compile(r"\bweb ?sites?\b|\blanding pages?\b|\bweb ?pages?\b|\bhome ?page\b|\bweb ?apps?\b|"
+                     r"\bweb applications?\b|\bportfolio\b|\bpersonal (?:site|page)\b|\bmicrosite\b|"
+                     r"\b3d experience\b|\binteractive experience\b|\bonline (?:store|shop)\b", re.IGNORECASE)
+_NOT_WEB_PORTFOLIO = re.compile(r"\b(stock|investment|financial|asset|crypto|trading|fund|loan|project)s?\s+portfolio",
+                                re.IGNORECASE)
+
+
+def _is_web_request(text: str) -> bool:
+    """Websites in any wording: website, landing page, web app, portfolio, personal site, 3D experience ..."""
+    t = text or ""
+    if not _WEB_RE.search(t):
+        return False
+    only_portfolio = not re.search(_WEB_RE.pattern.replace("\\bportfolio\\b|", ""), t, re.IGNORECASE)
+    return not (only_portfolio and _NOT_WEB_PORTFOLIO.search(t))
 
 
 def _mission_report(mission: Dict[str, Any]) -> str:
@@ -1730,7 +1773,7 @@ def _mission_report(mission: Dict[str, Any]) -> str:
              + (f", {len(failed)} failed" if failed else "") + (f", {len(blocked)} blocked" if blocked else "") + "."]
     final = mission.get("final_deliverable")
     if final:
-        lines.append(f"🎯 Deliverable: {final['url']}")
+        lines.append(f"🎯 Deliverable: {final['url']}" + ("" if final.get("verified", True) else " (draft: not every check passed)"))
     elif mission.get("web_kind") and mission["status"] != "CANCELLED":
         lines.append("No final deliverable was produced.")
     for s in failed:

@@ -461,3 +461,81 @@ async def test_gateway_backs_off_when_every_model_is_rate_limited(monkeypatch):
     assert await p.choose(False) == ["a"]
     resp = await p.generate(ModelCompletionRequest(prompt="hi", model_name="a"))
     assert resp.content == "done" and slept and slept[0] >= 1
+
+
+# --- portfolios: recognized as websites, one profile file, no fake design files ----------------------------------
+
+def test_portfolios_and_web_apps_are_websites_but_stock_portfolios_are_not():
+    from app.execution.agent_service import _is_web_request, _mission_web_kind
+    assert _mission_web_kind("make an interactive 3d portfolio for me") == "WEBSITE"
+    assert _is_web_request("build a web app for todo lists") and _is_web_request("personal site with a blog")
+    assert not _is_web_request("Analyze my stock portfolio risk")
+    assert not _is_web_request("Build a construction site safety report")
+
+
+def test_fake_binary_and_sentence_files_are_refused(svc):
+    from app.execution.workspace import WorkspaceManager
+    ws = svc.workspaces_root / "w"
+    ws.mkdir()
+    written = []
+    svc.history.start("task-f", "agent-designer", "Rihan", "Design", kind="TASK")
+    svc._write_files(WorkspaceManager(ws), [
+        {"path": "figma_prototype.fig", "content": "This is a Figma prototype file, which cannot be represented as text."},
+        {"path": "portfolio_backend/ repo with headless CMS (Sanity/Strapi), admin UI", "content": "x"},
+        {"path": "design_system.md", "content": "# Design system"}], written, "task-f")
+    assert [p.name for p in written] == ["design_system.md"]
+    notes = " | ".join(svc.history.get("task-f")["notes"])
+    assert "would be a fake file" in notes and "a description, not a file name" in notes
+
+
+@pytest.mark.asyncio
+async def test_text_pretending_to_be_a_pdf_fails_and_failures_come_first(tmp_path):
+    from app.execution import verifier
+    (tmp_path / "storyboard.pdf").write_text("This is a storyboard; PDFs cannot be text.", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("# ok", encoding="utf-8")
+    ev = await verifier.verify_deliverables(tmp_path, [tmp_path / "notes.md", tmp_path / "storyboard.pdf"])
+    assert ev.exit_code != 0
+    assert ev.output_snippet.startswith("FAIL storyboard.pdf [format]: not a real .pdf file")
+
+
+@pytest.mark.asyncio
+async def test_same_test_file_name_in_two_folders_does_not_break_pytest(tmp_path):
+    from app.execution import verifier
+    for folder in (tmp_path, tmp_path / "frontend"):
+        folder.mkdir(exist_ok=True)
+        (folder / "test_spec.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    code, out = await verifier.run_pytest(tmp_path)
+    assert code == 0, out
+
+
+@pytest.mark.asyncio
+async def test_portfolio_gets_one_profile_file_that_the_site_loads(tmp_path):
+    reqs_model = FakeProjectModel()
+    from types import SimpleNamespace
+
+    async def model(prompt, system, json_mode, max_tokens):
+        return (await reqs_model(SimpleNamespace(prompt=prompt, json_mode=json_mode))).content
+    b = project_builder.ProjectBuilder(model, None, None, lambda t: None)
+    name, summary, reqs = await b.requirements("an interactive 3D portfolio for me", "", True)
+    prof = next(r for r in reqs if r.name == "profile_json")
+    plan = await b.plan("portfolio", reqs, True, name, summary)
+    assert any(f["path"] == "content/profile.json" and f["requirements"] == [prof.id] for f in plan.files)
+    prompt = b._file_prompt(plan, reqs, next(f for f in plan.files if f["path"] == "index.html"), {}, True)
+    assert "fetch('content/profile.json')" in prompt
+
+    ws = tmp_path / "ws"
+    write_project(ws, {"content/profile.json": json.dumps({"name": "Your Name", "bio": "Sample bio", "projects": []}),
+                       "js/objects/rocket.js": FILES["js/objects/rocket.js"].replace("// REQ:R1", "// REQ:R1\nfetch('content/profile.json');")})
+    await b.verify(ws, plan, reqs, True)
+    assert prof.status == "pass" and "loaded by" in prof.evidence
+    (ws / "content/profile.json").write_text("{not json", encoding="utf-8")
+    await b.verify(ws, plan, reqs, True)
+    assert prof.status == "fail" and "not valid JSON" in prof.evidence
+
+
+def test_profile_keys_may_be_nested_and_prompts_carry_no_foreign_example_objects():
+    assert project_builder._has_key({"personal": {"name": "Your Name", "bio": "x"}, "projects": []}, "name")
+    assert not project_builder._has_key({"personal": {"title": "x"}}, "bio")
+    import inspect
+    src = inspect.getsource(project_builder.ProjectBuilder.requirements)
+    assert "rocket" not in src and "launch tower" not in src

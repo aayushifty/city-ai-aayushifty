@@ -547,7 +547,12 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     const atmosphere = createAtmosphere(scene, renderer, sun, ambient, hemi);
     atmosphere.onChange(() => postfx.setNight(atmosphere.night()));
-    const readTimeSetting = () => { try { return window.localStorage.getItem('cityai.timeOfDay') || 'live'; } catch { return 'live'; } };
+    // ?time=night (or day, dusk, ...) in the address overrides the phone's setting, e.g. to share a night view
+    const urlTime = new URLSearchParams(window.location.search).get('time');
+    const readTimeSetting = () => {
+      if (urlTime) return urlTime;
+      try { return window.localStorage.getItem('cityai.timeOfDay') || 'live'; } catch { return 'live'; }
+    };
     let timeSetting = readTimeSetting();
     atmosphere.setHour(hourFor(timeSetting));
     const onTimeSetting = () => { timeSetting = readTimeSetting(); atmosphere.setHour(hourFor(timeSetting)); };
@@ -659,6 +664,33 @@ export const CityScene: React.FC<CitySceneProps> = ({
     // their collision boxes join the player's and the camera's as soon as they arrive.
     let disposed = false;
     let disposeDressing: (() => void) | null = null;
+    // Street lamps cast real light at night: a small pool of point lights sits on the lamps nearest the camera
+    // (a light per lamp would be far too expensive). The count never changes, so shaders never recompile.
+    let lampSpots: THREE.Vector3[] = [];
+    const lampPool: THREE.PointLight[] = [];
+    for (let i = 0; i < 8; i++) {
+      const l = new THREE.PointLight(0xFFC98A, 0, 22, 1.4);
+      l.position.set(0, -50, 0);
+      scene.add(l);
+      lampPool.push(l);
+    }
+    let lampTimer = 0;
+    const updateLampPool = (dt: number) => {
+      lampTimer -= dt;
+      if (lampTimer > 0) return;
+      lampTimer = 0.25;
+      const night = atmosphere.night();
+      const c = camera.position;
+      const nearest = night > 0.05
+        ? lampSpots.map(p => ({ p, d: (p.x - c.x) ** 2 + (p.z - c.z) ** 2 })).sort((a, b) => a.d - b.d).slice(0, lampPool.length)
+        : [];
+      lampPool.forEach((l, i) => {
+        const n = nearest[i];
+        if (!n) { l.intensity = 0; return; }
+        l.position.set(n.p.x, n.p.y - 0.4, n.p.z);
+        l.intensity = 38 * night;
+      });
+    };
     const keepClear = [
       { x: fpv.current.x, z: fpv.current.z, r: 4 },                        // spawn point
       ...[-6, 4, 14, 24, 34, 44, 54].map(z => ({ x: 6, z, r: 8 })),        // executive runway
@@ -666,6 +698,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     dressCity(scene, buildings, roads, intersections, keepClear).then(res => {
       if (disposed) { res.dispose(); return; }
       disposeDressing = res.dispose;
+      lampSpots = res.lamps;
       for (const id of res.hiddenBuildingIds) {
         const g = buildingGroupMap.current.get(id);
         if (g) g.visible = false;
@@ -1205,6 +1238,8 @@ export const CityScene: React.FC<CitySceneProps> = ({
         }
       }
 
+      updateLampPool(dt);
+
       // Always rotate holographic citizen badges and thought bubbles to face the camera
       agentMeshMap.current.forEach((aGroup) => {
         // floating labels only near the camera (a city full of giant signs is not realistic)
@@ -1264,6 +1299,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       disposed = true;
       if (disposeDressing) disposeDressing();
       window.removeEventListener('cityai:timeofday', onTimeSetting);
+      lampPool.forEach(l => { scene.remove(l); l.dispose(); });
       window.clearInterval(clockTimer);
       life.dispose();
       backdrop.dispose();

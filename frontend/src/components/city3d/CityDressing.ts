@@ -161,16 +161,16 @@ export function createAtmosphere(
     } else {
       // moonlight from the opposite side of the sky
       sun.position.set(-sunDir.x * 200, 150, -sunDir.z * 200 + 60);
-      sun.color.set(0x9DB4E8);
-      sun.intensity = 0.55;
+      sun.color.set(0xA9BFF0);
+      sun.intensity = 1.1;
     }
-    hemi.color.copy(lerpColor(0x2A3A66, 0xC3D6EE, d));
-    hemi.groundColor.copy(lerpColor(0x0B0B10, 0x5B4A38, d));
-    hemi.intensity = 0.3 - 0.06 * d;
-    renderer.toneMappingExposure = 0.7 + 0.38 * (1 - d);   // brighter at night, but no glare at dawn/dusk
+    hemi.color.copy(lerpColor(0x4A5F96, 0xC3D6EE, d));
+    hemi.groundColor.copy(lerpColor(0x1A1A24, 0x5B4A38, d));
+    hemi.intensity = 0.62 - 0.38 * d;                      // night needs a real fill or people vanish
+    renderer.toneMappingExposure = 0.72 + 0.23 * (1 - d);
 
     const fog = scene.fog as THREE.Fog;
-    fog.color.copy(lerpColor(0x0C1222, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
+    fog.color.copy(lerpColor(0x101A30, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
 
     const night = 1 - d;
     lastNight = night;
@@ -501,6 +501,7 @@ export interface DressResult {
   obstacles: Box[];               // new collision boxes (downtown buildings, poles, signs)
   hiddenBuildingIds: string[];    // plain blocks replaced by real buildings
   zones: DistrictZone[];
+  lamps: THREE.Vector3[];         // street lamp bulb positions (real light pools are placed at the nearest ones)
   dispose: () => void;
 }
 
@@ -654,7 +655,7 @@ export async function dressCity(
   // street lamp bulbs: dark by day, glowing at night (driven by the atmosphere's night factor)
   if (bulbs.length) {
     const bulbMat = new THREE.MeshStandardMaterial({ color: 0xFFF4D6, emissive: 0xFFD99A, emissiveIntensity: 0, roughness: 0.3 });
-    nightGlow.push({ material: bulbMat, max: 4 });
+    nightGlow.push({ material: bulbMat, max: 2.2 });
     const bulbMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.28, 10, 8), bulbMat, bulbs.length);
     const mm = new THREE.Matrix4();
     bulbs.forEach((b, i) => { mm.makeTranslation(b.x, b.y, b.z); bulbMesh.setMatrixAt(i, mm); });
@@ -688,6 +689,7 @@ export async function dressCity(
     obstacles,
     hiddenBuildingIds: hidden,
     zones,
+    lamps: bulbs,
     dispose: () => {
       for (const o of disposables) {
         scene.remove(o);

@@ -7,6 +7,23 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
+  build: {
+    // three.js alone is ~600 kB minified and cannot be split further
+    chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        // libraries change far less often than the app: separate chunks stay cached across rebuilds
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/three/examples/')) return 'three-addons'
+          if (id.includes('/three/')) return 'three'
+          if (id.includes('/react') || id.includes('/scheduler/')) return 'react'
+          if (id.includes('/lucide-react/')) return 'icons'
+          return 'vendor'
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

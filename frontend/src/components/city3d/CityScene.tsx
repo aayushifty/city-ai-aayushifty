@@ -14,9 +14,9 @@ import {
 } from '../../simulation/types';
 import { AGENT_LOCATIONS, SHARED_COMMUNAL_SPOTS } from '../../simulation/engine';
 import { WorkplaceArchitect } from './WorkplaceArchitect';
-import { createHumanoid, animateHumanoid, ClothingStyle, humanoidNightRim } from './HumanoidBuilder';
+import { createHumanoid, animateHumanoid, ClothingStyle, humanoidNightRim, refreshFigureShaders, recompileAllFigures } from './HumanoidBuilder';
 import { buildBoxes, rayToBoxes, stepMovement, TPV_MAX_DIST, TPV_MIN_DIST, WALK_SPEED } from './PlayerController';
-import { buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, getGrassMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
+import { addFacadeNightGlow, buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, getGrassMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
 import { spawnPedestrians } from './CityLife';
 import { createPostFX, readQuality } from './PostFX';
 import { buildBackdrop } from './Backdrop';
@@ -547,6 +547,22 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     const atmosphere = createAtmosphere(scene, renderer, sun, ambient, hemi);
     atmosphere.onChange(() => { postfx.setNight(atmosphere.night()); humanoidNightRim.value = atmosphere.night(); });
+    // On NVIDIA GPUs (ANGLE / Direct3D 11, used by the desktop window) materials set up before the environment
+    // texture is swapped (day sky photo <-> generated night sky) draw nothing afterwards: buildings and people
+    // vanished at night. Refreshing every material once after a swap, and after the city has loaded, fixes it.
+    let refreshQueued = false;
+    const refreshAllMaterials = () => {
+      if (refreshQueued) return;
+      refreshQueued = true;
+      requestAnimationFrame(() => {
+        refreshQueued = false;
+        scene.traverse(o => {
+          const m = (o as THREE.Mesh).material;
+          if (m) (Array.isArray(m) ? m : [m]).forEach(x => { x.needsUpdate = true; });
+        });
+      });
+    };
+    atmosphere.onEnvChange(refreshAllMaterials);
     // ?time=night (or day, dusk, ...) in the address overrides the phone's setting, e.g. to share a night view
     const urlTime = new URLSearchParams(window.location.search).get('time');
     const readTimeSetting = () => {
@@ -610,7 +626,9 @@ export const CityScene: React.FC<CitySceneProps> = ({
       batchStatic(bGroup, o => o.parent === bGroup && o.userData?.rotSpeed !== undefined);
       scene.add(bGroup);
       buildingGroupMap.current.set(b.id, bGroup);
+      addFacadeNightGlow(bGroup);
     });
+    atmosphere.setHour(hourFor(timeSetting));   // apply the night glow to what was just registered
 
     // Supreme Governor Executive Runway & Jetway
     const runwayGeo = new THREE.PlaneGeometry(12, 60);
@@ -699,6 +717,9 @@ export const CityScene: React.FC<CitySceneProps> = ({
       if (disposed) { res.dispose(); return; }
       disposeDressing = res.dispose;
       lampSpots = res.lamps;
+      atmosphere.setHour(hourFor(timeSetting));
+      refreshAllMaterials();
+      recompileAllFigures();
       for (const id of res.hiddenBuildingIds) {
         const g = buildingGroupMap.current.get(id);
         if (g) g.visible = false;
@@ -712,6 +733,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
 
     loadCarFactory().then(makeCar => {
       if (disposed) return;
+      refreshAllMaterials();   // runs next frame, after the cars below are added
       vehicles.forEach((v, i) => {
         const g = vehicleGroupMap.current.get(v.id);
         if (!g) return;
@@ -1239,6 +1261,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
       }
 
       updateLampPool(dt);
+      refreshFigureShaders();
 
       // Always rotate holographic citizen badges and thought bubbles to face the camera
       agentMeshMap.current.forEach((aGroup) => {

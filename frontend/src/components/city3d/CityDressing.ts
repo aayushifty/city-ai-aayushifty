@@ -56,6 +56,27 @@ export function getGrassMaterial(): THREE.MeshStandardMaterial {
 /** Materials that glow at night (building windows, street lamp bulbs) and their full-night intensity. */
 export const nightGlow: { material: THREE.MeshStandardMaterial; max: number }[] = [];
 
+/**
+ * The district workplaces are mostly metal, which shows only reflections: under a black night sky they turned
+ * into black holes around the plaza. At night their own colour glows softly (glass brighter, like lit floors).
+ */
+export function addFacadeNightGlow(root: THREE.Object3D): void {
+  const seen = new Set<THREE.Material>();
+  root.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const std = m as THREE.MeshStandardMaterial;
+      if (seen.has(m) || !std.isMeshStandardMaterial || std.emissive.getHex() !== 0 || std.emissiveMap) continue;
+      seen.add(m);
+      std.emissive.copy(std.color);
+      std.emissiveIntensity = 0;
+      const glass = std.transparent && std.opacity < 0.9;
+      nightGlow.push({ material: std, max: glass ? 0.55 : 0.16 });
+    }
+  });
+}
+
 export interface Atmosphere {
   /** Moves sun/moon, sky, lights, fog and night glow to `hour` (0-24, local time). */
   setHour: (hour: number) => void;
@@ -63,6 +84,8 @@ export interface Atmosphere {
   night: () => number;
   /** Called after the lighting changed (also when the photographed sky finishes loading). */
   onChange: (fn: () => void) => void;
+  /** Called after the environment (reflection) texture was swapped, e.g. day sky photo <-> night sky. */
+  onEnvChange: (fn: () => void) => void;
   dispose: () => void;
 }
 
@@ -105,10 +128,11 @@ export function createAtmosphere(
   let lastHour = 12;
   let lastNight = 0;
   let onChange: (() => void) | null = null;
+  let onEnvChange: (() => void) | null = null;
   new HDRLoader().loadAsync(`${PH_BASE}/kloofendal_48d_partly_cloudy_puresky_2k.hdr`).then(tex => {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     hdr = { tex, env: pmrem.fromEquirectangular(tex).texture, sunDir: hdrSunDirection(tex) };
-    setHour(lastHour);
+    apply(lastHour);
   }).catch(err => console.warn('HDR sky not loaded; using the procedural sky', err));
   scene.fog = new THREE.Fog(0xAFC6DE, 170, 620);
 
@@ -170,10 +194,14 @@ export function createAtmosphere(
     renderer.toneMappingExposure = 0.72 + 0.23 * (1 - d);
 
     const fog = scene.fog as THREE.Fog;
-    fog.color.copy(lerpColor(0x101A30, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
+    fog.color.copy(lerpColor(0x16223C, 0xAFC6DE, d)).lerp(new THREE.Color(0xE8B48A), golden * 0.35);
 
     const night = 1 - d;
     lastNight = night;
+    // deep night: a dark navy sky that matches the fog (the physical sky goes pitch black, hiding every skyline)
+    const deepNight = d < 0.05;
+    sky.visible = !deepNight;
+    scene.background = deepNight ? fog.color.clone().multiplyScalar(0.8) : null;
     for (const g of nightGlow) g.material.emissiveIntensity = g.max * night;
 
     // reflections follow the sky (re-render the small environment map only when the light changed)
@@ -186,10 +214,18 @@ export function createAtmosphere(
     }
   };
 
+  const apply = (h: number) => {
+    const before = scene.environment;
+    setHour(h);
+    onChange?.();
+    if (scene.environment !== before) onEnvChange?.();
+  };
+
   return {
-    setHour: (h: number) => { setHour(h); onChange?.(); },
+    setHour: (h: number) => apply(h),
     night: () => lastNight,
     onChange: (fn: () => void) => { onChange = fn; },
+    onEnvChange: (fn: () => void) => { onEnvChange = fn; },
     dispose: () => {
       scene.remove(sky);
       sky.geometry.dispose();

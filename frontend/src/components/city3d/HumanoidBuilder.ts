@@ -17,6 +17,31 @@ function addNightRim(mat: THREE.MeshStandardMaterial): void {
       totalEmissiveRadiance += vec3(0.62, 0.74, 1.0) * (0.07 + 0.95 * pow(rimNdv, 2.2)) * uNightRim;`);
   };
   mat.customProgramCacheKey = () => 'humanoid-night-rim';
+  freshFigureMaterials.push({ mat, born: performance.now() });
+}
+
+/**
+ * On NVIDIA GPUs (ANGLE / Direct3D 11, which the desktop window uses) the skinned figure shader compiled on a
+ * figure's first frames draws nothing once the rest of the city has loaded: every citizen, the Governor and all
+ * pedestrians were invisible. Compiling it once more after that fixes it, so each figure material is recompiled
+ * once when it is a moment old, and all of them again after the city dressing loads (`recompileAllFigures`).
+ */
+const freshFigureMaterials: { mat: THREE.Material; born: number }[] = [];
+const allFigureMaterials = new Set<THREE.Material>();
+
+export function refreshFigureShaders(now = performance.now()): void {
+  for (let i = freshFigureMaterials.length - 1; i >= 0; i--) {
+    const f = freshFigureMaterials[i];
+    if (now - f.born < 1500) continue;
+    f.mat.needsUpdate = true;
+    allFigureMaterials.add(f.mat);
+    freshFigureMaterials.splice(i, 1);
+  }
+}
+
+export function recompileAllFigures(): void {
+  for (const m of allFigureMaterials) m.needsUpdate = true;
+  for (const f of freshFigureMaterials) f.born = performance.now();
 }
 
 /**

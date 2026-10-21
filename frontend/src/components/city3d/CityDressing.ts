@@ -166,7 +166,7 @@ export function createAtmosphere(
     }
     hemi.color.copy(lerpColor(0x4A5F96, 0xC3D6EE, d));
     hemi.groundColor.copy(lerpColor(0x1A1A24, 0x5B4A38, d));
-    hemi.intensity = 0.62 - 0.38 * d;                      // night needs a real fill or people vanish
+    hemi.intensity = 0.78 - 0.54 * d;                      // night needs a real fill or people vanish
     renderer.toneMappingExposure = 0.72 + 0.23 * (1 - d);
 
     const fog = scene.fog as THREE.Fog;

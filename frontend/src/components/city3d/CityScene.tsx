@@ -14,7 +14,7 @@ import {
 } from '../../simulation/types';
 import { AGENT_LOCATIONS, SHARED_COMMUNAL_SPOTS } from '../../simulation/engine';
 import { WorkplaceArchitect } from './WorkplaceArchitect';
-import { createHumanoid, animateHumanoid, ClothingStyle } from './HumanoidBuilder';
+import { createHumanoid, animateHumanoid, ClothingStyle, humanoidNightRim } from './HumanoidBuilder';
 import { buildBoxes, rayToBoxes, stepMovement, TPV_MAX_DIST, TPV_MIN_DIST, WALK_SPEED } from './PlayerController';
 import { buildStreetDetail, createAtmosphere, dressCity, getAsphaltMaterial, getGrassMaterial, hourFor, loadCarFactory, tileUVs } from './CityDressing';
 import { spawnPedestrians } from './CityLife';
@@ -546,7 +546,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
     window.addEventListener('cityai:graphics', onQuality);
 
     const atmosphere = createAtmosphere(scene, renderer, sun, ambient, hemi);
-    atmosphere.onChange(() => postfx.setNight(atmosphere.night()));
+    atmosphere.onChange(() => { postfx.setNight(atmosphere.night()); humanoidNightRim.value = atmosphere.night(); });
     // ?time=night (or day, dusk, ...) in the address overrides the phone's setting, e.g. to share a night view
     const urlTime = new URLSearchParams(window.location.search).get('time');
     const readTimeSetting = () => {
@@ -688,7 +688,7 @@ export const CityScene: React.FC<CitySceneProps> = ({
         const n = nearest[i];
         if (!n) { l.intensity = 0; return; }
         l.position.set(n.p.x, n.p.y - 0.4, n.p.z);
-        l.intensity = 38 * night;
+        l.intensity = 55 * night;
       });
     };
     const keepClear = [

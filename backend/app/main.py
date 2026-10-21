@@ -97,3 +97,16 @@ def health_check():
 _FRONTEND_DIST = config.BASE_DIR.parent / "frontend" / "dist"
 if (_FRONTEND_DIST / "index.html").is_file():
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="frontend")
+
+
+@app.middleware("http")
+async def no_stale_city_page(request: Request, call_next):
+    """The city page must be revalidated on every load: a cached index.html keeps pointing at an old bundle,
+    so the desktop window kept showing an old build after a rebuild. Hashed /assets files never change."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    elif path == "/" or path.endswith(".html"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response

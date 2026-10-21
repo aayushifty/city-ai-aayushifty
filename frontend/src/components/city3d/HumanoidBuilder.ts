@@ -2,6 +2,24 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
+ * Night visibility for every figure: a cool moonlit rim around the silhouette plus a faint lift, so dark clothes
+ * still read against dark streets. 0 by day .. 1 at night (set from the atmosphere's night factor).
+ */
+export const humanoidNightRim = { value: 0 };
+
+function addNightRim(mat: THREE.MeshStandardMaterial): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uNightRim = humanoidNightRim;
+    shader.fragmentShader = 'uniform float uNightRim;\n' +shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      float rimNdv = 1.0 - abs(dot(normal, normalize(vViewPosition)));
+      totalEmissiveRadiance += vec3(0.62, 0.74, 1.0) * (0.07 + 0.95 * pow(rimNdv, 2.2)) * uNightRim;`);
+  };
+  mat.customProgramCacheKey = () => 'humanoid-night-rim';
+}
+
+/**
  * Procedural, rigged human figures for the citizens and the Governor.
  *
  * Built from smooth tapered limbs with real joints (hips, knees, ankles, shoulders, elbows, neck), a sculpted
@@ -493,7 +511,9 @@ function skinFigure(root: THREE.Object3D): void {
   const merged = mergeGeometries(geos);
   geos.forEach(g => g.dispose());
   if (!merged) return;
-  const skinned = new THREE.SkinnedMesh(merged, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.03 }));
+  const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.03 });
+  addNightRim(bodyMat);
+  const skinned = new THREE.SkinnedMesh(merged, bodyMat);
   skinned.castShadow = true;
   skinned.receiveShadow = true;
   skinned.frustumCulled = false;   // limbs move outside the bind-pose bounds

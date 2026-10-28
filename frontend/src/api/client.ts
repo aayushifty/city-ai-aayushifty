@@ -69,6 +69,17 @@ export function absoluteLink(url: string): string {
   return `${window.location.origin}${url}`;
 }
 
+export interface AgentReasoningStep {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  task_id: string | null;
+  mission_id: string | null;
+  kind: 'plan' | 'thought' | 'tool_call' | 'tool_result';
+  text: string;
+  at: string;
+}
+
 export const api = {
   // Projects
   async listProjects(): Promise<Project[]> {
@@ -311,6 +322,13 @@ export const api = {
     const res = await fetch(`${API_BASE}/guide`);
     if (!res.ok) throw new Error('Guide not available');
     return (await res.json()).markdown;
+  },
+
+  /** A citizen's live reasoning feed: plan, thought summaries, tool calls and results (newest last). */
+  async getAgentReasoning(agentId: string, limit = 50): Promise<AgentReasoningStep[]> {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/reasoning?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to fetch reasoning');
+    return (await res.json()).steps;
   },
 
   /** Write once to everyone on a mission (its shared channel). */

@@ -42,7 +42,24 @@ function timeOf(iso: string): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+const STEP_LABEL: Record<string, string> = { plan: 'plan', thought: 'thinking', tool_call: 'tool', tool_result: 'result' };
+const STEP_COLOR: Record<string, string> = { plan: 'text-sky-300', thought: 'text-slate-300', tool_call: 'text-amber-300', tool_result: 'text-emerald-300' };
+
+/** One live reasoning step: a compact line, not a chat bubble, so the channel stays readable. */
+const ReasoningLine: React.FC<{ p: ChannelPost; color?: string }> = ({ p, color }) => (
+  <div className="flex gap-2 items-start pl-1 text-[10.5px] leading-snug" data-testid="reasoning-step">
+    <span className="mt-1 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color || '#64748b' }} />
+    <div className="min-w-0">
+      <span className="font-semibold text-slate-300">{p.author_name}</span>
+      {p.role && <span className="text-slate-500"> · {p.role}</span>}
+      <span className={`ml-1 uppercase tracking-wide text-[9px] font-bold ${STEP_COLOR[p.step || 'thought']}`}>{STEP_LABEL[p.step || 'thought']}</span>
+      <div className={`break-words ${p.step === 'tool_call' || p.step === 'tool_result' ? 'font-mono text-[10px] text-slate-400' : 'text-slate-400 italic'}`}>{p.text}</div>
+    </div>
+  </div>
+);
+
 const Post: React.FC<{ p: ChannelPost; color?: string }> = ({ p, color }) => {
+  if (p.kind === 'reasoning') return <ReasoningLine p={p} color={color} />;
   const gov = p.author_kind === 'governor';
   const sys = p.author_kind === 'system';
   return (

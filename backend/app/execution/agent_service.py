@@ -6,6 +6,7 @@ real verification with bounded repair, artifact tracking, and public mission DAG
 """
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import json
 import logging
@@ -35,6 +36,14 @@ from app.execution.roster import CITIZENS
 
 logger = logging.getLogger("city_ai.agent_service")
 
+def _evidence_line(evidence: Any) -> str:
+    """One-line summary of a verification run for the reasoning feed."""
+    status = "passed" if evidence.exit_code == 0 else f"failed (exit {evidence.exit_code})"
+    tail = " ".join(str(getattr(evidence, "output_snippet", "") or "").split())[-200:]
+    return (f"verification {status}: {evidence.passed_tests} passed, {evidence.failed_tests} failed"
+            + (f" - {tail}" if tail and evidence.exit_code != 0 else ""))
+
+
 class CitizenExecutionService:
     """Coordinates persistent AI citizens, real local model execution, tools, and deliverables."""
 
@@ -53,6 +62,7 @@ class CitizenExecutionService:
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._citizen_locks: Dict[str, asyncio.Lock] = {}
         self._chat_memory: Dict[str, List[Tuple[str, str]]] = {}  # recent chat turns per citizen
+        self._reasoning: Dict[str, deque] = {}  # recent plan/thought/tool steps per citizen (summaries, not raw CoT)
         self.history = TaskHistory(config.DATA_DIR / "task_history.json")
         self._init_citizens()
 
@@ -778,6 +788,9 @@ class CitizenExecutionService:
         ws_manager = WorkspaceManager(workspace_dir)
         self.history.update(task_id, workspace=str(workspace_dir))
         await self._progress(citizen, task_id, "PLANNING", 10.0, f"Planning: {req.title}")
+        await self._reason(citizen, task_id, "plan",
+                           f"Revising '{req.title}' from your feedback" if revision else
+                           f"Taking on '{req.title}' - deliverable: {req.expected_deliverable or 'see brief'}")
 
         task_text = f"{req.title} {req.description} {req.expected_deliverable}".lower()
         web_kind = None
@@ -853,6 +866,8 @@ class CitizenExecutionService:
             # models sometimes answer in the "--- path ---" / fenced-code layout they were shown
             files_to_write = _files_from_text(raw_output, [_rel(fp, workspace_dir) for fp in previous_files])
         summary = str(parsed.get("summary", "")) if isinstance(parsed, dict) else ""
+        if summary:
+            await self._reason(citizen, task_id, "thought", summary)
         if not files_to_write and revision and previous_files:
             # A revision must edit the existing work: a reply without a file list cannot be applied safely.
             snippet = re.sub(r"\s+", " ", raw_output or "")[:300]
@@ -867,6 +882,9 @@ class CitizenExecutionService:
             self.history.update(task_id, note="Model did not return the JSON file list; saved its reply as the deliverable.")
 
         written: List[Path] = list(previous_files)    # a revision is verified as the whole deliverable
+        if files_to_write:
+            names = [str(f.get("path", "")) for f in files_to_write][:6]
+            await self._reason(citizen, task_id, "tool_call", f"write {len(files_to_write)} file(s): {', '.join(names)}")
         self._write_files(ws_manager, files_to_write, written, task_id)
         ws_manager.commit_changes(f"revise: {req.title} v{revision.get('version')} by {citizen.name}" if revision
                                   else f"feat: {req.title} by {citizen.name}")
@@ -902,7 +920,9 @@ class CitizenExecutionService:
         self.artifacts[artifact.id] = artifact
 
         await self._progress(citizen, task_id, "TESTING", 60.0, "Running verification checks...")
+        await self._reason(citizen, task_id, "tool_call", "run verification checks")
         evidence = await verify_deliverables(workspace_dir, written)
+        await self._reason(citizen, task_id, "tool_result", _evidence_line(evidence))
         attempts = 0
         while evidence.exit_code != 0 and attempts < MAX_REPAIR_ATTEMPTS:
             attempts += 1
@@ -925,7 +945,11 @@ class CitizenExecutionService:
             except Exception as ex:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model call failed ({ex}).")
                 continue
-            fixes = _files_from(_extract_json(repair_raw)) or _files_from_text(
+            repair_json = _extract_json(repair_raw)
+            diagnosis = repair_json.get("diagnosis") if isinstance(repair_json, dict) else None
+            if diagnosis:
+                await self._reason(citizen, task_id, "thought", f"Diagnosis: {diagnosis}")
+            fixes = _files_from(repair_json) or _files_from_text(
                 repair_raw, [_rel(p, workspace_dir) for p in written])
             if not fixes:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model reply had no file fixes.")
@@ -933,6 +957,7 @@ class CitizenExecutionService:
             self._write_files(ws_manager, fixes, written, task_id)
             ws_manager.commit_changes(f"fix: repair attempt {attempts} for {req.title}")
             evidence = await verify_deliverables(workspace_dir, written)
+            await self._reason(citizen, task_id, "tool_result", _evidence_line(evidence))
 
         verified = evidence.exit_code == 0
         if primary and primary.exists():
@@ -998,6 +1023,11 @@ class CitizenExecutionService:
 
         async def progress(message: str, pct: float) -> None:
             await self._progress(citizen, task_id, "TESTING" if pct >= 60 else "WORKING", pct, message[:160])
+            lowered = message.lower()
+            kind = ("plan" if lowered.startswith("planning") else
+                    "tool_call" if lowered.startswith(("writing", "running", "checking", "verifying")) else
+                    "tool_result" if "fail" in lowered or "passed" in lowered else "thought")
+            await self._reason(citizen, task_id, kind, message)
 
         builder = project_builder.ProjectBuilder(model_for(citizen), model_for(reviewer), progress,
                                                  lambda text: self.history.update(task_id, note=text))
@@ -1526,14 +1556,46 @@ class CitizenExecutionService:
                                                        context="\n".join(context_parts), mission_id=mission["id"],
                                                        allow_web=allow_web)
 
+    # --- Live reasoning: what each citizen is planning, thinking and doing, as short summaries ---
+
+    REASONING_KINDS = ("plan", "thought", "tool_call", "tool_result")
+
+    async def _reason(self, citizen: CitizenProfile, task_id: Optional[str], kind: str, text: str) -> Dict[str, Any]:
+        """Streams one reasoning step (plan, thought summary, tool call or tool result) to the citizen's feed,
+        the live event bus and, for mission work, the mission channel - labelled with the citizen's name and role."""
+        rec = (self.history.get(task_id) if task_id else None) or {}
+        mission_id = rec.get("mission_id")
+        entry = {"agent_id": citizen.id, "agent_name": citizen.name, "role": citizen.profession, "task_id": task_id,
+                 "mission_id": mission_id, "kind": kind if kind in self.REASONING_KINDS else "thought",
+                 "text": " ".join(str(text).split())[:600], "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        self._reasoning.setdefault(citizen.id, deque(maxlen=200)).append(entry)
+        try:
+            await event_bus.publish(ForgeEvent(event_id=uuid.uuid4().hex, topic=f"agent:{citizen.id}:reasoning", payload=entry))
+        except Exception as e:  # the feed must never break the task
+            logger.debug(f"reasoning publish failed: {e}")
+        mission = self.get_mission(mission_id) if mission_id else None
+        if mission:
+            self._post(mission, "citizen", entry["text"], kind="reasoning", author_id=citizen.id,
+                       author_name=citizen.name, task_id=task_id, role=citizen.profession, step=entry["kind"])
+        return entry
+
+    def get_reasoning(self, agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """The citizen's most recent reasoning steps, oldest first."""
+        return list(self._reasoning.get(agent_id, ()))[-limit:]
+
     # --- Mission channel: one shared thread per mission ---
 
     def _post(self, mission: Dict[str, Any], author_kind: str, text: str, kind: str = "update",
               author_id: Optional[str] = None, author_name: Optional[str] = None,
-              url: Optional[str] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
+              url: Optional[str] = None, task_id: Optional[str] = None,
+              role: Optional[str] = None, step: Optional[str] = None) -> Dict[str, Any]:
         post = {"id": f"post-{uuid.uuid4().hex[:8]}", "author_kind": author_kind, "author_id": author_id,
                 "author_name": author_name or ("City AI" if author_kind == "system" else ""), "text": text[:4000],
                 "kind": kind, "url": url, "task_id": task_id, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if role:
+            post["role"] = role
+        if step:
+            post["step"] = step
         channel = mission.setdefault("channel", [])
         channel.append(post)
         del channel[:-MAX_CHANNEL_POSTS]

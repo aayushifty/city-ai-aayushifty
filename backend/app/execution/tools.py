@@ -40,6 +40,7 @@ class ToolContext:
     task_id: str
     deliverables: List[Dict[str, Any]] = field(default_factory=list)
     on_progress: Optional[Callable[[str], Awaitable[None]]] = None
+    on_reason: Optional[Callable[[str, str], Awaitable[None]]] = None  # (kind, summary) -> live reasoning feed
     should_stop: Optional[Callable[[], bool]] = None
 
     async def note(self, message: str) -> None:

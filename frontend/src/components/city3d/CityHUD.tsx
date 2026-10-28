@@ -45,6 +45,7 @@ import {
 } from '../../simulation/types';
 import { DeliverableArtifact } from '../../types';
 import { absoluteLink } from '../../api/client';
+import { AgentReasoningFeed } from './hud/AgentReasoningFeed';
 import { HostApprovalPanel } from './HostApprovalPanel';
 import { ModelPicker } from './ModelPicker';
 import { TaskHistoryPanel } from './TaskHistoryPanel';
@@ -761,6 +762,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
                   )}
                   <div ref={chatEndRef} />
                 </div>
+
+                <AgentReasoningFeed agentId={interactingAgent.id} />
 
                 {/* Quick Directive Chips */}
                 <div className="flex flex-wrap gap-1.5 pt-1">

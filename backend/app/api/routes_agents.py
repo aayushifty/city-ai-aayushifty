@@ -90,6 +90,13 @@ def get_agent(agent_id: str):
         raise HTTPException(status_code=404, detail="Agent not found")
     return c
 
+@router.get("/agents/{agent_id}/reasoning")
+def agent_reasoning(agent_id: str, limit: int = Query(50, ge=1, le=200)):
+    """The citizen's recent plan, reasoning summaries, tool calls and results (summaries, not raw chain-of-thought)."""
+    if not agent_service.get_citizen(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"agent_id": agent_id, "steps": agent_service.get_reasoning(agent_id, limit)}
+
 @router.post("/agents/{agent_id}/chat", response_model=CitizenChatResponse)
 async def chat_with_agent(agent_id: str, payload: CitizenChatMessageRequest):
     """Direct 2-way conversation with a citizen powered by local Ollama models."""

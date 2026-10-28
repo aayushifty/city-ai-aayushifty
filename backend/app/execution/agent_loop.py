@@ -83,7 +83,7 @@ async def run_agent_loop(
     for step in range(max_steps):
         steps_used = step + 1
         req = ModelCompletionRequest(
-            messages=messages, system_prompt=system,
+            prompt="", messages=messages, system_prompt=system,
             model_name=ctx.model_name, temperature=0.2, json_mode=True, max_tokens=2048,
         )
         try:
@@ -104,6 +104,10 @@ async def run_agent_loop(
             continue
         parse_failures = 0
 
+        thought = str(action.get("thought") or "").strip()
+        if thought and ctx.on_reason:
+            await ctx.on_reason("thought", thought)
+
         if "final" in action:
             final_text = str(action.get("final", "")).strip()
             break
@@ -118,11 +122,15 @@ async def run_agent_loop(
         else:
             if ctx.on_progress:
                 await ctx.on_progress(f"{ctx.agent_name}: {tool_name}")
+            if ctx.on_reason:
+                await ctx.on_reason("tool_call", f"{tool_name} {json.dumps(args, default=str)[:200]}")
             try:
                 observation = await spec.handler(ctx, args)
             except Exception as e:
                 logger.exception(f"[{ctx.agent_id}] tool {tool_name} crashed")
                 observation = f"ERROR: tool '{tool_name}' raised: {e}"
+        if spec and ctx.on_reason:
+            await ctx.on_reason("tool_result", str(observation)[:300])
         messages.append({"role": "user", "content": f"OBSERVATION:\n{observation}"})
 
     return {

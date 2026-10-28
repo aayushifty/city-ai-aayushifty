@@ -42,10 +42,12 @@ export interface ChannelPost {
   author_id: string | null;
   author_name: string;
   text: string;
-  kind: string;                  // brief, plan, progress, deliverable, failed, blocked, final, message, reply, report, system
+  kind: string;                  // brief, plan, reasoning, progress, deliverable, failed, blocked, final, message, reply, report, system
   url: string | null;
   task_id: string | null;
   at: string;
+  role?: string;                 // the citizen's profession, on reasoning posts
+  step?: 'plan' | 'thought' | 'tool_call' | 'tool_result';
 }
 
 export interface LiveMission {

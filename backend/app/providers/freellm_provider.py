@@ -34,15 +34,22 @@ _GENERAL_RANK = ["gpt-5", "claude", "gemini-2.5-pro", "qwen3.5-397b", "nemotron-
                  "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gpt-oss-120b", "gpt-4.1", "gpt-4o",
                  "nemotron-3-super", "llama-4-maverick", "llama-3.3-70b", "dots3", "mistral-large", "mistral-small",
                  "qwen3.8-27b", "qwen3.6-27b", "gemma-4-31b", "gemini-2.5-flash", "qwen3", "llama-3.3", "mixtral"]
-_CODE_RANK = ["qwen3-coder", "gpt-5", "claude", "qwen3.5-397b", "gemini-3.5-flash", "gemini-3-flash", "poolside-laguna-s",
+# Measured on the gateway (Oct 2026, a 600-token JS module): qwen3.8-27b 1.8s, gpt-oss-120b 2.3s,
+# gemini-3.1-flash-lite 2.8s; nemotron-3-ultra 23s; llama-3.3-70b ~5 tok/s; poolside often rate-limited.
+_CODE_RANK = ["qwen3-coder", "qwen3.8-27b", "gpt-oss-120b", "gemini-3.1-flash-lite", "gpt-5", "claude", "qwen3.5-397b", "gemini-3.5-flash", "gemini-3-flash", "poolside-laguna-s",
               "deepseek-v4-pro", "deepseek-v3", "kimi-k2", "glm-5", "devstral", "codestral", "nemotron-3-ultra",
               "gpt-oss-120b", "north-mini-code", "qwen2.5-coder-32b", "gpt-4.1"] + _GENERAL_RANK
 # Fast coders for bulk file writing and repairs: quick to answer, good at code. Huge reasoning models
 # (nemotron-3-ultra, poolside, deepseek-r1, ...) are left out because one file can take them minutes.
-_FAST_CODE_RANK = ["qwen3-coder", "gemini-3.5-flash", "gemini-3-flash", "gemini-3.6-flash", "gemini-3.7-flash",
-                   "gemini-3.8-flash", "gpt-oss-120b", "deepseek-v3", "kimi-k2", "devstral", "codestral", "glm-5",
-                   "gpt-4.1", "qwen2.5-coder-32b", "llama-3.3-70b"]
+_FAST_CODE_RANK = ["qwen3.8-27b", "gpt-oss-120b", "gemini-3.1-flash-lite", "qwen3-coder", "gemini-3.5-flash",
+                   "gemini-3-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash", "gpt-oss-20b",
+                   "nemotron-3.5-lightning", "dots3", "deepseek-v3", "kimi-k2", "devstral", "codestral", "glm-5",
+                   "gpt-4.1", "qwen2.5-coder-32b"]
 _SLOW = re.compile(r"nemotron-3-ultra|poolside|deepseek-r1|-thinking|reason", re.IGNORECASE)
+# Never write code with these: too slow on the gateway (llama-3.3, mistral, qwen3.6-27b), truncated answers
+# (flash-preview) or too small to write a whole file.
+_NOT_FOR_CODE = re.compile(r"llama-3\.3|mistral|mixtral|qwen3\.6-27b|flash-preview|content-safety|robotics|-vl\b|"
+                           r"[-_.](0\.6|0\.8|1\.5|4|9)b\b", re.IGNORECASE)
 RETRYABLE = {404, 408, 409, 425, 429, 500, 502, 503, 504, 529}
 PROBE_TTL_S = 15 * 60
 CHAIN_LEN = 5
@@ -55,6 +62,8 @@ def rank_models(ids: List[str], coding: bool = False, fast: bool = False) -> Lis
     fast=True keeps only the quick coder families, in _FAST_CODE_RANK order."""
     order = _FAST_CODE_RANK if fast else _CODE_RANK if coding else _GENERAL_RANK
     chat = [m for m in ids if not _NON_CHAT.search(m)]
+    if coding or fast:
+        chat = [m for m in chat if not _NOT_FOR_CODE.search(m)]
     if fast:
         chat = [m for m in chat if not _SLOW.search(m) and any(k in m.lower() for k in order)]
 
@@ -62,7 +71,7 @@ def rank_models(ids: List[str], coding: bool = False, fast: bool = False) -> Lis
         low = model_id.lower()
         rank = next((i for i, key in enumerate(order) if key in low), len(order))
         size = max((int(n) for n in re.findall(r"(\d{2,4})b\b", low)), default=0)
-        small_variant = bool(re.search(r"lite|nano|mini|tiny|small|-\d(\.\d)?b", low))   # weaker sibling of a family
+        small_variant = bool(re.search(r"lite|nano|mini|tiny|small|-\d(\.\d)?b\b", low))   # weaker sibling of a family
         return (bool(_ROUTERS.search(low)), rank, small_variant, -size, ":free" not in low, low)
 
     return sorted(chat, key=score)
@@ -78,7 +87,7 @@ class FreeLLMModelProvider(OpenAIModelProvider):
     price_in_per_m = 0.0
     price_out_per_m = 0.0
     supports_json_mode = True
-    request_timeout = 300.0          # whole files of a project are written through it
+    request_timeout = 120.0          # a stalled model fails over to the next one instead of hanging a mission
     _CACHE_S = 60.0
 
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,

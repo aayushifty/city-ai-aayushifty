@@ -1922,7 +1922,7 @@ def _content_steps_only(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if Path(str(s.get("expected_deliverable") or "notes.md")).suffix.lower() in DOC_SUFFIXES + (".html", ".htm")
             and not _CODE_STEP.search(f"{s.get('title', '')} {s.get('expected_deliverable', '')}")]
     return kept[:CONTENT_STEPS_MAX]
-FAST_CALL_TIMEOUT_S = 150.0     # a project file that takes a quick coder longer than this goes to the next model
+FAST_CALL_TIMEOUT_S = 90.0      # a project file that takes a quick coder longer than this goes to the next model
 CODING_ROLES = {"engineer", "webdev", "designer", "devops", "qa", "architect"}
 MAX_CHANNEL_POSTS = 300
 REVISABLE_STATUSES = {"VERIFIED", "FAILED"}

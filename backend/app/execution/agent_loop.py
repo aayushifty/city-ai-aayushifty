@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from app.config import config
 from app.providers.base import ModelCompletionRequest
 from app.providers.router import model_router
-from app.execution.tools import TOOLS, ToolContext, tools_catalog_prompt
+from app.execution.tools import ToolContext, tools_catalog_prompt, tools_for
 
 logger = logging.getLogger("city_ai.agent_loop")
 
@@ -116,9 +116,10 @@ async def run_agent_loop(
         args = action.get("args") or action.get("arguments") or {}
         if not isinstance(args, dict):
             args = {}
-        spec = TOOLS.get(tool_name)
+        allowed = tools_for(ctx.agent_id)
+        spec = allowed.get(tool_name)
         if not spec:
-            observation = f"ERROR: unknown tool '{tool_name}'. Choose one of: {', '.join(TOOLS)}."
+            observation = f"ERROR: unknown tool '{tool_name}'. Choose one of: {', '.join(allowed)}."
         else:
             if ctx.on_progress:
                 await ctx.on_progress(f"{ctx.agent_name}: {tool_name}")

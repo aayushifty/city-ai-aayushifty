@@ -334,10 +334,33 @@ TOOLS: Dict[str, ToolSpec] = {
 }
 
 
-def tools_catalog_prompt() -> str:
+_FILES = {"write_workspace_file", "read_file", "list_dir", "run_in_workspace"}
+_WEB = {"web_search", "web_fetch"}
+_BUILD = {"build_presentation", "build_website", "build_app", "publish_folder", "launch_app"}
+_HOST = {"host_command", "write_host_file"}
+# Each role sees only the tools its job needs: a shorter prompt for the model and fewer wrong tool calls.
+ROLE_TOOLS: Dict[str, set] = {
+    "engineer": _FILES | _WEB | _BUILD, "webdev": _FILES | _WEB | _BUILD, "designer": _FILES | _WEB | _BUILD,
+    "architect": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "qa": _FILES | _WEB | {"launch_app"}, "diagnostic": _FILES | _WEB,
+    "devops": _FILES | _WEB | _BUILD | _HOST, "operator": _FILES | _WEB | _BUILD | _HOST,
+    "security": _FILES | _WEB,
+    "analyst": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "researcher": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "data": _FILES | _WEB | {"build_presentation", "build_app", "publish_folder"},
+}
+
+
+def tools_for(agent_id: str) -> Dict[str, ToolSpec]:
+    """The tools a citizen may use, by the role in its id (agent-<role>); unknown roles get every tool."""
+    allowed = ROLE_TOOLS.get(agent_id.split("-", 1)[-1])
+    return {k: v for k, v in TOOLS.items() if allowed is None or k in allowed}
+
+
+def tools_catalog_prompt(tools: Optional[Dict[str, ToolSpec]] = None) -> str:
     """Renders the tool list for the system prompt."""
     lines = []
-    for spec in TOOLS.values():
+    for spec in (tools if tools is not None else TOOLS).values():
         arg_str = ", ".join(f"{k}: {v}" for k, v in spec.args.items())
         tag = "" if spec.autonomous else " [needs Governor approval]"
         lines.append(f'- {spec.name}({arg_str}){tag}: {spec.description}')

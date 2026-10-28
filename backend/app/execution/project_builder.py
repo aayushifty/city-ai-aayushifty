@@ -43,6 +43,7 @@ MAIN_JS = "js/main.js"
 PROFILE_JSON = "content/profile.json"
 EXTRAS_JS = "js/scene-extras.js"
 MAX_REPAIR_ROUNDS = 3
+WRITE_BATCH = 3                 # files per model call when writing a layer in parallel
 REQ_KINDS = {"3d_object", "3d_scene", "page", "section", "feature", "interaction", "content", "style"}
 
 ModelFn = Callable[[str, str, bool, int], Awaitable[str]]          # (prompt, system, json_mode, max_tokens) -> text
@@ -455,8 +456,10 @@ class ProjectBuilder:
             + ("- Three.js comes from a CDN import map ('three' and 'three/addons/'); js/main.js sets up the scene; "
                "EVERY 3d_object gets its own module js/objects/<name>.js exporting a create function;\n" if three_d else "")
             + (API_RULE if wants_backend(f"{request} {summary}") else "")
-            + f"- at most {MAX_FILES} files; assign every requirement id to the file(s) that implement it.\n"
-            'Reply with ONLY JSON: {"files": [{"path": "js/objects/rocket.js", "purpose": "...", "requirements": ["R3"]}]}'
+            + f"- at most {MAX_FILES} files; assign every requirement id to the file(s) that implement it;\n"
+            "- for every JS module list the exact names it exports (other files import only these).\n"
+            'Reply with ONLY JSON: {"files": [{"path": "js/objects/rocket.js", "purpose": "...", "requirements": ["R3"], '
+            '"exports": ["createRocket"]}]}'
         )
         data = _json(await self.model(prompt, "You are a senior web architect. You reply with one JSON object.", True, 3000))
         files: List[Dict[str, Any]] = []
@@ -467,7 +470,11 @@ class ProjectBuilder:
                 continue
             seen.add(path)
             ids = [str(x) for x in (f.get("requirements") or []) if any(r.id == str(x) for r in reqs)]
-            files.append({"path": path, "purpose": str(f.get("purpose") or "")[:300], "requirements": ids})
+            entry = {"path": path, "purpose": str(f.get("purpose") or "")[:300], "requirements": ids}
+            if path.endswith((".js", ".mjs")):
+                entry["exports"] = [str(x) for x in (f.get("exports") or [])
+                                    if re.fullmatch(r"[A-Za-z_$][\w$]*", str(x))][:12]
+            files.append(entry)
         if "index.html" not in seen:
             files.insert(0, {"path": "index.html", "purpose": "Home page", "requirements": []})
         if not any(f["path"].endswith(".css") for f in files):
@@ -578,6 +585,8 @@ class ProjectBuilder:
             f"Requirements this file must implement:\n" + ("\n".join(f"{r.id} [{r.kind}] {r.name}: {r.text}" for r in mine) or "(supporting file)")
             + (f"\n\nOther requirements (implemented elsewhere, for context):\n{others}" if others else "")
             + (f"\n\nFiles already written:\n{deps}" if deps else "")
+            + (f"\n\nINTERFACE CONTRACT (import only these names; export exactly what your file promises):\n"
+               f"{self._contract(plan, written, path)}" if path.endswith((".js", ".mjs", ".html")) else "")
             + (f"\n\n{extra}" if extra else "")
             + f"\n\nRules: {rule}\nWrite the COMPLETE file, production quality, no placeholders or TODOs.\n"
             f"Reply with ONLY the file content inside one fenced code block."
@@ -589,6 +598,43 @@ class ProjectBuilder:
                                "You are an expert front-end and Three.js engineer. You write complete, working files.",
                                False, 8000)
         return _file_body(raw, f["path"])
+
+    def _contract(self, plan: Plan, written: Dict[str, str], current: str = "") -> str:
+        """What every JS module exports: real exports once written, the planned ones before, so parallel writers agree."""
+        lines = []
+        for x in plan.files:
+            p = x["path"]
+            if not p.endswith((".js", ".mjs")):
+                continue
+            if p == API_JS and x.get("generated"):
+                lines.append(f"- {p}: classic script that defines the global `api`; pages load it with "
+                             f"<script src=\"{API_JS}\"></script> before their modules; NEVER import from it")
+                continue
+            names = sorted(_exports(written[p])) if p in written else (x.get("exports") or [])
+            mark = " (this file)" if p == current else ""
+            lines.append(f"- {p}{mark}: exports {', '.join(names) if names else '(nothing - do not import from it)'}")
+        return "\n".join(lines) or "(no JS modules)"
+
+    async def write_files(self, plan: Plan, reqs: List[Requirement], group: List[Dict[str, Any]],
+                          written: Dict[str, str], three_d: bool) -> Dict[str, str]:
+        """Writes 2-3 files in one model call; a file missing from the reply is written on its own."""
+        if len(group) == 1:
+            return {group[0]["path"]: await self.write_file(plan, reqs, group[0], written, three_d)}
+        tail = "Reply with ONLY the file content inside one fenced code block."
+        parts = [self._file_prompt(plan, reqs, f, written, three_d).replace(tail, "").strip() for f in group]
+        prompt = (f"Write these {len(group)} files of one project.\n\n"
+                  + "\n\n".join(f"########## FILE {i + 1} ##########\n{p}" for i, p in enumerate(parts))
+                  + "\n\nReply with each file as a line `=== FILE: <path> ===` followed by its complete content in one "
+                    "fenced code block, in the order above. Nothing else.")
+        raw = await self.model(prompt, "You are an expert front-end and Three.js engineer. You write complete, working files.",
+                               False, 12000)
+        out = {p: _file_body(body, p) for p, body in _split_files(raw, [f["path"] for f in group]).items()}
+        missing = [f for f in group if not out.get(f["path"], "").strip()]
+        if missing:
+            self.note(f"Batch reply lacked {', '.join(f['path'] for f in missing)}; writing them one by one")
+            bodies = await asyncio.gather(*(self.write_file(plan, reqs, f, written, three_d) for f in missing))
+            out.update({f["path"]: b for f, b in zip(missing, bodies)})
+        return out
 
     async def write_all(self, plan: Plan, reqs: List[Requirement], ws: Path, three_d: bool) -> Dict[str, str]:
         written: Dict[str, str] = {}
@@ -607,12 +653,19 @@ class ProjectBuilder:
                 continue
             await self.progress(f"Writing {len(batch)} file(s): {', '.join(f['path'] for f in batch)[:120]}",
                                 30.0 + level * 12)
-            contents = await asyncio.gather(*(self.write_file(plan, reqs, f, dict(written), three_d) for f in batch),
-                                            return_exceptions=True)
-            for f, content in zip(batch, contents):
-                if isinstance(content, Exception):
-                    self.note(f"Writing {f['path']} failed: {content}")
-                    content = ""
+            groups = _chunk(batch, WRITE_BATCH)
+            results = await asyncio.gather(*(self.write_files(plan, reqs, g, dict(written), three_d) for g in groups),
+                                           return_exceptions=True)
+            merged: Dict[str, str] = {}
+            for g, res in zip(groups, results):
+                if isinstance(res, BaseException):
+                    self.note(f"Writing {', '.join(f['path'] for f in g)} failed: {res}")
+                    continue
+                merged.update(res)
+            for f in batch:
+                content = merged.get(f["path"], "")
+                if not content.strip():
+                    self.note(f"{f['path']} came back empty")
                 written[f["path"]] = content
                 out = ws / f["path"]
                 out.parent.mkdir(parents=True, exist_ok=True)
@@ -647,6 +700,10 @@ class ProjectBuilder:
         fixed = fix_relative_links(ws)
         if fixed:
             self.note(f"Corrected {fixed} link(s) that pointed at the right file from the wrong folder.")
+        mended = fix_imports_and_ids(ws)
+        if mended:
+            self.note(f"Fixed {len(mended)} import/id mismatch(es) mechanically: " + "; ".join(mended[:4])
+                      + (" …" if len(mended) > 4 else ""))
         problems: Dict[str, List[str]] = {}
         files = {p.relative_to(ws).as_posix(): p for p in ws.rglob("*") if p.is_file() and ".git" not in p.parts}
         texts = {rel: p.read_text(encoding="utf-8", errors="replace") for rel, p in files.items()
@@ -1063,7 +1120,10 @@ class ProjectBuilder:
             await self.progress(f"Checks failed ({sum(len(v) for v in problems.values())} problems); repair {rounds}/{MAX_REPAIR_ROUNDS}",
                                 60.0 + rounds * 7)
             await self.repair(ws, plan, reqs, problems, three_d, rounds)
-            problems = await self.verify(ws, plan, reqs, three_d)
+            before, problems = problems, await self.verify(ws, plan, reqs, three_d)
+            if problems and error_signature(before) == error_signature(problems):
+                self.note("The repair left exactly the same problems; stopping repairs instead of repeating them.")
+                break
 
         await self.progress(f"{reviewer_name} is reviewing the project", 88.0)
         review = await self.review(ws, plan, reqs, reviewer_name,
@@ -1106,6 +1166,34 @@ class ProjectBuilder:
         if path:
             return path
         return f"js/objects/{r.name}.js" if r.kind == "3d_object" else "index.html"
+
+
+def _chunk(items: List[Any], size: int) -> List[List[Any]]:
+    """Splits items into the fewest groups of at most `size`, balanced (7 by 3 -> 3, 2, 2)."""
+    if not items:
+        return []
+    n = -(-len(items) // size)
+    base, extra = divmod(len(items), n)
+    out, i = [], 0
+    for k in range(n):
+        step = base + (1 if k < extra else 0)
+        out.append(items[i:i + step])
+        i += step
+    return out
+
+
+_FILE_MARK = re.compile(r"^\s*=+\s*FILE:\s*`?([^\s`=]+)`?\s*=*\s*$", re.M)
+
+
+def _split_files(raw: str, paths: List[str]) -> Dict[str, str]:
+    """Cuts a multi-file reply at its `=== FILE: path ===` lines; only the expected paths are kept."""
+    marks = list(_FILE_MARK.finditer(raw or ""))
+    out: Dict[str, str] = {}
+    for i, m in enumerate(marks):
+        p = _safe_rel(m.group(1).strip())
+        if p in paths and p not in out:
+            out[p] = raw[m.end(): marks[i + 1].start() if i + 1 < len(marks) else len(raw)]
+    return out
 
 
 def _exports(js: str) -> set:
@@ -1214,6 +1302,170 @@ def fix_relative_links(ws: Path) -> int:
         if new_text != text:
             path.write_text(new_text, encoding="utf-8")
     return count
+
+
+def error_signature(errors: Any) -> frozenset:
+    """What a set of failures is, ignoring line numbers and spacing, so two repair rounds
+    that end in the same errors can be recognised and the loop stopped."""
+    if isinstance(errors, dict):
+        lines = [f"{k}: {m}" for k, ms in errors.items() for m in ms]
+    else:
+        lines = [l for l in str(errors).splitlines()
+                 if re.search(r"error|exception|failed|traceback|assert", l, re.I)] or str(errors).splitlines()[-5:]
+    return frozenset(re.sub(r"\s+", " ", re.sub(r"\d+", "#", l)).strip().lower() for l in lines if l.strip())
+
+
+def _script_pages(texts: Dict[str, str], module: str) -> List[str]:
+    """HTML pages that load a module, directly or through modules that import it."""
+    loaders, todo = {module}, [module]
+    while todo:
+        cur = todo.pop()
+        for rel, text in texts.items():
+            if rel in loaders or not rel.endswith((".js", ".mjs")):
+                continue
+            base = Path(rel).parent
+            if any(_normalize((base / s).as_posix()) == cur for s in re.findall(r"from\s*['\"](\.{1,2}/[^'\"]+)['\"]", text)):
+                loaders.add(rel)
+                todo.append(rel)
+    pages = []
+    for rel, text in texts.items():
+        if rel.endswith(".html"):
+            base = Path(rel).parent
+            srcs = {_normalize((base / s).as_posix()) for s in re.findall(r"<script[^>]+src\s*=\s*['\"]([^'\"#?]+)", text)}
+            if srcs & loaders:
+                pages.append(rel)
+    return pages
+
+
+def _close(name: str, options: Any) -> Optional[str]:
+    """The option that is clearly the same name spelled differently (case, - and _, small typos)."""
+    import difflib
+    key = lambda s: re.sub(r"[-_]", "", s).lower()
+    by_key = {key(o): o for o in options}
+    if key(name) in by_key:
+        return by_key[key(name)]
+    hit = difflib.get_close_matches(key(name), list(by_key), n=1, cutoff=0.85)
+    return by_key[hit[0]] if hit else None
+
+
+def fix_imports_and_ids(ws: Path) -> List[str]:
+    """Mechanical fixes for the mistakes models make most when files are written separately, applied before any
+    model repair: importing the generated api.js client (a classic script), importing names a module does not export,
+    and looking up element ids that differ from the page's only in spelling."""
+    import os
+    files = {p.relative_to(ws).as_posix(): p for p in ws.rglob("*") if p.is_file() and ".git" not in p.parts}
+    texts = {rel: p.read_text(encoding="utf-8", errors="replace") for rel, p in files.items()
+             if p.suffix in (".html", ".js", ".mjs")}
+    orig = dict(texts)
+    done: List[str] = []
+    generated_api = API_JS in texts and "Generated by City AI" in texts[API_JS]
+
+    # 1. api.js defines the global `api`; an ES import from it yields nothing
+    needs_api: set = set()
+    for rel, text in texts.items():
+        if rel == API_JS or not rel.endswith((".js", ".mjs")) or not generated_api:
+            continue
+        base = Path(rel).parent
+
+        def to_global(m: re.Match) -> str:
+            if _normalize((base / m.group("spec")).as_posix()) != API_JS:
+                return m.group(0)
+            if m.group("named") is not None:
+                lines = []
+                for part in (p.strip() for p in m.group("named").split(",")):
+                    if part:
+                        src, _, alias = part.partition(" as ")
+                        src, alias = src.strip(), (alias or src).strip()
+                        lines.append(f"const {alias} = window.api;" if src in ("api", "default") else
+                                     f"const {alias} = window.api.{src}.bind(window.api);")
+                return "\n".join(lines)
+            return f"const {m.group('alias')} = window.api;"
+
+        new = re.sub(r"import\s*(?:\{(?P<named>[^}]*)\}|(?:\*\s*as\s+)?(?P<alias>\w+))\s*from\s*['\"](?P<spec>[^'\"]+)['\"];?",
+                     to_global, text)
+        if new != text:
+            texts[rel] = new
+            needs_api.add(rel)
+            done.append(f"{rel}: replaced the import from {API_JS} with the global `api`")
+    for rel in list(texts):
+        if rel.endswith((".js", ".mjs")) and rel != API_JS and generated_api and re.search(r"\bapi\.\w+\(", texts[rel]):
+            needs_api.add(rel)
+    for module in needs_api:
+        for page in _script_pages(texts, module):
+            html = texts[page]
+            if re.search(r"<script[^>]+src=['\"][^'\"]*js/api\.js['\"]", html):
+                continue
+            src = os.path.relpath(API_JS, Path(page).parent.as_posix() or ".").replace("\\", "/")
+            tag = f'<script src="{src}"></script>\n'
+            m = re.search(r"<script\b", html)
+            texts[page] = html[:m.start()] + tag + html[m.start():] if m else html.replace("</body>", tag + "</body>")
+            done.append(f"{page}: added {tag.strip()} before its scripts")
+
+    # 2. named / default imports the target module does not export
+    for rel in list(texts):
+        if not rel.endswith((".js", ".mjs", ".html")):
+            continue
+        base = Path(rel).parent
+
+        def fix_import(m: re.Match) -> str:
+            target = _normalize((base / m.group("spec")).as_posix())
+            if target not in texts or target == API_JS:
+                return m.group(0)
+            exported = _exports(texts[target])
+            if m.group("named") is not None:
+                parts = []
+                for part in (p.strip() for p in m.group("named").split(",")):
+                    if not part:
+                        continue
+                    src, _, alias = part.partition(" as ")
+                    src, alias = src.strip(), alias.strip()
+                    if src not in exported:
+                        decl = re.compile(rf"^((?:async\s+)?function\*?\s+{src}\b|(?:const|let|var|class)\s+{src}\b)", re.M)
+                        close = _close(src, exported - {"default"})
+                        if decl.search(texts[target]):
+                            texts[target] = decl.sub(r"export \1", texts[target], count=1)
+                            done.append(f"{target}: exported {src}, which {rel} imports")
+                        elif close:
+                            done.append(f"{rel}: imports {close} from {target} (it asked for {src})")
+                            alias, src = alias or src, close
+                    parts.append(f"{src} as {alias}" if alias and alias != src else src)
+                return m.group(0).replace(m.group("named"), " " + ", ".join(parts) + " ", 1)
+            name = m.group("default")
+            if "default" in exported:
+                return m.group(0)
+            pick = name if name in exported else (next(iter(exported)) if len(exported) == 1 else _close(name, exported))
+            if not pick:
+                return m.group(0)
+            done.append(f"{rel}: imports {{ {pick} }} from {target} (it has no default export)")
+            return f"import {{ {pick}{' as ' + name if pick != name else ''} }} from '{m.group('spec')}';"
+
+        texts[rel] = re.sub(r"import\s*(?:\{(?P<named>[^}]*)\}|(?P<default>\w+))\s*from\s*['\"](?P<spec>\.{1,2}/[^'\"]+)['\"];?",
+                            fix_import, texts[rel])
+
+    # 3. element ids: use the page's spelling
+    for rel in list(texts):
+        if not rel.endswith((".js", ".mjs")) or rel == API_JS:
+            continue
+        pages = _script_pages(texts, rel)
+        if not pages:
+            continue
+        page_ids = set()
+        for page in pages:
+            page_ids |= set(re.findall(r'\bid\s*=\s*["\']([^"\']+)["\']', texts[page]))
+        looked_up = set(re.findall(r"getElementById\(\s*['\"]([^'\"]+)['\"]", texts[rel])) | set(
+            re.findall(r"querySelector(?:All)?\(\s*['\"]#([\w-]+)['\"]", texts[rel]))
+        for wanted in sorted(looked_up - page_ids):
+            close = _close(wanted, page_ids)
+            if close:
+                texts[rel] = re.sub(rf"(getElementById\(\s*['\"]|querySelector(?:All)?\(\s*['\"]#){re.escape(wanted)}(?=['\"])",
+                                    lambda m, c=close: m.group(1) + c, texts[rel])
+                done.append(f"{rel}: looks up #{close} (the page's id) instead of #{wanted}")
+            # a missing element is left for verify to report: a placeholder <div> would hide the real cause
+
+    for rel, text in texts.items():
+        if text != orig[rel]:
+            files[rel].write_text(text, encoding="utf-8")
+    return done
 
 
 def _has_key(data: Any, key: str, depth: int = 0) -> bool:

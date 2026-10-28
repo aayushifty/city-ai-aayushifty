@@ -24,6 +24,7 @@ from app.execution.runner import ProcessRunner
 from app.execution.verifier import VerifierEngine, verify_deliverables
 from app.execution.task_history import TERMINAL_STATUSES, TaskHistory
 from app.execution import project_builder
+from app.execution.project_builder import error_signature
 from app.models.database import Database
 from app.models.schemas import (
     CitizenProfile, CitizenChatResponse, CitizenTaskRequest,
@@ -598,19 +599,22 @@ class CitizenExecutionService:
     # --- Helpers shared by chat deliverables, tasks and missions ---
 
     async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2,
-                          json_mode: bool = False, max_tokens: int = 4096, continuations: int = 0) -> str:
+                          json_mode: bool = False, max_tokens: int = 4096, continuations: int = 0,
+                          model_name: Optional[str] = None, timeout_s: Optional[float] = None) -> str:
         """With continuations > 0, a reply cut off by the token limit is continued that many times and joined,
-        so long documents are not saved ending mid-sentence."""
+        so long documents are not saved ending mid-sentence. model_name / timeout_s override the citizen's model
+        and the provider's per-call time limit (a model that runs past it is dropped for the next one)."""
+        model = model_name or citizen.assigned_model
         req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt, max_tokens=max_tokens,
-                                     model_name=citizen.assigned_model, temperature=temperature, json_mode=json_mode)
+                                     model_name=model, temperature=temperature, json_mode=json_mode, timeout_s=timeout_s)
         resp = await self._route(citizen, req)
         text = resp.content or ""
         for _ in range(continuations):
             if (getattr(resp, "raw_metadata", None) or {}).get("finish_reason") != "length":
                 break
             req = ModelCompletionRequest(
-                prompt="", system_prompt=system_prompt, max_tokens=max_tokens, model_name=citizen.assigned_model,
-                temperature=temperature, messages=[
+                prompt="", system_prompt=system_prompt, max_tokens=max_tokens, model_name=model,
+                temperature=temperature, timeout_s=timeout_s, messages=[
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": text},
                     {"role": "user", "content": "Your reply was cut off by the length limit. Continue EXACTLY where it "
@@ -973,8 +977,13 @@ class CitizenExecutionService:
                 continue
             self._write_files(ws_manager, fixes, written, task_id)
             ws_manager.commit_changes(f"fix: repair attempt {attempts} for {req.title}")
-            evidence = await verify_deliverables(workspace_dir, written)
+            previous, evidence = evidence, await verify_deliverables(workspace_dir, written)
             await self._reason(citizen, task_id, "tool_result", _evidence_line(evidence))
+            if evidence.exit_code != 0 and error_signature(previous.output_snippet) == error_signature(evidence.output_snippet):
+                await self._reason(citizen, task_id, "thought",
+                                   "The repair produced the same error again; stopping instead of looping on it.")
+                self.history.update(task_id, note=f"Repair attempt {attempts}: same error as before; stopped repairing.")
+                break
 
         verified = evidence.exit_code == 0
         if primary and primary.exists():
@@ -1033,8 +1042,16 @@ class CitizenExecutionService:
         """A real multi-file project: requirements checklist, plan, files, verification, repair, peer review, link."""
         reviewer = self.citizens["agent-architect" if citizen.id == "agent-qa" else "agent-qa"]
 
+        freellm = model_router.get_provider("freellm")
+
         def model_for(c: CitizenProfile):
             async def call(prompt: str, system: str, json_mode: bool, max_tokens: int) -> str:
+                # Bulk file writes and repairs go to a quick coder with a per-call time limit; the gateway fails
+                # over down the fast chain, then the coding chain. Without fast models: the citizen's own model.
+                fast = await freellm.fast_models() if (freellm and c.provider_key == "freellm") else []
+                if fast:
+                    return await self._model_call(c, prompt, system, temperature=0.25, json_mode=json_mode,
+                                                  max_tokens=max_tokens, model_name=fast[0], timeout_s=FAST_CALL_TIMEOUT_S)
                 return await self._model_call(c, prompt, system, temperature=0.25, json_mode=json_mode, max_tokens=max_tokens)
             return call
 
@@ -1378,7 +1395,8 @@ class CitizenExecutionService:
             + (f"The mission's result is ONE {'3D ' if mission.get('three_d') else ''}"
                f"{'website' if mission.get('web_kind') == 'WEBSITE' else 'presentation'}. Your subtasks must NOT build it: they "
                "research and write the content, copy, data and design notes (markdown or JSON). A final assembly step, "
-               "added automatically, builds the single deliverable from all of their work.\n"
+               "added automatically, builds the single deliverable from all of their work. Use at most 3 subtasks, all "
+               "markdown or JSON: no Django, Flask, Python, test suites or other code steps — the assembly picks the stack.\n"
                if mission.get("web_kind") else "")
             + 
             f"Available agent IDs: {agent_list}.\n"
@@ -1400,6 +1418,8 @@ class CitizenExecutionService:
         except Exception as ex:
             logger.warning(f"Mission decomposition failed: {ex}")
 
+        if mission.get("web_kind"):
+            subtasks_data = _content_steps_only(subtasks_data)
         if not subtasks_data:
             subtasks_data = _fallback_subtasks(req)
 
@@ -1611,6 +1631,7 @@ class CitizenExecutionService:
         """Runs a ticket, then holds it in review until QA signs off. A rejection sends it back to the
         assignee with QA's notes; after QA_MAX_ROUNDS rejections the ticket fails with those notes."""
         result = await self._run_mission_subtask(mission, st, subtasks)
+        is_doc = Path(str(st.get("expected_deliverable") or "")).suffix.lower() in DOC_SUFFIXES
         for rnd in range(1, self.QA_MAX_ROUNDS + 1):
             if not result.get("verified"):
                 return result
@@ -1625,6 +1646,9 @@ class CitizenExecutionService:
             if approved:
                 return result
             st.setdefault("qa_history", []).append(notes)
+            if is_doc:
+                # a written document gets one QA pass: the assignee revises with the notes, without a second review
+                return await self._run_mission_subtask(mission, st, subtasks, qa_notes=notes)
             if rnd == self.QA_MAX_ROUNDS:
                 return {**result, "verified": False, "error": f"QA rejected after {rnd} rounds: {notes}"}
             result = await self._run_mission_subtask(mission, st, subtasks, qa_notes=notes)
@@ -1886,6 +1910,19 @@ class CitizenExecutionService:
 
 
 MAX_REPAIR_ATTEMPTS = 3
+DOC_SUFFIXES = (".md", ".json", ".txt", ".csv")
+CONTENT_STEPS_MAX = 3
+_CODE_STEP = re.compile(r"\b(django|flask|fastapi|pytest|unit ?tests?|test suite|testing|backend|server|database|migrations?)\b", re.I)
+
+
+def _content_steps_only(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """For a mission the final assembly builds, keep only the planner's content steps: code, framework and test
+    steps are dropped (the builder picks and writes the stack itself) and at most CONTENT_STEPS_MAX remain."""
+    kept = [s for s in steps
+            if Path(str(s.get("expected_deliverable") or "notes.md")).suffix.lower() in DOC_SUFFIXES + (".html", ".htm")
+            and not _CODE_STEP.search(f"{s.get('title', '')} {s.get('expected_deliverable', '')}")]
+    return kept[:CONTENT_STEPS_MAX]
+FAST_CALL_TIMEOUT_S = 150.0     # a project file that takes a quick coder longer than this goes to the next model
 CODING_ROLES = {"engineer", "webdev", "designer", "devops", "qa", "architect"}
 MAX_CHANNEL_POSTS = 300
 REVISABLE_STATUSES = {"VERIFIED", "FAILED"}

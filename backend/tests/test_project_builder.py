@@ -97,7 +97,7 @@ async def test_honest_failure_when_the_model_cannot_fix_it(svc, monkeypatch):
     result, rec = await build(svc, monkeypatch, model)
     assert result["verified"] is False and rec["status"] == "FAILED"
     assert "JavaScript syntax error" in rec["verification"]["output"]
-    assert rec["verification"]["repair_attempts"] == project_builder.MAX_REPAIR_ROUNDS
+    assert rec["verification"]["repair_attempts"] == 1          # the same error twice stops the loop early
     assert result["url"], "the project is still published so you can look at it"
 
 

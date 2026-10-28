@@ -67,7 +67,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
         if request.json_mode and self.supports_json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        async with self._client(self.request_timeout) as client:
+        async with self._client(request.timeout_s or self.request_timeout) as client:
             resp = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if resp.status_code == 400 and "response_format" in payload:
                 # Some hosted models reject JSON mode; retry without it and parse leniently.
@@ -103,7 +103,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self._extra_headers()}
         payload = {"model": self._model_for(request), "messages": request.chat_messages(),
                    "temperature": request.temperature, "max_tokens": request.max_tokens, "stream": True}
-        async with self._client(self.request_timeout) as client:
+        async with self._client(request.timeout_s or self.request_timeout) as client:
             async with client.stream("POST", f"{self.base_url}/chat/completions", headers=headers, json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():

@@ -73,7 +73,7 @@ class ModelRouter:
         # a little parallelism.
         self._semaphores: Dict[str, PriorityGate] = {
             "ollama": PriorityGate(1),
-            "freellm": PriorityGate(2),     # free upstreams rate-limit bursts: two requests at a time
+            "freellm": PriorityGate(4),     # files are written in parallel; the gateway fails over per model on 429s
         }
         self._waiting: Dict[str, int] = {}
 

@@ -549,3 +549,24 @@ def test_missing_imports_flags_uninstalled_packages_only(tmp_path):
     (tmp_path / "models.py").write_text("")
     src = "import os, json\nimport flask_never_installed_xyz\nfrom fastapi import FastAPI\nfrom models import Todo\nfrom . import x\n"
     assert _missing_imports(src, tmp_path) == ["flask_never_installed_xyz"]
+
+
+@pytest.mark.asyncio
+async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page(tmp_path):
+    ws = tmp_path / "ws"
+    server = project_builder.SERVER_TEMPLATE
+    app_js = ("const API_BASE = '/api';\n"
+              "fetch(`${API_BASE}/items/todos`); fetch(`/api/items/todos/${id}`, {method: 'PUT'});\n"
+              "fetch(`${API_BASE}/tasks`); fetch('/api/auth/login', {method: 'POST'});\n"
+              "const pw = form.querySelector('input[name=\"confirm-password\"]').value;\n"
+              "const email = form.elements.email.value;\n")
+    page = FILES["index.html"].replace("{HEADLINE}", "x").replace(
+        "</body>", '<form><input name="email"><input name="confirmPassword"></form><script src="js/app.js"></script></body>')
+    write_project(ws, {"server.py": server, "js/app.js": app_js, "index.html": page})
+    plan, reqs = fake_plan_and_reqs()
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    msgs = " | ".join(problems.get("js/app.js", []))
+    assert "calls /api/auth/login, /api/tasks, which server.py does not have" in msgs
+    assert "/api/items/todos" not in msgs.split("which server.py")[0]
+    assert "reads form field(s) that no page has a name= for: confirm-password" in msgs
+    assert "email" not in msgs.split("name= for:")[1].split("(")[0]

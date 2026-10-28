@@ -110,6 +110,22 @@ async def test_qa_review_rejects_placeholder_files_without_a_model(svc, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_qa_sees_the_end_of_a_long_file_and_the_gap_is_marked(svc, tmp_path, monkeypatch):
+    mission, st = _ticket(svc, tmp_path)
+    body = "".join(f"<p>Section {i} has real content about todos.</p>\n" for i in range(400))
+    Path(tmp_path, "report.html").write_text(f"<html><body>{body}<p>THE END</p></body></html>", encoding="utf-8")
+    seen = {}
+
+    async def model(citizen, prompt, *a, **k):
+        seen["prompt"] = prompt
+        return '{"approved": true, "notes": "complete"}'
+
+    monkeypatch.setattr(svc, "_model_call", model)
+    ok, _, _ = await svc._qa_review(mission, st, {"files": ["report.html"]})
+    assert ok and "THE END" in seen["prompt"] and "characters omitted" in seen["prompt"]
+
+
+@pytest.mark.asyncio
 async def test_full_mission_lands_every_ticket_in_done_with_qa_sign_off(svc, monkeypatch):
     mission, _, _ = await run(svc, monkeypatch)
     board = svc.mission_board(mission["id"])
@@ -132,3 +148,22 @@ def test_board_route(svc, monkeypatch):
     body = client.get("/api/missions/m1/board").json()
     assert [t["role"] for t in body["columns"]["review"]] == ["PM"]
     assert body["columns"]["done"] == []
+
+
+@pytest.mark.asyncio
+async def test_reply_cut_off_by_the_length_limit_is_continued(svc, monkeypatch):
+    from app.providers.base import ModelCompletionResponse
+    replies = iter([("# Report\nReact is well-suited for", "length"), (" interactive UIs. Done.", "stop")])
+    sent = []
+
+    async def fake_route(citizen, req, interactive=False):
+        sent.append(req)
+        text, reason = next(replies)
+        return ModelCompletionResponse(content=text, model_name="m", provider_name="p",
+                                       raw_metadata={"finish_reason": reason})
+
+    monkeypatch.setattr(svc, "_route", fake_route)
+    citizen = next(iter(svc.citizens.values()))
+    out = await svc._model_call(citizen, "write it", "sys", continuations=2)
+    assert out == "# Report\nReact is well-suited for interactive UIs. Done."
+    assert len(sent) == 2 and sent[1].messages[1] == {"role": "assistant", "content": "# Report\nReact is well-suited for"}

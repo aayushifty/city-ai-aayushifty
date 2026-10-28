@@ -93,7 +93,7 @@ class OpenAIModelProvider(ModelProviderAdapter):
             estimated_cost_usd=cost,
             latency_ms=latency,
             is_fallback=False,
-            raw_metadata={"id": data.get("id")}
+            raw_metadata={"id": data.get("id"), "finish_reason": choice.get("finish_reason")}
         )
 
     async def generate_stream(self, request: ModelCompletionRequest):

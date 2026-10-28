@@ -598,11 +598,26 @@ class CitizenExecutionService:
     # --- Helpers shared by chat deliverables, tasks and missions ---
 
     async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2,
-                          json_mode: bool = False, max_tokens: int = 4096) -> str:
+                          json_mode: bool = False, max_tokens: int = 4096, continuations: int = 0) -> str:
+        """With continuations > 0, a reply cut off by the token limit is continued that many times and joined,
+        so long documents are not saved ending mid-sentence."""
         req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt, max_tokens=max_tokens,
                                      model_name=citizen.assigned_model, temperature=temperature, json_mode=json_mode)
         resp = await self._route(citizen, req)
-        return resp.content or ""
+        text = resp.content or ""
+        for _ in range(continuations):
+            if (getattr(resp, "raw_metadata", None) or {}).get("finish_reason") != "length":
+                break
+            req = ModelCompletionRequest(
+                prompt="", system_prompt=system_prompt, max_tokens=max_tokens, model_name=citizen.assigned_model,
+                temperature=temperature, messages=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": "Your reply was cut off by the length limit. Continue EXACTLY where it "
+                                                "stopped, with no repetition and no preamble."}])
+            resp = await self._route(citizen, req)
+            text += resp.content or ""
+        return text
 
     async def _progress(self, citizen: CitizenProfile, task_id: str, status: str, progress: float,
                         thought: Optional[str] = None, history_status: Optional[str] = None, **history_fields: Any) -> None:
@@ -860,7 +875,8 @@ class CitizenExecutionService:
         system = f"You are {citizen.name}. Generate complete, working code, reports and documentation."
         await self._progress(citizen, task_id, "WORKING", 30.0,
                              f"Applying your changes to {req.title}" if revision else f"Writing deliverables for {req.title}")
-        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1, json_mode=bool(revision))
+        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1, json_mode=bool(revision),
+                                             max_tokens=8192, continuations=2)
         parsed = _extract_json(raw_output)
         files_to_write = _files_from(parsed)
         if not files_to_write and revision:
@@ -1629,11 +1645,12 @@ class CitizenExecutionService:
         excerpts = []
         for rel in files[:3]:
             text = (workspace / rel).read_text(encoding="utf-8", errors="replace")
-            excerpts.append(f"--- {rel} ---\n{text[:1500]}")
+            excerpts.append(f"--- {rel} ---\n{_qa_excerpt(text)}")
         prompt = (f"QA sign-off for ticket '{st['title']}' (mission: {mission['title']}).\n"
                   f"Expected deliverable: {st['expected_deliverable']}\n"
                   f"Assignee's summary: {str(result.get('summary') or '')[:500]}\n\n" + "\n".join(excerpts) +
-                  "\n\nReject only for concrete defects: missing required content, placeholder text, broken markup "
+                  "\n\nA '[... N characters omitted ...]' marker is where this excerpt skips text, not a defect in the file. "
+                  "Reject only for concrete defects: missing required content, placeholder text, broken markup "
                   'or code, or the wrong topic. Reply with JSON only: {"approved": true or false, "notes": "what to fix, or why it passes"}')
         try:
             raw = await self._model_call(reviewer, prompt, f"You are {reviewer.name}, the QA lead. Be strict but fair.",
@@ -2106,6 +2123,13 @@ def ticket_role(agent_id: str) -> str:
 
 def ticket_column(status: str) -> str:
     return _COLUMN_BY_STATUS.get(status, "backlog")
+
+
+def _qa_excerpt(text: str, head: int = 4000, tail: int = 1500) -> str:
+    """The start and end of a file for QA, with the gap marked, so a long file is not judged as cut off."""
+    if len(text) <= head + tail:
+        return text
+    return f"{text[:head]}\n[... {len(text) - head - tail} characters omitted ...]\n{text[-tail:]}"
 
 
 def qa_static_issues(workspace: Path, files: List[str]) -> List[str]:

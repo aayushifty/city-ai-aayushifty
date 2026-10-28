@@ -471,6 +471,9 @@ def test_portfolios_and_web_apps_are_websites_but_stock_portfolios_are_not():
     assert _is_web_request("build a web app for todo lists") and _is_web_request("personal site with a blog")
     assert not _is_web_request("Analyze my stock portfolio risk")
     assert not _is_web_request("Build a construction site safety report")
+    assert _mission_web_kind("Build a todo app that saves items") == "WEBSITE"
+    assert _mission_web_kind("an app that tracks my reading list") == "WEBSITE"
+    assert _mission_web_kind("Write a market analysis of app stores") is None
 
 
 def test_fake_binary_and_sentence_files_are_refused(svc):

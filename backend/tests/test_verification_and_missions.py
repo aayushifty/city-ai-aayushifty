@@ -305,6 +305,11 @@ async def test_mission_submit_returns_immediately_and_plans_in_background(svc, m
 
     monkeypatch.setattr(model_router, "route_completion", slow_planner)
     monkeypatch.setattr(svc, "_run_task_execution_loop", fake_loop)
+
+    async def qa_signs_off(m, st, result):
+        return True, "ok", svc.citizens["agent-qa"]
+
+    monkeypatch.setattr(svc, "_qa_review", qa_signs_off)
     req = PublicMissionCreateRequest(title="Build a  Modern Trauma Center", description="d")
     mission = svc.submit_public_mission(req)
     assert mission["status"] == "PLANNING" and mission["subtasks"] == []

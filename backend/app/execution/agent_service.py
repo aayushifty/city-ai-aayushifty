@@ -1917,9 +1917,15 @@ def _mission_web_kind(text: str) -> Optional[str]:
     t = (text or "").lower()
     if re.search(r"\bpresentation\b|\bslides?\b|\bslide deck\b|\bdeck\b", t):
         return "3D_PRESENTATION"
-    if _is_web_request(t):
+    if _is_web_request(t) or _APP_RE.search(t):
         return "WEBSITE"
     return None
+
+
+# a usable app ("a todo app", "an app that saves notes") is delivered as one live web app too
+_APP_RE = re.compile(r"\b(?:todo|to-do|notes?|tracker|habit|budget|expense|recipe|quiz|calculator|booking|"
+                     r"inventory|chat|kanban|timer|game|crud)\s+(?:list\s+)?apps?\b|\bapps?\s+(?:that|which|to|for)\b",
+                     re.IGNORECASE)
 
 
 _WEB_RE = re.compile(r"\bweb ?sites?\b|\blanding pages?\b|\bweb ?pages?\b|\bhome ?page\b|\bweb ?apps?\b|"

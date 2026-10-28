@@ -28,3 +28,4 @@ node_modules/
 data/workspaces/
 .pytest_cache/
 backend/.pytest_cache/
+.playwright-mcp/

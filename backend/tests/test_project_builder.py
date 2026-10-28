@@ -570,3 +570,15 @@ async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page
     assert "/api/items/todos" not in msgs.split("which server.py")[0]
     assert "reads form field(s) that no page has a name= for: confirm-password" in msgs
     assert "email" not in msgs.split("name= for:")[1].split("(")[0]
+
+    api_js = ("class Api { constructor() { this.baseUrl = 'http://localhost:8000'; this.root = ''; }\n"
+              "  a() { return fetch(`${this.baseUrl}/login`); }\n"
+              "  b() { return fetch(`${this.root}/todos/${id}`); }\n"
+              "  c() { return fetch(`${this.root}/api/items/todos`); }\n"
+              "  d() { return fetch('css/style.css'); } }\n")
+    write_project(ws, {"js/app.js": api_js})
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    msgs = " | ".join(problems.get("js/app.js", []))
+    assert "http://localhost:8000/login (use a relative URL" in msgs
+    assert "/todos/x" in msgs
+    assert "/api/items/todos" not in msgs.split("which server.py")[0] and "style.css" not in msgs

@@ -571,15 +571,23 @@ class ProjectBuilder:
             for rel, text in texts.items():
                 if not rel.endswith((".js", ".mjs")) and not rel.endswith(".html"):
                     continue
-                consts = dict(re.findall(r"\b(?:const|let|var)\s+(\w+)\s*=\s*['\"`]([^'\"`$]*)['\"`]", text))
+                # const API = '/api', this.baseUrl = 'http://localhost:8000', baseUrl: '/api'
+                consts = dict(re.findall(r"(?:\b(?:const|let|var)\s+|\bthis\.|[{,]\s*)(\w+)\s*[:=]\s*['\"`]([^'\"`$]*)['\"`]", text))
                 urls = [u for _, u in re.findall(r"fetch\(\s*(['\"`])(.*?)\1", text)]
-                urls += [consts[n] for n in re.findall(r"fetch\(\s*([A-Za-z_]\w*)\s*[,)]", text) if n in consts]
+                urls += [consts[n] for n in re.findall(r"fetch\(\s*(?:this\.)?([A-Za-z_]\w*)\s*[,)]", text) if n in consts]
                 bad = set()
                 for url in urls:
-                    path = re.sub(r"\$\{\s*(\w+)\s*\}", lambda m: consts.get(m.group(1), "x"), url)
+                    # a leading unknown ${base} is the site root; other unknown ${...} are ids
+                    path = re.sub(r"^\$\{\s*(?:this\.)?(\w+)\s*\}", lambda m: consts.get(m.group(1), ""), url)
+                    path = re.sub(r"\$\{\s*(?:this\.)?(\w+)\s*\}", lambda m: consts.get(m.group(1), "x"), path)
                     path = re.sub(r"\$\{[^}]*\}", "x", path).split("?")[0].split("#")[0]
+                    if re.match(r"https?://(localhost|127\.0\.0\.1)", path):
+                        bad.add(path + " (use a relative URL: the app runs on its own port)")
+                        continue
                     path = "/" + path.lstrip("./") if path.startswith(("api/", "./api/")) else path
-                    if path.startswith("/api") and not any(r.match(path.rstrip("/")) for r in routes):
+                    if not path.startswith("/") or path.rstrip("/") == "" or "." in path.rsplit("/", 1)[-1]:
+                        continue  # external, the page itself, or a static file
+                    if not any(r.match(path.rstrip("/")) for r in routes):
                         bad.add(path)
                 if bad:
                     add(rel, "calls " + ", ".join(sorted(bad)[:6]) + ", which server.py does not have. The only API "

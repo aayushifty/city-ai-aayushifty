@@ -6,6 +6,7 @@ real verification with bounded repair, artifact tracking, and public mission DAG
 """
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import json
 import logging
@@ -23,6 +24,7 @@ from app.execution.runner import ProcessRunner
 from app.execution.verifier import VerifierEngine, verify_deliverables
 from app.execution.task_history import TERMINAL_STATUSES, TaskHistory
 from app.execution import project_builder
+from app.execution.project_builder import error_signature
 from app.models.database import Database
 from app.models.schemas import (
     CitizenProfile, CitizenChatResponse, CitizenTaskRequest,
@@ -31,9 +33,18 @@ from app.models.schemas import (
 from app.providers.base import ModelCompletionRequest
 from app.providers.router import model_router
 from app.execution.computer_service import computer_service
+from app.execution.app_runner import app_runner
 from app.execution.roster import CITIZENS
 
 logger = logging.getLogger("city_ai.agent_service")
+
+def _evidence_line(evidence: Any) -> str:
+    """One-line summary of a verification run for the reasoning feed."""
+    status = "passed" if evidence.exit_code == 0 else f"failed (exit {evidence.exit_code})"
+    tail = " ".join(str(getattr(evidence, "output_snippet", "") or "").split())[-200:]
+    return (f"verification {status}: {evidence.passed_tests} passed, {evidence.failed_tests} failed"
+            + (f" - {tail}" if tail and evidence.exit_code != 0 else ""))
+
 
 class CitizenExecutionService:
     """Coordinates persistent AI citizens, real local model execution, tools, and deliverables."""
@@ -53,6 +64,7 @@ class CitizenExecutionService:
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._citizen_locks: Dict[str, asyncio.Lock] = {}
         self._chat_memory: Dict[str, List[Tuple[str, str]]] = {}  # recent chat turns per citizen
+        self._reasoning: Dict[str, deque] = {}  # recent plan/thought/tool steps per citizen (summaries, not raw CoT)
         self.history = TaskHistory(config.DATA_DIR / "task_history.json")
         self._init_citizens()
 
@@ -587,11 +599,29 @@ class CitizenExecutionService:
     # --- Helpers shared by chat deliverables, tasks and missions ---
 
     async def _model_call(self, citizen: CitizenProfile, prompt: str, system_prompt: str, temperature: float = 0.2,
-                          json_mode: bool = False, max_tokens: int = 4096) -> str:
+                          json_mode: bool = False, max_tokens: int = 4096, continuations: int = 0,
+                          model_name: Optional[str] = None, timeout_s: Optional[float] = None) -> str:
+        """With continuations > 0, a reply cut off by the token limit is continued that many times and joined,
+        so long documents are not saved ending mid-sentence. model_name / timeout_s override the citizen's model
+        and the provider's per-call time limit (a model that runs past it is dropped for the next one)."""
+        model = model_name or citizen.assigned_model
         req = ModelCompletionRequest(prompt=prompt, system_prompt=system_prompt, max_tokens=max_tokens,
-                                     model_name=citizen.assigned_model, temperature=temperature, json_mode=json_mode)
+                                     model_name=model, temperature=temperature, json_mode=json_mode, timeout_s=timeout_s)
         resp = await self._route(citizen, req)
-        return resp.content or ""
+        text = resp.content or ""
+        for _ in range(continuations):
+            if (getattr(resp, "raw_metadata", None) or {}).get("finish_reason") != "length":
+                break
+            req = ModelCompletionRequest(
+                prompt="", system_prompt=system_prompt, max_tokens=max_tokens, model_name=model,
+                temperature=temperature, timeout_s=timeout_s, messages=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": text},
+                    {"role": "user", "content": "Your reply was cut off by the length limit. Continue EXACTLY where it "
+                                                "stopped, with no repetition and no preamble."}])
+            resp = await self._route(citizen, req)
+            text += resp.content or ""
+        return text
 
     async def _progress(self, citizen: CitizenProfile, task_id: str, status: str, progress: float,
                         thought: Optional[str] = None, history_status: Optional[str] = None, **history_fields: Any) -> None:
@@ -778,6 +808,9 @@ class CitizenExecutionService:
         ws_manager = WorkspaceManager(workspace_dir)
         self.history.update(task_id, workspace=str(workspace_dir))
         await self._progress(citizen, task_id, "PLANNING", 10.0, f"Planning: {req.title}")
+        await self._reason(citizen, task_id, "plan",
+                           f"Revising '{req.title}' from your feedback" if revision else
+                           f"Taking on '{req.title}' - deliverable: {req.expected_deliverable or 'see brief'}")
 
         task_text = f"{req.title} {req.description} {req.expected_deliverable}".lower()
         web_kind = None
@@ -846,13 +879,16 @@ class CitizenExecutionService:
         system = f"You are {citizen.name}. Generate complete, working code, reports and documentation."
         await self._progress(citizen, task_id, "WORKING", 30.0,
                              f"Applying your changes to {req.title}" if revision else f"Writing deliverables for {req.title}")
-        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1, json_mode=bool(revision))
+        raw_output = await self._model_call(citizen, plan_prompt, system, temperature=0.1, json_mode=bool(revision),
+                                             max_tokens=8192, continuations=2)
         parsed = _extract_json(raw_output)
         files_to_write = _files_from(parsed)
         if not files_to_write and revision:
             # models sometimes answer in the "--- path ---" / fenced-code layout they were shown
             files_to_write = _files_from_text(raw_output, [_rel(fp, workspace_dir) for fp in previous_files])
         summary = str(parsed.get("summary", "")) if isinstance(parsed, dict) else ""
+        if summary:
+            await self._reason(citizen, task_id, "thought", summary)
         if not files_to_write and revision and previous_files:
             # A revision must edit the existing work: a reply without a file list cannot be applied safely.
             snippet = re.sub(r"\s+", " ", raw_output or "")[:300]
@@ -867,6 +903,9 @@ class CitizenExecutionService:
             self.history.update(task_id, note="Model did not return the JSON file list; saved its reply as the deliverable.")
 
         written: List[Path] = list(previous_files)    # a revision is verified as the whole deliverable
+        if files_to_write:
+            names = [str(f.get("path", "")) for f in files_to_write][:6]
+            await self._reason(citizen, task_id, "tool_call", f"write {len(files_to_write)} file(s): {', '.join(names)}")
         self._write_files(ws_manager, files_to_write, written, task_id)
         ws_manager.commit_changes(f"revise: {req.title} v{revision.get('version')} by {citizen.name}" if revision
                                   else f"feat: {req.title} by {citizen.name}")
@@ -902,7 +941,9 @@ class CitizenExecutionService:
         self.artifacts[artifact.id] = artifact
 
         await self._progress(citizen, task_id, "TESTING", 60.0, "Running verification checks...")
+        await self._reason(citizen, task_id, "tool_call", "run verification checks")
         evidence = await verify_deliverables(workspace_dir, written)
+        await self._reason(citizen, task_id, "tool_result", _evidence_line(evidence))
         attempts = 0
         while evidence.exit_code != 0 and attempts < MAX_REPAIR_ATTEMPTS:
             attempts += 1
@@ -925,14 +966,24 @@ class CitizenExecutionService:
             except Exception as ex:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model call failed ({ex}).")
                 continue
-            fixes = _files_from(_extract_json(repair_raw)) or _files_from_text(
+            repair_json = _extract_json(repair_raw)
+            diagnosis = repair_json.get("diagnosis") if isinstance(repair_json, dict) else None
+            if diagnosis:
+                await self._reason(citizen, task_id, "thought", f"Diagnosis: {diagnosis}")
+            fixes = _files_from(repair_json) or _files_from_text(
                 repair_raw, [_rel(p, workspace_dir) for p in written])
             if not fixes:
                 self.history.update(task_id, note=f"Repair attempt {attempts}: model reply had no file fixes.")
                 continue
             self._write_files(ws_manager, fixes, written, task_id)
             ws_manager.commit_changes(f"fix: repair attempt {attempts} for {req.title}")
-            evidence = await verify_deliverables(workspace_dir, written)
+            previous, evidence = evidence, await verify_deliverables(workspace_dir, written)
+            await self._reason(citizen, task_id, "tool_result", _evidence_line(evidence))
+            if evidence.exit_code != 0 and error_signature(previous.output_snippet) == error_signature(evidence.output_snippet):
+                await self._reason(citizen, task_id, "thought",
+                                   "The repair produced the same error again; stopping instead of looping on it.")
+                self.history.update(task_id, note=f"Repair attempt {attempts}: same error as before; stopped repairing.")
+                break
 
         verified = evidence.exit_code == 0
         if primary and primary.exists():
@@ -991,13 +1042,26 @@ class CitizenExecutionService:
         """A real multi-file project: requirements checklist, plan, files, verification, repair, peer review, link."""
         reviewer = self.citizens["agent-architect" if citizen.id == "agent-qa" else "agent-qa"]
 
+        freellm = model_router.get_provider("freellm")
+
         def model_for(c: CitizenProfile):
             async def call(prompt: str, system: str, json_mode: bool, max_tokens: int) -> str:
+                # Bulk file writes and repairs go to a quick coder with a per-call time limit; the gateway fails
+                # over down the fast chain, then the coding chain. Without fast models: the citizen's own model.
+                fast = await freellm.fast_models() if (freellm and c.provider_key == "freellm") else []
+                if fast:
+                    return await self._model_call(c, prompt, system, temperature=0.25, json_mode=json_mode,
+                                                  max_tokens=max_tokens, model_name=fast[0], timeout_s=FAST_CALL_TIMEOUT_S)
                 return await self._model_call(c, prompt, system, temperature=0.25, json_mode=json_mode, max_tokens=max_tokens)
             return call
 
         async def progress(message: str, pct: float) -> None:
             await self._progress(citizen, task_id, "TESTING" if pct >= 60 else "WORKING", pct, message[:160])
+            lowered = message.lower()
+            kind = ("plan" if lowered.startswith("planning") else
+                    "tool_call" if lowered.startswith(("writing", "running", "checking", "verifying")) else
+                    "tool_result" if "fail" in lowered or "passed" in lowered else "thought")
+            await self._reason(citizen, task_id, kind, message)
 
         builder = project_builder.ProjectBuilder(model_for(citizen), model_for(reviewer), progress,
                                                  lambda text: self.history.update(task_id, note=text))
@@ -1008,6 +1072,9 @@ class CitizenExecutionService:
 
         dest, rel = await asyncio.to_thread(project_builder.publish, workspace_dir, result["plan"]["name"], task_id)
         url = computer_service.public_url(rel)
+        live = await self._serve_live(citizen, task_id, dest, result["plan"]["name"])
+        if live:
+            url = live["url"]
         verified = result["verified"]
         report = (f"Requirements: {result['passed']}/{result['total']} implemented and checked. "
                   + (f"Review by {result['review']['reviewer']}: "
@@ -1029,7 +1096,8 @@ class CitizenExecutionService:
         self._record_artifact(citizen, task_id, artifact, verified)
         self.history.update(task_id, project=result["plan"], requirements=result["requirements"], review=result["review"],
                             three_d=result["three_d"], project_files=result["files"],
-                            browser=_browser_summary(result.get("runtime")))
+                            browser=_browser_summary(result.get("runtime")),
+                            live_app=live, static_url=computer_service.public_url(rel))
         self._finish_history(task_id, verified, evidence, attempts=result["repair_rounds"])
         await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
                              f"{result['plan']['name'][:60]}: {result['passed']}/{result['total']} requirements"
@@ -1037,6 +1105,25 @@ class CitizenExecutionService:
                              history_status="VERIFIED" if verified else "FAILED")
         return {"verified": verified, "files": result["files"], "evidence": evidence, "attempts": result["repair_rounds"],
                 "summary": report, "url": url, "error": None if verified else report}
+
+    async def _serve_live(self, citizen: CitizenProfile, task_id: str, project: Path, name: str) -> Optional[Dict[str, Any]]:
+        """Runs the published project as a live loopback server (FastAPI, Node or static) and checks it answers
+        HTTP 200. Returns the app record, or None when it would not start (the /deliverables link still works)."""
+        old = app_runner.by_task(task_id)
+        if old:
+            await asyncio.to_thread(app_runner.stop, old["id"])
+        try:
+            info = await asyncio.to_thread(app_runner.start, project, name, task_id)
+        except Exception as ex:
+            await self._reason(citizen, task_id, "result", f"Could not start the live app: {ex}")
+            return None
+        if info.get("status") != "running":
+            await self._reason(citizen, task_id, "result",
+                               f"Live app did not come up ({info.get('status')}): {(info.get('error') or '')[:200]}")
+            return None
+        await self._reason(citizen, task_id, "result",
+                           f"Live {info['kind']} app is running at {info['url']} (HTTP 200 checked).")
+        return info
 
     def _write_files(self, ws_manager: WorkspaceManager, files: List[Dict[str, str]], written: List[Path], task_id: str) -> None:
         for f in files:
@@ -1308,7 +1395,8 @@ class CitizenExecutionService:
             + (f"The mission's result is ONE {'3D ' if mission.get('three_d') else ''}"
                f"{'website' if mission.get('web_kind') == 'WEBSITE' else 'presentation'}. Your subtasks must NOT build it: they "
                "research and write the content, copy, data and design notes (markdown or JSON). A final assembly step, "
-               "added automatically, builds the single deliverable from all of their work.\n"
+               "added automatically, builds the single deliverable from all of their work. Use at most 3 subtasks, all "
+               "markdown or JSON: no Django, Flask, Python, test suites or other code steps — the assembly picks the stack.\n"
                if mission.get("web_kind") else "")
             + 
             f"Available agent IDs: {agent_list}.\n"
@@ -1330,6 +1418,8 @@ class CitizenExecutionService:
         except Exception as ex:
             logger.warning(f"Mission decomposition failed: {ex}")
 
+        if mission.get("web_kind"):
+            subtasks_data = _content_steps_only(subtasks_data)
         if not subtasks_data:
             subtasks_data = _fallback_subtasks(req)
 
@@ -1379,6 +1469,9 @@ class CitizenExecutionService:
             self.history.start(final_task, builder.id, builder.name, final_title, kind="MISSION_SUBTASK", mission_id=mission_id)
             mission["final_subtask_id"] = f"{mission_id}-final"
 
+        for st in formatted_subtasks:
+            st["role"] = ticket_role(st["assigned_agent_id"])
+            st["qa"] = None
         mission["subtasks"] = formatted_subtasks
         mission["participating_agent_ids"] = list(dict.fromkeys(s["assigned_agent_id"] for s in formatted_subtasks))
         mission["status"] = "IN_PROGRESS"
@@ -1425,7 +1518,7 @@ class CitizenExecutionService:
                         else all(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"])
                     if st["status"] == "PENDING" and deps_done:
                         st["status"] = "QUEUED"
-                        running[asyncio.create_task(self._run_mission_subtask(mission, st, subtasks))] = st["id"]
+                        running[asyncio.create_task(self._run_ticket(mission, st, subtasks))] = st["id"]
                 if not running:
                     for st in subtasks.values():
                         if st["status"] == "PENDING":  # only reachable with a dependency cycle
@@ -1482,7 +1575,7 @@ class CitizenExecutionService:
         ))
 
     async def _run_mission_subtask(self, mission: Dict[str, Any], st: Dict[str, Any],
-                                   subtasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+                                   subtasks: Dict[str, Dict[str, Any]], qa_notes: str = "") -> Dict[str, Any]:
         citizen = self.citizens[st["assigned_agent_id"]]
         workspace = Path(mission["workspace_dir"])
         context_parts = []
@@ -1497,6 +1590,9 @@ class CitizenExecutionService:
                     part += f"--- {rel} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2500]}\n"
             context_parts.append(part)
         st["context_from"] = list(st["dependencies"])
+        if qa_notes:
+            context_parts.insert(0, "## QA rejected your previous attempt. Fix every point before resubmitting:\n"
+                                 + qa_notes[:1500] + "\n")
         description = f"Part of mission '{mission['title']}': {mission['description']}"
         if st.get("final"):
             failed = [subtasks[d]["title"] for d in st["dependencies"] if subtasks[d]["status"] != "COMPLETED"]
@@ -1526,14 +1622,133 @@ class CitizenExecutionService:
                                                        context="\n".join(context_parts), mission_id=mission["id"],
                                                        allow_web=allow_web)
 
+    # --- Company workflow: tickets move backlog -> in progress -> review -> done, and QA signs off ---
+
+    QA_MAX_ROUNDS = 2
+
+    async def _run_ticket(self, mission: Dict[str, Any], st: Dict[str, Any],
+                          subtasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Runs a ticket, then holds it in review until QA signs off. A rejection sends it back to the
+        assignee with QA's notes; after QA_MAX_ROUNDS rejections the ticket fails with those notes."""
+        result = await self._run_mission_subtask(mission, st, subtasks)
+        is_doc = Path(str(st.get("expected_deliverable") or "")).suffix.lower() in DOC_SUFFIXES
+        for rnd in range(1, self.QA_MAX_ROUNDS + 1):
+            if not result.get("verified"):
+                return result
+            st["status"] = "REVIEW"
+            st["progress"] = 90
+            approved, notes, reviewer = await self._qa_review(mission, st, result)
+            st["qa"] = {"approved": approved, "notes": notes, "round": rnd, "reviewer": reviewer.name}
+            text = f"QA sign-off: {st['title']}. {notes}" if approved else \
+                f"QA rejected {st['title']} (round {rnd}), sent back with notes: {notes}"
+            self._post(mission, "citizen", text, kind="review", author_id=reviewer.id, author_name=reviewer.name,
+                       task_id=st["task_id"], role=ticket_role(reviewer.id))
+            if approved:
+                return result
+            st.setdefault("qa_history", []).append(notes)
+            if is_doc:
+                # a written document gets one QA pass: the assignee revises with the notes, without a second review
+                return await self._run_mission_subtask(mission, st, subtasks, qa_notes=notes)
+            if rnd == self.QA_MAX_ROUNDS:
+                return {**result, "verified": False, "error": f"QA rejected after {rnd} rounds: {notes}"}
+            result = await self._run_mission_subtask(mission, st, subtasks, qa_notes=notes)
+        return result
+
+    async def _qa_review(self, mission: Dict[str, Any], st: Dict[str, Any],
+                         result: Dict[str, Any]) -> Tuple[bool, str, CitizenProfile]:
+        """QA's verdict on a ticket: hard checks on the files first, then the QA citizen's own review.
+        A model that is down or answers off-format never blocks a ticket that passed the hard checks."""
+        reviewer = self.citizens.get("agent-qa") or self.citizens["agent-coordinator"]
+        workspace = Path(mission["workspace_dir"])
+        files = list(result.get("files") or [])
+        issues = qa_static_issues(workspace, files)
+        if issues:
+            notes = "; ".join(issues)[:1200]
+            await self._reason(reviewer, st["task_id"], "thought", f"Reviewing {st['title']}: {notes}")
+            return False, notes, reviewer
+        excerpts = []
+        for rel in files[:3]:
+            text = (workspace / rel).read_text(encoding="utf-8", errors="replace")
+            excerpts.append(f"--- {rel} ---\n{_qa_excerpt(text)}")
+        prompt = (f"QA sign-off for ticket '{st['title']}' (mission: {mission['title']}).\n"
+                  f"Expected deliverable: {st['expected_deliverable']}\n"
+                  f"Assignee's summary: {str(result.get('summary') or '')[:500]}\n\n" + "\n".join(excerpts) +
+                  "\n\nA '[... N characters omitted ...]' marker is where this excerpt skips text, not a defect in the file. "
+                  "Reject only for concrete defects: missing required content, placeholder text, broken markup "
+                  'or code, or the wrong topic. Reply with JSON only: {"approved": true or false, "notes": "what to fix, or why it passes"}')
+        try:
+            raw = await self._model_call(reviewer, prompt, f"You are {reviewer.name}, the QA lead. Be strict but fair.",
+                                         temperature=0.1, json_mode=True, max_tokens=400)
+            verdict = _extract_json(raw)
+        except Exception as ex:
+            logger.warning(f"QA review model call failed: {ex}")
+            verdict = None
+        if not isinstance(verdict, dict):
+            verdict = {}
+        notes = str(verdict.get("notes") or "").strip()
+        if verdict.get("approved") is False and notes:
+            await self._reason(reviewer, st["task_id"], "thought", f"Rejecting {st['title']}: {notes[:300]}")
+            return False, notes[:1200], reviewer
+        notes = notes[:400] or "Files present and complete."
+        await self._reason(reviewer, st["task_id"], "thought", f"Approving {st['title']}: {notes}")
+        return True, notes, reviewer
+
+    def mission_board(self, mission_id: str) -> Optional[Dict[str, Any]]:
+        """The mission's tickets as a kanban: backlog, in_progress, review, done (and blocked for failures)."""
+        mission = self.get_mission(mission_id)
+        if mission is None:
+            return None
+        columns: Dict[str, List[Dict[str, Any]]] = {c: [] for c in BOARD_COLUMNS}
+        for st in mission.get("subtasks", []):
+            columns[ticket_column(st["status"])].append({
+                "id": st["id"], "task_id": st["task_id"], "title": st["title"], "status": st["status"],
+                "assignee_id": st["assigned_agent_id"], "assignee": st["assigned_agent_name"],
+                "role": st.get("role") or ticket_role(st["assigned_agent_id"]), "progress": st.get("progress", 0),
+                "qa": st.get("qa"), "qa_history": st.get("qa_history", []), "url": st.get("url"),
+                "error": st.get("error"), "final": bool(st.get("final"))})
+        return {"mission_id": mission_id, "title": mission["title"], "status": mission["status"],
+                "lead": {"id": "agent-coordinator", "role": "CEO/PM"}, "columns": columns}
+
+    # --- Live reasoning: what each citizen is planning, thinking and doing, as short summaries ---
+
+    REASONING_KINDS = ("plan", "thought", "tool_call", "tool_result")
+
+    async def _reason(self, citizen: CitizenProfile, task_id: Optional[str], kind: str, text: str) -> Dict[str, Any]:
+        """Streams one reasoning step (plan, thought summary, tool call or tool result) to the citizen's feed,
+        the live event bus and, for mission work, the mission channel - labelled with the citizen's name and role."""
+        rec = (self.history.get(task_id) if task_id else None) or {}
+        mission_id = rec.get("mission_id")
+        entry = {"agent_id": citizen.id, "agent_name": citizen.name, "role": citizen.profession, "task_id": task_id,
+                 "mission_id": mission_id, "kind": kind if kind in self.REASONING_KINDS else "thought",
+                 "text": " ".join(str(text).split())[:600], "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        self._reasoning.setdefault(citizen.id, deque(maxlen=200)).append(entry)
+        try:
+            await event_bus.publish(ForgeEvent(event_id=uuid.uuid4().hex, topic=f"agent:{citizen.id}:reasoning", payload=entry))
+        except Exception as e:  # the feed must never break the task
+            logger.debug(f"reasoning publish failed: {e}")
+        mission = self.get_mission(mission_id) if mission_id else None
+        if mission:
+            self._post(mission, "citizen", entry["text"], kind="reasoning", author_id=citizen.id,
+                       author_name=citizen.name, task_id=task_id, role=citizen.profession, step=entry["kind"])
+        return entry
+
+    def get_reasoning(self, agent_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """The citizen's most recent reasoning steps, oldest first."""
+        return list(self._reasoning.get(agent_id, ()))[-limit:]
+
     # --- Mission channel: one shared thread per mission ---
 
     def _post(self, mission: Dict[str, Any], author_kind: str, text: str, kind: str = "update",
               author_id: Optional[str] = None, author_name: Optional[str] = None,
-              url: Optional[str] = None, task_id: Optional[str] = None) -> Dict[str, Any]:
+              url: Optional[str] = None, task_id: Optional[str] = None,
+              role: Optional[str] = None, step: Optional[str] = None) -> Dict[str, Any]:
         post = {"id": f"post-{uuid.uuid4().hex[:8]}", "author_kind": author_kind, "author_id": author_id,
                 "author_name": author_name or ("City AI" if author_kind == "system" else ""), "text": text[:4000],
                 "kind": kind, "url": url, "task_id": task_id, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if role:
+            post["role"] = role
+        if step:
+            post["step"] = step
         channel = mission.setdefault("channel", [])
         channel.append(post)
         del channel[:-MAX_CHANNEL_POSTS]
@@ -1695,6 +1910,19 @@ class CitizenExecutionService:
 
 
 MAX_REPAIR_ATTEMPTS = 3
+DOC_SUFFIXES = (".md", ".json", ".txt", ".csv")
+CONTENT_STEPS_MAX = 3
+_CODE_STEP = re.compile(r"\b(django|flask|fastapi|pytest|unit ?tests?|test suite|testing|backend|server|database|migrations?)\b", re.I)
+
+
+def _content_steps_only(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """For a mission the final assembly builds, keep only the planner's content steps: code, framework and test
+    steps are dropped (the builder picks and writes the stack itself) and at most CONTENT_STEPS_MAX remain."""
+    kept = [s for s in steps
+            if Path(str(s.get("expected_deliverable") or "notes.md")).suffix.lower() in DOC_SUFFIXES + (".html", ".htm")
+            and not _CODE_STEP.search(f"{s.get('title', '')} {s.get('expected_deliverable', '')}")]
+    return kept[:CONTENT_STEPS_MAX]
+FAST_CALL_TIMEOUT_S = 90.0      # a project file that takes a quick coder longer than this goes to the next model
 CODING_ROLES = {"engineer", "webdev", "designer", "devops", "qa", "architect"}
 MAX_CHANNEL_POSTS = 300
 REVISABLE_STATUSES = {"VERIFIED", "FAILED"}
@@ -1743,9 +1971,15 @@ def _mission_web_kind(text: str) -> Optional[str]:
     t = (text or "").lower()
     if re.search(r"\bpresentation\b|\bslides?\b|\bslide deck\b|\bdeck\b", t):
         return "3D_PRESENTATION"
-    if _is_web_request(t):
+    if _is_web_request(t) or _APP_RE.search(t):
         return "WEBSITE"
     return None
+
+
+# a usable app ("a todo app", "an app that saves notes") is delivered as one live web app too
+_APP_RE = re.compile(r"\b(?:todo|to-do|notes?|tracker|habit|budget|expense|recipe|quiz|calculator|booking|"
+                     r"inventory|chat|kanban|timer|game|crud)\s+(?:list\s+)?apps?\b|\bapps?\s+(?:that|which|to|for)\b",
+                     re.IGNORECASE)
 
 
 _WEB_RE = re.compile(r"\bweb ?sites?\b|\blanding pages?\b|\bweb ?pages?\b|\bhome ?page\b|\bweb ?apps?\b|"
@@ -1908,6 +2142,53 @@ def _rel(p: Path, root: Path) -> str:
         return str(Path(p).resolve().relative_to(Path(root).resolve())).replace("\\", "/")
     except ValueError:
         return Path(p).name
+
+
+BOARD_COLUMNS = ("backlog", "in_progress", "review", "done", "blocked")
+_COLUMN_BY_STATUS = {"PENDING": "backlog", "QUEUED": "backlog", "WORKING": "in_progress", "REVIEW": "review",
+                     "COMPLETED": "done", "FAILED": "blocked", "BLOCKED": "blocked", "CANCELLED": "blocked"}
+_ROLE_BY_AGENT = {"agent-coordinator": "CEO/PM", "agent-analyst": "PM", "agent-designer": "Design",
+                  "agent-webdev": "Frontend", "agent-engineer": "Backend", "agent-architect": "Backend",
+                  "agent-data": "Backend", "agent-qa": "QA", "agent-devops": "DevOps", "agent-security": "Security",
+                  "agent-researcher": "Research", "agent-diagnostic": "QA", "agent-operator": "DevOps"}
+_PLACEHOLDERS = ("lorem ipsum", "[insert ", "todo: add content", "your content here")
+
+
+def ticket_role(agent_id: str) -> str:
+    return _ROLE_BY_AGENT.get(agent_id, "Specialist")
+
+
+def ticket_column(status: str) -> str:
+    return _COLUMN_BY_STATUS.get(status, "backlog")
+
+
+def _qa_excerpt(text: str, head: int = 4000, tail: int = 1500) -> str:
+    """The start and end of a file for QA, with the gap marked, so a long file is not judged as cut off."""
+    if len(text) <= head + tail:
+        return text
+    return f"{text[:head]}\n[... {len(text) - head - tail} characters omitted ...]\n{text[-tail:]}"
+
+
+def qa_static_issues(workspace: Path, files: List[str]) -> List[str]:
+    """Defects QA rejects without asking a model: nothing delivered, missing or empty files, placeholder copy,
+    HTML with no markup at all."""
+    if not files:
+        return ["No deliverable files were produced."]
+    issues = []
+    for rel in files[:30]:
+        p = workspace / rel
+        if not p.is_file():
+            issues.append(f"{rel} is missing")
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        low = text.lower()
+        if not text.strip():
+            issues.append(f"{rel} is empty")
+        elif any(ph in low for ph in _PLACEHOLDERS):
+            issues.append(f"{rel} still contains placeholder text")
+        elif rel.lower().endswith((".html", ".htm")) and not any(t in low for t in ("<html", "<body", "<div", "<main")):
+            issues.append(f"{rel} has no HTML document body")
+    return issues
 
 
 def _mission_status(subtasks: List[Dict[str, Any]]) -> str:

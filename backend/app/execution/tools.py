@@ -10,9 +10,12 @@ The citizen's model drives a tool-use loop. Tools fall into two groups.
   SecurityEngine.check_host_command refuses disk/OS-destroying commands before they are even shown.
 """
 
+import ast
 import asyncio
+import importlib.util
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +43,7 @@ class ToolContext:
     task_id: str
     deliverables: List[Dict[str, Any]] = field(default_factory=list)
     on_progress: Optional[Callable[[str], Awaitable[None]]] = None
+    on_reason: Optional[Callable[[str, str], Awaitable[None]]] = None  # (kind, summary) -> live reasoning feed
     should_stop: Optional[Callable[[], bool]] = None
 
     async def note(self, message: str) -> None:
@@ -87,7 +91,33 @@ async def _tool_write_workspace_file(ctx: ToolContext, args: Dict[str, Any]) -> 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     await ctx.note(f"Wrote {rel} ({len(content)} chars)")
-    return f"OK: wrote {len(content)} chars to workspace file '{rel}'."
+    result = f"OK: wrote {len(content)} chars to workspace file '{rel}'."
+    missing = _missing_imports(content, ctx.workspace) if rel.endswith(".py") else []
+    if missing:
+        result += (f"\nWARNING: this file imports {', '.join(missing)}, which is not installed and not a file in "
+                   "your workspace, so running or testing it will fail. Rewrite it using only the standard "
+                   "library and the installed packages.")
+    return result
+
+
+def _missing_imports(source: str, workspace: Path) -> List[str]:
+    """Top-level modules a Python file imports that are neither stdlib, installed, nor in the workspace."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return sorted(
+        n for n in names
+        if n not in sys.stdlib_module_names
+        and not (workspace / f"{n}.py").exists() and not (workspace / n).is_dir()
+        and importlib.util.find_spec(n) is None
+    )
 
 
 async def _tool_read_file(ctx: ToolContext, args: Dict[str, Any]) -> str:
@@ -333,10 +363,33 @@ TOOLS: Dict[str, ToolSpec] = {
 }
 
 
-def tools_catalog_prompt() -> str:
+_FILES = {"write_workspace_file", "read_file", "list_dir", "run_in_workspace"}
+_WEB = {"web_search", "web_fetch"}
+_BUILD = {"build_presentation", "build_website", "build_app", "publish_folder", "launch_app"}
+_HOST = {"host_command", "write_host_file"}
+# Each role sees only the tools its job needs: a shorter prompt for the model and fewer wrong tool calls.
+ROLE_TOOLS: Dict[str, set] = {
+    "engineer": _FILES | _WEB | _BUILD, "webdev": _FILES | _WEB | _BUILD, "designer": _FILES | _WEB | _BUILD,
+    "architect": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "qa": _FILES | _WEB | {"launch_app"}, "diagnostic": _FILES | _WEB,
+    "devops": _FILES | _WEB | _BUILD | _HOST, "operator": _FILES | _WEB | _BUILD | _HOST,
+    "security": _FILES | _WEB,
+    "analyst": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "researcher": _FILES | _WEB | {"build_presentation", "publish_folder"},
+    "data": _FILES | _WEB | {"build_presentation", "build_app", "publish_folder"},
+}
+
+
+def tools_for(agent_id: str) -> Dict[str, ToolSpec]:
+    """The tools a citizen may use, by the role in its id (agent-<role>); unknown roles get every tool."""
+    allowed = ROLE_TOOLS.get(agent_id.split("-", 1)[-1])
+    return {k: v for k, v in TOOLS.items() if allowed is None or k in allowed}
+
+
+def tools_catalog_prompt(tools: Optional[Dict[str, ToolSpec]] = None) -> str:
     """Renders the tool list for the system prompt."""
     lines = []
-    for spec in TOOLS.values():
+    for spec in (tools if tools is not None else TOOLS).values():
         arg_str = ", ".join(f"{k}: {v}" for k, v in spec.args.items())
         tag = "" if spec.autonomous else " [needs Governor approval]"
         lines.append(f'- {spec.name}({arg_str}){tag}: {spec.description}')

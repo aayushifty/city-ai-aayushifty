@@ -97,7 +97,7 @@ async def test_honest_failure_when_the_model_cannot_fix_it(svc, monkeypatch):
     result, rec = await build(svc, monkeypatch, model)
     assert result["verified"] is False and rec["status"] == "FAILED"
     assert "JavaScript syntax error" in rec["verification"]["output"]
-    assert rec["verification"]["repair_attempts"] == project_builder.MAX_REPAIR_ROUNDS
+    assert rec["verification"]["repair_attempts"] == 1          # the same error twice stops the loop early
     assert result["url"], "the project is still published so you can look at it"
 
 
@@ -471,6 +471,9 @@ def test_portfolios_and_web_apps_are_websites_but_stock_portfolios_are_not():
     assert _is_web_request("build a web app for todo lists") and _is_web_request("personal site with a blog")
     assert not _is_web_request("Analyze my stock portfolio risk")
     assert not _is_web_request("Build a construction site safety report")
+    assert _mission_web_kind("Build a todo app that saves items") == "WEBSITE"
+    assert _mission_web_kind("an app that tracks my reading list") == "WEBSITE"
+    assert _mission_web_kind("Write a market analysis of app stores") is None
 
 
 def test_fake_binary_and_sentence_files_are_refused(svc):
@@ -539,3 +542,96 @@ def test_profile_keys_may_be_nested_and_prompts_carry_no_foreign_example_objects
     import inspect
     src = inspect.getsource(project_builder.ProjectBuilder.requirements)
     assert "rocket" not in src and "launch tower" not in src
+
+
+def test_missing_imports_flags_uninstalled_packages_only(tmp_path):
+    from app.execution.tools import _missing_imports
+    (tmp_path / "models.py").write_text("")
+    src = "import os, json\nimport flask_never_installed_xyz\nfrom fastapi import FastAPI\nfrom models import Todo\nfrom . import x\n"
+    assert _missing_imports(src, tmp_path) == ["flask_never_installed_xyz"]
+
+
+@pytest.mark.asyncio
+async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page(tmp_path):
+    ws = tmp_path / "ws"
+    server = project_builder.SERVER_TEMPLATE
+    app_js = ("const API_BASE = '/api';\n"
+              "fetch(`${API_BASE}/items/todos`); fetch(`/api/items/todos/${id}`, {method: 'PUT'});\n"
+              "fetch(`${API_BASE}/tasks`); fetch('/api/login', {method: 'POST'});\n"
+              "const pw = form.querySelector('input[name=\"confirm-password\"]').value;\n"
+              "const email = form.elements.email.value;\n")
+    page = FILES["index.html"].replace("{HEADLINE}", "x").replace(
+        "</body>", '<form><input name="email"><input name="confirmPassword"></form><script src="js/app.js"></script></body>')
+    write_project(ws, {"server.py": server, "js/app.js": app_js, "index.html": page})
+    plan, reqs = fake_plan_and_reqs()
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    msgs = " | ".join(problems.get("js/app.js", []))
+    assert "calls /api/login, /api/tasks, which server.py does not have" in msgs
+    assert "/api/items/todos" not in msgs.split("which server.py")[0]
+    assert "reads form field(s) that no page has a name= for: confirm-password" in msgs
+    assert "email" not in msgs.split("name= for:")[1].split("(")[0]
+
+    api_js = ("class Api { constructor() { this.baseUrl = 'http://localhost:8000'; this.root = ''; }\n"
+              "  a() { return fetch(`${this.baseUrl}/login`); }\n"
+              "  b() { return fetch(`${this.root}/todos/${id}`); }\n"
+              "  c() { return fetch(`${this.root}/api/items/todos`); }\n"
+              "  d() { return fetch('css/style.css'); } }\n")
+    write_project(ws, {"js/app.js": api_js})
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    msgs = " | ".join(problems.get("js/app.js", []))
+    assert "http://localhost:8000/login (use a relative URL" in msgs
+    assert "/todos/x" in msgs
+    assert "/api/items/todos" not in msgs.split("which server.py")[0] and "style.css" not in msgs
+
+
+def test_generated_server_has_private_per_user_data_and_hides_its_files(tmp_path, monkeypatch):
+    import importlib.util
+    import sqlite3
+    from fastapi.testclient import TestClient
+    (tmp_path / "server.py").write_text(project_builder.SERVER_TEMPLATE, encoding="utf-8")
+    (tmp_path / "index.html").write_text("<html>hi</html>", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("gen_server", tmp_path / "server.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    c = TestClient(mod.app)
+    a = c.post("/api/auth/register", json={"username": "ann", "password": "pw1234"}).json()
+    assert c.post("/api/auth/register", json={"username": "ANN", "password": "x1234"}).status_code == 409
+    assert c.post("/api/auth/login", json={"username": "ann", "password": "nope"}).json()["detail"] == "wrong username or password"
+    b = c.post("/api/auth/login", json={"username": "bob", "password": "pw"}).status_code
+    assert b == 401
+    c.post("/api/auth/register", json={"username": "bob", "password": "pw1234"})
+    hb = {"Authorization": "Bearer " + c.post("/api/auth/login", json={"username": "bob", "password": "pw1234"}).json()["token"]}
+    ha = {"Authorization": "Bearer " + a["token"]}
+    item = c.post("/api/items/todos", json={"text": "milk", "done": False}, headers=ha).json()
+    assert c.get("/api/items/todos", headers=ha).json() == [item]
+    assert c.get("/api/items/todos", headers=hb).json() == []
+    assert c.put(f"/api/items/todos/{item['id']}", json={"done": True}, headers=hb).status_code == 404
+    assert c.delete(f"/api/items/todos/{item['id']}", headers=hb).status_code == 404
+    assert c.get("/api/auth/me", headers=ha).json() == {"username": "ann"}
+    c.post("/api/auth/logout", headers=ha)
+    assert c.get("/api/auth/me", headers=ha).status_code == 401
+    (tmp_path / "__pycache__").mkdir()
+    for leaked in ("data.db-wal", "data.db-journal", "notes.sqlite", "__pycache__/server.cpython-311.pyc"):
+        (tmp_path / leaked).write_text("secret")
+    for path in ("/server.py", "/data.db", "/data.db-wal", "/data.db-journal", "/data.db.", "/notes.sqlite",
+                 "/__pycache__/server.cpython-311.pyc", "/DATA.DB"):
+        assert c.get(path).status_code == 404, path
+    with sqlite3.connect(tmp_path / "data.db") as con:
+        assert a["token"] not in [r[0] for r in con.execute("SELECT token FROM sessions")]
+    assert c.get("/").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_data_apps_get_the_api_client_and_pages_must_load_it(tmp_path):
+    ws = tmp_path / "ws"
+    page = FILES["index.html"].replace("{HEADLINE}", "x").replace(
+        "</body>", "<script>api.login('a', 'b');</script></body>")
+    write_project(ws, {"server.py": project_builder.SERVER_TEMPLATE, "index.html": page,
+                       "js/api.js": project_builder.API_JS_TEMPLATE})
+    plan, reqs = fake_plan_and_reqs()
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    assert any("does not load it" in m for m in problems.get("index.html", []))
+    assert not problems.get("js/api.js")
+    write_project(ws, {"index.html": page.replace("<script>api", '<script src="js/api.js"></script><script>api')})
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    assert not any("does not load it" in m for m in problems.get("index.html", []))

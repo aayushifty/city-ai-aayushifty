@@ -69,6 +69,57 @@ export function absoluteLink(url: string): string {
   return `${window.location.origin}${url}`;
 }
 
+export interface BoardTicket {
+  id: string;
+  task_id: string;
+  title: string;
+  status: string;
+  assignee_id: string;
+  assignee: string;
+  role: string;
+  progress: number;
+  qa: { approved: boolean; notes: string; round: number; reviewer: string } | null;
+  qa_history: string[];
+  url: string | null;
+  error: string | null;
+  final: boolean;
+}
+
+export type BoardColumn = 'backlog' | 'in_progress' | 'review' | 'done' | 'blocked';
+
+export interface MissionBoard {
+  mission_id: string;
+  title: string;
+  status: string;
+  lead: { id: string; role: string };
+  columns: Record<BoardColumn, BoardTicket[]>;
+}
+
+export interface RunningApp {
+  id: string;
+  task_id: string;
+  name: string;
+  dir: string;
+  kind: 'fastapi' | 'node' | 'static';
+  port: number | null;
+  url: string | null;
+  status: 'starting' | 'running' | 'stopped' | 'crashed' | 'unhealthy';
+  pid: number | null;
+  started_at: string | null;
+  error: string | null;
+}
+
+export interface AgentReasoningStep {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  task_id: string | null;
+  mission_id: string | null;
+  kind: 'plan' | 'thought' | 'tool_call' | 'tool_result';
+  text: string;
+  at: string;
+}
+
 export const api = {
   // Projects
   async listProjects(): Promise<Project[]> {
@@ -311,6 +362,76 @@ export const api = {
     const res = await fetch(`${API_BASE}/guide`);
     if (!res.ok) throw new Error('Guide not available');
     return (await res.json()).markdown;
+  },
+
+  /** A citizen's live reasoning feed: plan, thought summaries, tool calls and results (newest last). */
+  async getAgentReasoning(agentId: string, limit = 50): Promise<AgentReasoningStep[]> {
+    const res = await fetch(`${API_BASE}/agents/${agentId}/reasoning?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to fetch reasoning');
+    return (await res.json()).steps;
+  },
+
+  /** Delivered projects running as live loopback servers, newest first. */
+  async listApps(): Promise<RunningApp[]> {
+    const res = await fetch(`${API_BASE}/apps`);
+    if (!res.ok) throw new Error('Failed to fetch running apps');
+    return res.json();
+  },
+
+  async appAction(appId: string, action: 'start' | 'stop' | 'restart'): Promise<RunningApp> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/${action}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`Failed to ${action} app`);
+    return res.json();
+  },
+
+  async appLogs(appId: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/logs`);
+    if (!res.ok) throw new Error('Failed to fetch app logs');
+    return res.text();
+  },
+
+  async appFiles(appId: string): Promise<{ path: string; size: number }[]> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/files`);
+    if (!res.ok) throw new Error('Failed to list app files');
+    return res.json();
+  },
+
+  async appFile(appId: string, path: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/file?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to open file');
+    return res.text();
+  },
+
+  async saveAppFile(appId: string, path: string, content: string): Promise<{ path: string; diff: string; changed: boolean }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/file`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to save file');
+    return res.json();
+  },
+
+  async appTerminal(appId: string, command: string): Promise<{ stdout: string; stderr: string; exit_code: number }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/terminal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command }),
+    });
+    if (!res.ok) throw new Error('Command failed to run');
+    return res.json();
+  },
+
+  /** Opens a revision ticket for the citizen who built the app. */
+  async askAgentToChange(appId: string, text: string): Promise<{ task_id?: string; id?: string }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/ask`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Could not create the ticket');
+    return res.json();
+  },
+
+  /** The mission's tickets as a kanban, each with its role, assignee and QA verdict. */
+  async getMissionBoard(missionId: string): Promise<MissionBoard> {
+    const res = await fetch(`${API_BASE}/missions/${missionId}/board`);
+    if (!res.ok) throw new Error('Failed to fetch board');
+    return res.json();
   },
 
   /** Write once to everyone on a mission (its shared channel). */

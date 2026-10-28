@@ -174,7 +174,8 @@ class OllamaModelProvider(ModelProviderAdapter):
             completion_tokens=c_tokens,
             estimated_cost_usd=0.0,
             latency_ms=latency,
-            is_fallback=False
+            is_fallback=False,
+            raw_metadata={"finish_reason": data.get("done_reason")}
         )
 
     async def generate_stream(self, request: ModelCompletionRequest) -> AsyncGenerator[str, None]:

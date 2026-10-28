@@ -117,8 +117,8 @@ async def test_task_that_cannot_be_repaired_reports_failure(svc, monkeypatch):
     result = await svc._run_task_execution_loop(citizen, "task-repair2", CALC_TASK)
 
     assert result["verified"] is False
-    assert result["attempts"] == 3
-    assert len(model.prompts) == 4  # initial attempt + 3 repairs
+    assert result["attempts"] == 1          # fail fast: the error did not change
+    assert len(model.prompts) == 2  # initial attempt + 1 repair, then the repeated error stops it
     rec = svc.history.get("task-repair2")
     assert rec["status"] == "FAILED" and rec["verification"]["verified"] is False
     art = svc.get_artifact("task-repair2")
@@ -305,6 +305,11 @@ async def test_mission_submit_returns_immediately_and_plans_in_background(svc, m
 
     monkeypatch.setattr(model_router, "route_completion", slow_planner)
     monkeypatch.setattr(svc, "_run_task_execution_loop", fake_loop)
+
+    async def qa_signs_off(m, st, result):
+        return True, "ok", svc.citizens["agent-qa"]
+
+    monkeypatch.setattr(svc, "_qa_review", qa_signs_off)
     req = PublicMissionCreateRequest(title="Build a  Modern Trauma Center", description="d")
     mission = svc.submit_public_mission(req)
     assert mission["status"] == "PLANNING" and mission["subtasks"] == []

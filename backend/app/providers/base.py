@@ -16,6 +16,8 @@ class ModelCompletionRequest(BaseModel):
     messages: Optional[List[Dict[str, str]]] = None
     # Ask the provider to constrain output to a single JSON object.
     json_mode: bool = False
+    # Per-call limit in seconds (a slow model is abandoned for the next one); None = the provider's default.
+    timeout_s: Optional[float] = None
 
     def chat_messages(self) -> List[Dict[str, str]]:
         """Returns the full message list in OpenAI chat format."""

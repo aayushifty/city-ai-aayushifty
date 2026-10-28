@@ -15,6 +15,7 @@ from app.models.schemas import (
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
 from app.execution.computer_service import computer_service
+from app.execution.app_runner import app_runner
 from app.execution.approvals import approval_broker
 from app.config import FREE_MODEL_CATALOG
 
@@ -89,6 +90,13 @@ def get_agent(agent_id: str):
     if not c:
         raise HTTPException(status_code=404, detail="Agent not found")
     return c
+
+@router.get("/agents/{agent_id}/reasoning")
+def agent_reasoning(agent_id: str, limit: int = Query(50, ge=1, le=200)):
+    """The citizen's recent plan, reasoning summaries, tool calls and results (summaries, not raw chain-of-thought)."""
+    if not agent_service.get_citizen(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"agent_id": agent_id, "steps": agent_service.get_reasoning(agent_id, limit)}
 
 @router.post("/agents/{agent_id}/chat", response_model=CitizenChatResponse)
 async def chat_with_agent(agent_id: str, payload: CitizenChatMessageRequest):
@@ -187,6 +195,15 @@ def mission_channel(mission_id: str):
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission_id": mission_id, "posts": mission.get("channel", [])}
 
+@router.get("/missions/{mission_id}/board")
+def mission_board(mission_id: str):
+    """The mission's tickets as a kanban (backlog, in progress, review, done, blocked), each with its role,
+    assignee and QA verdict."""
+    board = agent_service.mission_board(mission_id)
+    if board is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return board
+
 @router.post("/missions/{mission_id}/channel")
 async def post_to_mission_channel(mission_id: str, payload: ChannelMessage):
     """Write once to everyone on the mission. Steps that have not started are given the message, @Name asks one
@@ -270,6 +287,81 @@ class FileReadRequest(BaseModel):
 class FileWriteRequest(BaseModel):
     path: str
     content: str
+
+@router.get("/apps")
+def list_apps():
+    """Delivered projects running as live loopback servers, newest first."""
+    return app_runner.list()
+
+class AppFileWrite(BaseModel):
+    path: str
+    content: str
+
+class AppCommand(BaseModel):
+    command: str
+    timeout: int = 60
+
+class AppChangeRequest(BaseModel):
+    text: str
+
+def _ide_call(fn, *args):
+    try:
+        return fn(*args)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"File not found: {e}")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/apps/{app_id}/files")
+def app_files(app_id: str):
+    """IDE file tree: every file of the delivered app, relative to its folder."""
+    return _ide_call(app_runner.files, app_id)
+
+@router.get("/apps/{app_id}/file", response_class=PlainTextResponse)
+def app_file(app_id: str, path: str):
+    return _ide_call(app_runner.read_file, app_id, path)
+
+@router.put("/apps/{app_id}/file")
+def save_app_file(app_id: str, payload: AppFileWrite):
+    """Saves an edit made in the IDE and returns its unified diff. Paths are confined to the app folder."""
+    return _ide_call(app_runner.write_file, app_id, payload.path, payload.content)
+
+@router.post("/apps/{app_id}/terminal")
+def app_terminal(app_id: str, payload: AppCommand):
+    """IDE terminal: runs a command with the app folder as working directory (same guard as /computer/execute)."""
+    root = _ide_call(app_runner._path, app_id)
+    return computer_service.execute_shell_command(payload.command, timeout=min(payload.timeout, 300),
+                                                  cwd=str(root), actor="IDE")
+
+@router.post("/apps/{app_id}/ask")
+async def ask_agent_to_change(app_id: str, payload: AppChangeRequest):
+    """'Ask an agent to change X': opens a revision ticket for the citizen who built the app."""
+    rec = app_runner.get(app_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    if not rec.get("task_id"):
+        raise HTTPException(status_code=400, detail="This app was not delivered by a task")
+    return await revise_task(rec["task_id"], RevisionRequest(feedback=payload.text))
+
+@router.post("/apps/{app_id}/{action}")
+def control_app(app_id: str, action: str):
+    """Stops, restarts or starts again a delivered app (start of a stopped app is a restart)."""
+    if action not in ("start", "stop", "restart"):
+        raise HTTPException(status_code=400, detail="action must be start, stop or restart")
+    rec = app_runner.stop(app_id) if action == "stop" else app_runner.restart(app_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    return rec
+
+@router.get("/apps/{app_id}/logs", response_class=PlainTextResponse)
+def app_logs(app_id: str):
+    if app_runner.get(app_id) is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    return app_runner.logs(app_id)
 
 @router.post("/computer/execute")
 def execute_computer_command(payload: ComputerCommandRequest):

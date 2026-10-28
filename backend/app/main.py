@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     sync_task = asyncio.create_task(keep_providers_current())
     yield
     sync_task.cancel()
+    from app.execution.app_runner import app_runner
+    app_runner.stop_all()  # delivered apps never outlive the backend
 
 app = FastAPI(
     title="city_ai_aayushifty — Local-First Autonomous AI Metropolis",

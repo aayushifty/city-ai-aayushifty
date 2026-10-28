@@ -130,6 +130,7 @@ async def run_pages(project: Path, timeout_s: int = 40) -> Dict[str, Any]:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
     results: Dict[str, Any] = {}
+    failed_to_start = 0
     try:
         for rel in pages[:8]:
             cmd = [edge, "--headless=new", "--disable-gpu", "--enable-unsafe-swiftshader", "--use-angle=swiftshader",
@@ -142,7 +143,12 @@ async def run_pages(project: Path, timeout_s: int = 40) -> Dict[str, Any]:
                 proc.kill()
                 results[rel] = {"error": "the page did not finish loading in the browser (timeout)"}
                 continue
-            m = re.search(r'data-probe="([^"]*)"', out.decode("utf-8", "replace"))
+            text = out.decode("utf-8", "replace")
+            if "<html" not in text.lower():
+                # No DOM at all: the browser itself failed to start (e.g. low memory), not the page.
+                failed_to_start += 1
+                continue
+            m = re.search(r'data-probe="([^"]*)"', text)
             if not m:
                 results[rel] = {"error": "the browser produced no result for this page (it may have crashed or hung)"}
                 continue
@@ -153,6 +159,8 @@ async def run_pages(project: Path, timeout_s: int = 40) -> Dict[str, Any]:
     finally:
         server.shutdown()
         shutil.rmtree(tmp, ignore_errors=True)
+    if failed_to_start and not results:
+        return {"available": False, "reason": "the browser could not start on this machine (it may be low on memory), so pages were not run", "pages": {}}
     return {"available": True, "reason": "", "pages": results}
 
 

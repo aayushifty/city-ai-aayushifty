@@ -586,6 +586,7 @@ async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page
 
 def test_generated_server_has_private_per_user_data_and_hides_its_files(tmp_path, monkeypatch):
     import importlib.util
+    import sqlite3
     from fastapi.testclient import TestClient
     (tmp_path / "server.py").write_text(project_builder.SERVER_TEMPLATE, encoding="utf-8")
     (tmp_path / "index.html").write_text("<html>hi</html>", encoding="utf-8")
@@ -609,7 +610,14 @@ def test_generated_server_has_private_per_user_data_and_hides_its_files(tmp_path
     assert c.get("/api/auth/me", headers=ha).json() == {"username": "ann"}
     c.post("/api/auth/logout", headers=ha)
     assert c.get("/api/auth/me", headers=ha).status_code == 401
-    assert c.get("/server.py").status_code == 404 and c.get("/data.db").status_code == 404
+    (tmp_path / "__pycache__").mkdir()
+    for leaked in ("data.db-wal", "data.db-journal", "notes.sqlite", "__pycache__/server.cpython-311.pyc"):
+        (tmp_path / leaked).write_text("secret")
+    for path in ("/server.py", "/data.db", "/data.db-wal", "/data.db-journal", "/data.db.", "/notes.sqlite",
+                 "/__pycache__/server.cpython-311.pyc", "/DATA.DB"):
+        assert c.get(path).status_code == 404, path
+    with sqlite3.connect(tmp_path / "data.db") as con:
+        assert a["token"] not in [r[0] for r in con.execute("SELECT token FROM sessions")]
     assert c.get("/").status_code == 200
 
 

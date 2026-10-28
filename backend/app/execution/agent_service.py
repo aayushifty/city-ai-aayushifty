@@ -32,6 +32,7 @@ from app.models.schemas import (
 from app.providers.base import ModelCompletionRequest
 from app.providers.router import model_router
 from app.execution.computer_service import computer_service
+from app.execution.app_runner import app_runner
 from app.execution.roster import CITIZENS
 
 logger = logging.getLogger("city_ai.agent_service")
@@ -1038,6 +1039,9 @@ class CitizenExecutionService:
 
         dest, rel = await asyncio.to_thread(project_builder.publish, workspace_dir, result["plan"]["name"], task_id)
         url = computer_service.public_url(rel)
+        live = await self._serve_live(citizen, task_id, dest, result["plan"]["name"])
+        if live:
+            url = live["url"]
         verified = result["verified"]
         report = (f"Requirements: {result['passed']}/{result['total']} implemented and checked. "
                   + (f"Review by {result['review']['reviewer']}: "
@@ -1059,7 +1063,8 @@ class CitizenExecutionService:
         self._record_artifact(citizen, task_id, artifact, verified)
         self.history.update(task_id, project=result["plan"], requirements=result["requirements"], review=result["review"],
                             three_d=result["three_d"], project_files=result["files"],
-                            browser=_browser_summary(result.get("runtime")))
+                            browser=_browser_summary(result.get("runtime")),
+                            live_app=live, static_url=computer_service.public_url(rel))
         self._finish_history(task_id, verified, evidence, attempts=result["repair_rounds"])
         await self._progress(citizen, task_id, "COMPLETED" if verified else "FAILED", 100.0,
                              f"{result['plan']['name'][:60]}: {result['passed']}/{result['total']} requirements"
@@ -1067,6 +1072,25 @@ class CitizenExecutionService:
                              history_status="VERIFIED" if verified else "FAILED")
         return {"verified": verified, "files": result["files"], "evidence": evidence, "attempts": result["repair_rounds"],
                 "summary": report, "url": url, "error": None if verified else report}
+
+    async def _serve_live(self, citizen: CitizenProfile, task_id: str, project: Path, name: str) -> Optional[Dict[str, Any]]:
+        """Runs the published project as a live loopback server (FastAPI, Node or static) and checks it answers
+        HTTP 200. Returns the app record, or None when it would not start (the /deliverables link still works)."""
+        old = app_runner.by_task(task_id)
+        if old:
+            await asyncio.to_thread(app_runner.stop, old["id"])
+        try:
+            info = await asyncio.to_thread(app_runner.start, project, name, task_id)
+        except Exception as ex:
+            await self._reason(citizen, task_id, "result", f"Could not start the live app: {ex}")
+            return None
+        if info.get("status") != "running":
+            await self._reason(citizen, task_id, "result",
+                               f"Live app did not come up ({info.get('status')}): {(info.get('error') or '')[:200]}")
+            return None
+        await self._reason(citizen, task_id, "result",
+                           f"Live {info['kind']} app is running at {info['url']} (HTTP 200 checked).")
+        return info
 
     def _write_files(self, ws_manager: WorkspaceManager, files: List[Dict[str, str]], written: List[Path], task_id: str) -> None:
         for f in files:

@@ -6,6 +6,14 @@ import pytest
 from app.execution import project_builder, runtime_check
 
 
+@pytest.fixture(autouse=True)
+def no_live_apps(monkeypatch):
+    """Missions in unit tests do not spawn real servers; test_app_runner uses its own AppRunner."""
+    from app.execution.app_runner import app_runner
+    monkeypatch.setattr(app_runner, "start", lambda project, name="", task_id="", wait=True: {
+        "id": "app-test", "task_id": task_id, "status": "disabled", "url": None, "kind": "static"})
+
+
 class BrowserStub:
     """What the headless browser 'saw'. Default: every page rendered the scene with the given object names."""
 

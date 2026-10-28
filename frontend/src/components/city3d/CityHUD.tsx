@@ -47,6 +47,7 @@ import { DeliverableArtifact } from '../../types';
 import { absoluteLink } from '../../api/client';
 import { AgentReasoningFeed } from './hud/AgentReasoningFeed';
 import { HostApprovalPanel } from './HostApprovalPanel';
+import { RunningAppsPanel } from './hud/RunningAppsPanel';
 import { ModelPicker } from './ModelPicker';
 import { TaskHistoryPanel } from './TaskHistoryPanel';
 import { CityLiveDataContext, PANEL, useCityLiveDataPoller } from './hud/useCityLiveData';
@@ -1251,6 +1252,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
       {/* 5. BOTTOM LEFT: notifications, approval stars, mini-map with status bars */}
       <div className="absolute left-4 bottom-4 z-30 flex flex-col gap-2 items-start">
+        {!panelsHidden && !modalOpen && <RunningAppsPanel />}
         {hudSettings.notifications && !modalOpen && (
           <NotificationFeed toasts={notifications.toasts} onDismiss={notifications.dismiss} onRevise={setRevisionTaskId} />
         )}

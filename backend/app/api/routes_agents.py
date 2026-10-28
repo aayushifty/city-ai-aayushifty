@@ -15,6 +15,7 @@ from app.models.schemas import (
 from app.providers.router import model_router
 from app.execution.agent_service import CitizenExecutionService
 from app.execution.computer_service import computer_service
+from app.execution.app_runner import app_runner
 from app.execution.approvals import approval_broker
 from app.config import FREE_MODEL_CATALOG
 
@@ -286,6 +287,27 @@ class FileReadRequest(BaseModel):
 class FileWriteRequest(BaseModel):
     path: str
     content: str
+
+@router.get("/apps")
+def list_apps():
+    """Delivered projects running as live loopback servers, newest first."""
+    return app_runner.list()
+
+@router.post("/apps/{app_id}/{action}")
+def control_app(app_id: str, action: str):
+    """Stops, restarts or starts again a delivered app (start of a stopped app is a restart)."""
+    if action not in ("start", "stop", "restart"):
+        raise HTTPException(status_code=400, detail="action must be start, stop or restart")
+    rec = app_runner.stop(app_id) if action == "stop" else app_runner.restart(app_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    return rec
+
+@router.get("/apps/{app_id}/logs", response_class=PlainTextResponse)
+def app_logs(app_id: str):
+    if app_runner.get(app_id) is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    return app_runner.logs(app_id)
 
 @router.post("/computer/execute")
 def execute_computer_command(payload: ComputerCommandRequest):

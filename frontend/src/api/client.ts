@@ -95,6 +95,20 @@ export interface MissionBoard {
   columns: Record<BoardColumn, BoardTicket[]>;
 }
 
+export interface RunningApp {
+  id: string;
+  task_id: string;
+  name: string;
+  dir: string;
+  kind: 'fastapi' | 'node' | 'static';
+  port: number | null;
+  url: string | null;
+  status: 'starting' | 'running' | 'stopped' | 'crashed' | 'unhealthy';
+  pid: number | null;
+  started_at: string | null;
+  error: string | null;
+}
+
 export interface AgentReasoningStep {
   agent_id: string;
   agent_name: string;
@@ -355,6 +369,25 @@ export const api = {
     const res = await fetch(`${API_BASE}/agents/${agentId}/reasoning?limit=${limit}`);
     if (!res.ok) throw new Error('Failed to fetch reasoning');
     return (await res.json()).steps;
+  },
+
+  /** Delivered projects running as live loopback servers, newest first. */
+  async listApps(): Promise<RunningApp[]> {
+    const res = await fetch(`${API_BASE}/apps`);
+    if (!res.ok) throw new Error('Failed to fetch running apps');
+    return res.json();
+  },
+
+  async appAction(appId: string, action: 'start' | 'stop' | 'restart'): Promise<RunningApp> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/${action}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`Failed to ${action} app`);
+    return res.json();
+  },
+
+  async appLogs(appId: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/logs`);
+    if (!res.ok) throw new Error('Failed to fetch app logs');
+    return res.text();
   },
 
   /** The mission's tickets as a kanban, each with its role, assignee and QA verdict. */

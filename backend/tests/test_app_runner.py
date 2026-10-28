@@ -113,3 +113,36 @@ def test_app_routes(monkeypatch, tmp_path):
         assert client.get(f"/api/apps/{rec['id']}/logs").status_code == 200
     finally:
         r.stop_all()
+
+
+def test_ide_files_edit_diff_and_confinement(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner_mod, "LOG_DIR", tmp_path / "logs")
+    r = AppRunner()
+    monkeypatch.setattr(routes, "app_runner", r)
+    client = TestClient(app, base_url="http://127.0.0.1")
+    site = tmp_path / "ide"
+    (site / "node_modules").mkdir(parents=True)
+    (site / "node_modules" / "x.js").write_text("x", encoding="utf-8")
+    (site / "index.html").write_text("<h1>Old</h1>\n", encoding="utf-8")
+    rec = r.start(site, name="IDE", task_id="t-ide")
+    try:
+        base = f"/api/apps/{rec['id']}"
+        assert [f["path"] for f in client.get(base + "/files").json()] == ["index.html"]
+        assert client.get(base + "/file", params={"path": "index.html"}).text == "<h1>Old</h1>\n"
+        saved = client.put(base + "/file", json={"path": "index.html", "content": "<h1>New</h1>\n"}).json()
+        assert saved["changed"] and "-<h1>Old</h1>" in saved["diff"] and "+<h1>New</h1>" in saved["diff"]
+        with urllib.request.urlopen(rec["url"], timeout=5) as resp:
+            assert b"New" in resp.read()
+        assert client.get(base + "/file", params={"path": "../outside.txt"}).status_code == 403
+        assert client.put(base + "/file", json={"path": "../evil.txt", "content": "x"}).status_code == 403
+        assert not (tmp_path / "evil.txt").exists()
+        assert client.get(base + "/file", params={"path": "missing.txt"}).status_code == 404
+        assert client.get("/api/apps/nope/files").status_code == 404
+        out = client.post(base + "/terminal", json={"command": "Get-ChildItem -Name"}).json()
+        assert "index.html" in out["stdout"]
+        calls = []
+        monkeypatch.setattr(routes.agent_service, "revise_task", lambda tid, fb: calls.append((tid, fb)) or {"task_id": "t2"})
+        assert client.post(base + "/ask", json={"text": "make the title blue"}).json() == {"task_id": "t2"}
+        assert calls == [("t-ide", "make the title blue")]
+    finally:
+        r.stop_all()

@@ -44,10 +44,11 @@ import {
   RoadSegment
 } from '../../simulation/types';
 import { DeliverableArtifact } from '../../types';
-import { absoluteLink } from '../../api/client';
+import { absoluteLink, type RunningApp } from '../../api/client';
 import { AgentReasoningFeed } from './hud/AgentReasoningFeed';
 import { HostApprovalPanel } from './HostApprovalPanel';
 import { RunningAppsPanel } from './hud/RunningAppsPanel';
+import { IdeView } from './hud/IdeView';
 import { ModelPicker } from './ModelPicker';
 import { TaskHistoryPanel } from './TaskHistoryPanel';
 import { CityLiveDataContext, PANEL, useCityLiveDataPoller } from './hud/useCityLiveData';
@@ -126,6 +127,7 @@ export const CityHUD: React.FC<CityHUDProps> = ({
   onPreviewDeliverable
 }) => {
   // Individual task form state
+  const [ideApp, setIdeApp] = useState<RunningApp | null>(null);
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
   const [taskDeliverable, setTaskDeliverable] = useState('');
@@ -1252,7 +1254,8 @@ export const CityHUD: React.FC<CityHUDProps> = ({
 
       {/* 5. BOTTOM LEFT: notifications, approval stars, mini-map with status bars */}
       <div className="absolute left-4 bottom-4 z-30 flex flex-col gap-2 items-start">
-        {!panelsHidden && !modalOpen && <RunningAppsPanel />}
+        {!panelsHidden && !modalOpen && <RunningAppsPanel onOpenIde={setIdeApp} />}
+        {ideApp && <IdeView app={ideApp} onClose={() => setIdeApp(null)} />}
         {hudSettings.notifications && !modalOpen && (
           <NotificationFeed toasts={notifications.toasts} onDismiss={notifications.dismiss} onRevise={setRevisionTaskId} />
         )}

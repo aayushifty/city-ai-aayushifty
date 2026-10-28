@@ -5,6 +5,7 @@ Node, anything else is served as static files. Every server binds to 127.0.0.1 o
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import socket
@@ -21,6 +22,8 @@ from app.config import config
 
 LOG_DIR = config.DATA_DIR / "app_logs"
 HEALTH_TIMEOUT_S = 20.0
+SKIP_DIRS = {"node_modules", "__pycache__", ".git", ".venv", "venv"}
+MAX_EDIT_BYTES = 1_000_000
 
 
 def free_port() -> int:
@@ -159,6 +162,47 @@ class AppRunner:
         if not f.is_file():
             return ""
         return f.read_bytes()[-tail:].decode("utf-8", errors="replace")
+
+    # --- IDE: the files of a running app, confined to its folder ---
+
+    def _path(self, app_id: str, rel: str = "") -> Path:
+        rec = self._apps.get(app_id)
+        if rec is None:
+            raise LookupError("App not found")
+        root = Path(rec["dir"]).resolve()
+        target = (root / rel).resolve()
+        if target != root and root not in target.parents:
+            raise PermissionError("Path is outside the app folder")
+        return target
+
+    def files(self, app_id: str) -> List[Dict[str, Any]]:
+        """Every file of the app (relative POSIX paths and sizes), skipping dependency and cache folders."""
+        root = self._path(app_id)
+        out = []
+        for f in sorted(root.rglob("*")):
+            rel = f.relative_to(root)
+            if f.is_file() and not SKIP_DIRS.intersection(rel.parts):
+                out.append({"path": rel.as_posix(), "size": f.stat().st_size})
+        return out[:2000]
+
+    def read_file(self, app_id: str, rel: str) -> str:
+        f = self._path(app_id, rel)
+        if not f.is_file():
+            raise FileNotFoundError(rel)
+        if f.stat().st_size > MAX_EDIT_BYTES:
+            raise ValueError("File is too large to open in the editor")
+        return f.read_text(encoding="utf-8", errors="replace")
+
+    def write_file(self, app_id: str, rel: str, content: str) -> Dict[str, Any]:
+        """Saves a file inside the app folder and returns the unified diff against what was there."""
+        f = self._path(app_id, rel)
+        if f == self._path(app_id) or len(content.encode("utf-8")) > MAX_EDIT_BYTES:
+            raise ValueError("Invalid file path or content too large")
+        old = f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(content, encoding="utf-8")
+        diff = "".join(difflib.unified_diff(old.splitlines(True), content.splitlines(True), f"a/{rel}", f"b/{rel}"))
+        return {"path": rel, "diff": diff, "changed": old != content}
 
     def stop_all(self) -> None:
         for app_id in list(self._procs):

@@ -390,6 +390,43 @@ export const api = {
     return res.text();
   },
 
+  async appFiles(appId: string): Promise<{ path: string; size: number }[]> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/files`);
+    if (!res.ok) throw new Error('Failed to list app files');
+    return res.json();
+  },
+
+  async appFile(appId: string, path: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/file?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to open file');
+    return res.text();
+  },
+
+  async saveAppFile(appId: string, path: string, content: string): Promise<{ path: string; diff: string; changed: boolean }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/file`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed to save file');
+    return res.json();
+  },
+
+  async appTerminal(appId: string, command: string): Promise<{ stdout: string; stderr: string; exit_code: number }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/terminal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command }),
+    });
+    if (!res.ok) throw new Error('Command failed to run');
+    return res.json();
+  },
+
+  /** Opens a revision ticket for the citizen who built the app. */
+  async askAgentToChange(appId: string, text: string): Promise<{ task_id?: string; id?: string }> {
+    const res = await fetch(`${API_BASE}/apps/${appId}/ask`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Could not create the ticket');
+    return res.json();
+  },
+
   /** The mission's tickets as a kanban, each with its role, assignee and QA verdict. */
   async getMissionBoard(missionId: string): Promise<MissionBoard> {
     const res = await fetch(`${API_BASE}/missions/${missionId}/board`);

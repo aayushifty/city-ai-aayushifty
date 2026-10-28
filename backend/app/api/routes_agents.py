@@ -293,6 +293,60 @@ def list_apps():
     """Delivered projects running as live loopback servers, newest first."""
     return app_runner.list()
 
+class AppFileWrite(BaseModel):
+    path: str
+    content: str
+
+class AppCommand(BaseModel):
+    command: str
+    timeout: int = 60
+
+class AppChangeRequest(BaseModel):
+    text: str
+
+def _ide_call(fn, *args):
+    try:
+        return fn(*args)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"File not found: {e}")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/apps/{app_id}/files")
+def app_files(app_id: str):
+    """IDE file tree: every file of the delivered app, relative to its folder."""
+    return _ide_call(app_runner.files, app_id)
+
+@router.get("/apps/{app_id}/file", response_class=PlainTextResponse)
+def app_file(app_id: str, path: str):
+    return _ide_call(app_runner.read_file, app_id, path)
+
+@router.put("/apps/{app_id}/file")
+def save_app_file(app_id: str, payload: AppFileWrite):
+    """Saves an edit made in the IDE and returns its unified diff. Paths are confined to the app folder."""
+    return _ide_call(app_runner.write_file, app_id, payload.path, payload.content)
+
+@router.post("/apps/{app_id}/terminal")
+def app_terminal(app_id: str, payload: AppCommand):
+    """IDE terminal: runs a command with the app folder as working directory (same guard as /computer/execute)."""
+    root = _ide_call(app_runner._path, app_id)
+    return computer_service.execute_shell_command(payload.command, timeout=min(payload.timeout, 300),
+                                                  cwd=str(root), actor="IDE")
+
+@router.post("/apps/{app_id}/ask")
+async def ask_agent_to_change(app_id: str, payload: AppChangeRequest):
+    """'Ask an agent to change X': opens a revision ticket for the citizen who built the app."""
+    rec = app_runner.get(app_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    if not rec.get("task_id"):
+        raise HTTPException(status_code=400, detail="This app was not delivered by a task")
+    return await revise_task(rec["task_id"], RevisionRequest(feedback=payload.text))
+
 @router.post("/apps/{app_id}/{action}")
 def control_app(app_id: str, action: str):
     """Stops, restarts or starts again a delivered app (start of a stopped app is a restart)."""

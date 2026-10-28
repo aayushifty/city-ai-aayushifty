@@ -221,6 +221,31 @@ class FreeLLMModelProvider(OpenAIModelProvider):
                 break
         raise last or RuntimeError("no gateway model answered")
 
+    async def generate_stream(self, request):
+        """Streams from the requested model, moving down the chain only while nothing has been yielded yet."""
+        first = self._model_for(request)
+        coding = first in self._chains.get(True, []) and first not in self._chains.get(False, [])
+        tries = list(dict.fromkeys([first] + self._chains.get(coding, []) + self._chains.get(not coding, [])))
+        last: Optional[Exception] = None
+        for model in tries[:CHAIN_LEN]:
+            started = False
+            try:
+                async for delta in super().generate_stream(request.model_copy(update={"model_name": model})):
+                    started = True
+                    self.last_used = model
+                    yield delta
+                if started:
+                    return
+            except httpx.HTTPStatusError as ex:
+                if started or ex.response.status_code not in RETRYABLE:
+                    raise
+                last = ex
+            except (httpx.TimeoutException, httpx.TransportError) as ex:
+                if started:
+                    raise
+                last = ex
+        raise last or RuntimeError("no gateway model answered")
+
     def status(self) -> Dict[str, Any]:
         return {"online": self._ok, "base_url": self.base_url, "model_count": len(self._models),
                 "ready_count": len(self._ready), "key_configured": bool(self.api_key), "error": self.last_error,

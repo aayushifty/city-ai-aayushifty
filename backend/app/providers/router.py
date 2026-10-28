@@ -199,20 +199,53 @@ class ModelRouter:
     async def route_completion_stream(
         self,
         request: ModelCompletionRequest,
-        preferred_provider: Optional[str] = "ollama"
+        preferred_provider: Optional[str] = None,
+        interactive: bool = True,
+        fallback_models: Optional[Dict[str, str]] = None,
     ) -> AsyncGenerator[str, None]:
-        """Streams completion from Ollama if available, otherwise completes and yields content."""
-        ollama_p = self._providers.get("ollama")
-        if preferred_provider == "ollama" and ollama_p and await ollama_p.is_available() and hasattr(ollama_p, "generate_stream"):
-            async with self._sem("ollama").hold(0):
-                try:
-                    async for token in ollama_p.generate_stream(request):  # type: ignore
-                        yield token
-                    return
-                except Exception as e:
-                    logger.warning(f"Streaming failed on Ollama: {e}, falling back to non-streamed")
+        """Streams token by token from the first provider down the chain that can stream. A provider that fails
+        before yielding anything hands over to the next; one that fails mid-reply ends the stream there."""
+        candidates = []
+        if preferred_provider and preferred_provider in self._providers:
+            candidates.append(preferred_provider)
+        for p in self.fallback_chain:
+            if p not in candidates and p in self._providers and p != "mock":
+                candidates.append(p)
 
-        resp = await self.route_completion(request, preferred_provider)
+        for provider_name in candidates:
+            provider = self._providers[provider_name]
+            if not hasattr(provider, "generate_stream"):
+                continue
+            try:
+                if not await provider.is_available():
+                    continue
+            except Exception:
+                continue
+            req = request
+            if preferred_provider and provider_name != preferred_provider:
+                req = request.model_copy(update={"model_name": (fallback_models or {}).get(provider_name)
+                                                 or config.PROVIDER_DEFAULT_MODELS.get(provider_name)})
+            started = False
+            self._waiting[provider_name] = self._waiting.get(provider_name, 0) + 1
+            acquired = False
+            try:
+                async with self._sem(provider_name).hold(0 if interactive else 1):
+                    acquired = True
+                    self._waiting[provider_name] -= 1
+                    async for token in provider.generate_stream(req):  # type: ignore[attr-defined]
+                        started = True
+                        yield token
+                return
+            except Exception as e:
+                if started:
+                    logger.warning(f"Stream from {provider_name} broke mid-reply: {e}")
+                    return
+                logger.warning(f"Streaming failed on {provider_name}: {e}. Attempting next fallback.")
+            finally:
+                if not acquired:
+                    self._waiting[provider_name] -= 1
+
+        resp = await self.route_completion(request, preferred_provider, interactive, fallback_models)
         yield resp.content
 
 model_router = ModelRouter()

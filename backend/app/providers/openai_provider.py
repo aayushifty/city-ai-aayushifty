@@ -1,5 +1,6 @@
 """FORGE AI OpenAI & OpenAI-Compatible Provider Adapters (OpenAI, Groq, OpenRouter)."""
 
+import json
 import os
 import time
 from typing import Optional
@@ -94,6 +95,29 @@ class OpenAIModelProvider(ModelProviderAdapter):
             is_fallback=False,
             raw_metadata={"id": data.get("id")}
         )
+
+    async def generate_stream(self, request: ModelCompletionRequest):
+        """Yields the reply token by token (OpenAI server-sent events)."""
+        if not self.api_key:
+            raise ValueError(f"{self.api_key_env} is not configured")
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self._extra_headers()}
+        payload = {"model": self._model_for(request), "messages": request.chat_messages(),
+                   "temperature": request.temperature, "max_tokens": request.max_tokens, "stream": True}
+        async with self._client(self.request_timeout) as client:
+            async with client.stream("POST", f"{self.base_url}/chat/completions", headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        delta = (json.loads(data).get("choices") or [{}])[0].get("delta", {}).get("content")
+                    except (ValueError, AttributeError, IndexError):
+                        continue
+                    if delta:
+                        yield SecurityEngine.redact_secrets(delta)
 
 
 class GroqModelProvider(OpenAIModelProvider):

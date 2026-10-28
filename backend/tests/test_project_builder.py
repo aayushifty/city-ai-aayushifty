@@ -557,7 +557,7 @@ async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page
     server = project_builder.SERVER_TEMPLATE
     app_js = ("const API_BASE = '/api';\n"
               "fetch(`${API_BASE}/items/todos`); fetch(`/api/items/todos/${id}`, {method: 'PUT'});\n"
-              "fetch(`${API_BASE}/tasks`); fetch('/api/auth/login', {method: 'POST'});\n"
+              "fetch(`${API_BASE}/tasks`); fetch('/api/login', {method: 'POST'});\n"
               "const pw = form.querySelector('input[name=\"confirm-password\"]').value;\n"
               "const email = form.elements.email.value;\n")
     page = FILES["index.html"].replace("{HEADLINE}", "x").replace(
@@ -566,7 +566,7 @@ async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page
     plan, reqs = fake_plan_and_reqs()
     problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
     msgs = " | ".join(problems.get("js/app.js", []))
-    assert "calls /api/auth/login, /api/tasks, which server.py does not have" in msgs
+    assert "calls /api/login, /api/tasks, which server.py does not have" in msgs
     assert "/api/items/todos" not in msgs.split("which server.py")[0]
     assert "reads form field(s) that no page has a name= for: confirm-password" in msgs
     assert "email" not in msgs.split("name= for:")[1].split("(")[0]
@@ -582,3 +582,48 @@ async def test_api_calls_and_form_field_names_must_match_the_server_and_the_page
     assert "http://localhost:8000/login (use a relative URL" in msgs
     assert "/todos/x" in msgs
     assert "/api/items/todos" not in msgs.split("which server.py")[0] and "style.css" not in msgs
+
+
+def test_generated_server_has_private_per_user_data_and_hides_its_files(tmp_path, monkeypatch):
+    import importlib.util
+    from fastapi.testclient import TestClient
+    (tmp_path / "server.py").write_text(project_builder.SERVER_TEMPLATE, encoding="utf-8")
+    (tmp_path / "index.html").write_text("<html>hi</html>", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("gen_server", tmp_path / "server.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    c = TestClient(mod.app)
+    a = c.post("/api/auth/register", json={"username": "ann", "password": "pw1234"}).json()
+    assert c.post("/api/auth/register", json={"username": "ANN", "password": "x1234"}).status_code == 409
+    assert c.post("/api/auth/login", json={"username": "ann", "password": "nope"}).json()["detail"] == "wrong username or password"
+    b = c.post("/api/auth/login", json={"username": "bob", "password": "pw"}).status_code
+    assert b == 401
+    c.post("/api/auth/register", json={"username": "bob", "password": "pw1234"})
+    hb = {"Authorization": "Bearer " + c.post("/api/auth/login", json={"username": "bob", "password": "pw1234"}).json()["token"]}
+    ha = {"Authorization": "Bearer " + a["token"]}
+    item = c.post("/api/items/todos", json={"text": "milk", "done": False}, headers=ha).json()
+    assert c.get("/api/items/todos", headers=ha).json() == [item]
+    assert c.get("/api/items/todos", headers=hb).json() == []
+    assert c.put(f"/api/items/todos/{item['id']}", json={"done": True}, headers=hb).status_code == 404
+    assert c.delete(f"/api/items/todos/{item['id']}", headers=hb).status_code == 404
+    assert c.get("/api/auth/me", headers=ha).json() == {"username": "ann"}
+    c.post("/api/auth/logout", headers=ha)
+    assert c.get("/api/auth/me", headers=ha).status_code == 401
+    assert c.get("/server.py").status_code == 404 and c.get("/data.db").status_code == 404
+    assert c.get("/").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_data_apps_get_the_api_client_and_pages_must_load_it(tmp_path):
+    ws = tmp_path / "ws"
+    page = FILES["index.html"].replace("{HEADLINE}", "x").replace(
+        "</body>", "<script>api.login('a', 'b');</script></body>")
+    write_project(ws, {"server.py": project_builder.SERVER_TEMPLATE, "index.html": page,
+                       "js/api.js": project_builder.API_JS_TEMPLATE})
+    plan, reqs = fake_plan_and_reqs()
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    assert any("does not load it" in m for m in problems.get("index.html", []))
+    assert not problems.get("js/api.js")
+    write_project(ws, {"index.html": page.replace("<script>api", '<script src="js/api.js"></script><script>api')})
+    problems = await project_builder.ProjectBuilder(None, None, None, lambda t: None).verify(ws, plan, reqs, True)
+    assert not any("does not load it" in m for m in problems.get("index.html", []))

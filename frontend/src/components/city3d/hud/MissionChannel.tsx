@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MessagesSquare, X, Send, Loader2, ExternalLink, Target, AtSign } from 'lucide-react';
+import { MessagesSquare, X, Send, Loader2, ExternalLink, Target, AtSign, KanbanSquare } from 'lucide-react';
+import { MissionKanban } from './MissionKanban';
 import { absoluteLink, api } from '../../../api/client';
 import { ChannelPost, LiveMission, statusStyle, useLiveData } from './useCityLiveData';
 
@@ -35,6 +36,7 @@ const KIND_STYLE: Record<string, string> = {
   failed: 'border-red-400/50 bg-red-500/5',
   blocked: 'border-orange-400/50 bg-orange-500/5',
   report: 'border-violet-400/50 bg-violet-500/10',
+  review: 'border-teal-400/50 bg-teal-500/10',
 };
 
 function timeOf(iso: string): string {
@@ -95,6 +97,7 @@ export const MissionChannelPanel: React.FC<{ missionId: string; onClose: () => v
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const [showBoard, setShowBoard] = useState(true);
   const posts = mission?.channel || [];
   const colors = useMemo(() => Object.fromEntries(live.citizens.map(c => [c.id, c.color])), [live.citizens]);
   const people = useMemo(() => {
@@ -126,7 +129,7 @@ export const MissionChannelPanel: React.FC<{ missionId: string; onClose: () => v
   const st = statusStyle(mission?.status);
   return (
     <div className="fixed inset-0 z-[58] bg-black/45 flex items-center justify-center p-3 pointer-events-auto font-sans" onClick={onClose}>
-      <div className="w-full max-w-xl h-[min(640px,88vh)] flex flex-col bg-[#0B1220]/97 border border-amber-500/40 rounded-xl shadow-2xl"
+      <div className={`w-full ${showBoard ? 'max-w-4xl' : 'max-w-xl'} h-[min(680px,90vh)] flex flex-col bg-[#0B1220]/97 border border-amber-500/40 rounded-xl shadow-2xl`}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-2 px-3 py-2.5 border-b border-white/10">
           <MessagesSquare size={16} className="text-amber-300 mt-0.5 shrink-0" />
@@ -144,8 +147,12 @@ export const MissionChannelPanel: React.FC<{ missionId: string; onClose: () => v
               <Target size={11} /> Open deliverable{mission.final_deliverable.version && mission.final_deliverable.version > 1 ? ` v${mission.final_deliverable.version}` : ''}
             </a>
           )}
+          <button type="button" onClick={() => setShowBoard(b => !b)} data-testid="toggle-board"
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10.5px] font-bold shrink-0 border ${showBoard ? 'bg-amber-500 text-black border-amber-400' : 'border-white/15 text-slate-300 hover:text-white'}`}
+            title="Ticket board"><KanbanSquare size={11} /> Board</button>
           <button type="button" onClick={onClose} className="text-slate-500 hover:text-white" title="Close"><X size={15} /></button>
         </div>
+        {showBoard && <MissionKanban missionId={missionId} />}
 
         <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2.5 space-y-2.5">
           {!mission && <div className="text-[11px] text-slate-400 text-center p-6">This mission is no longer on the backend (it restarted).</div>}

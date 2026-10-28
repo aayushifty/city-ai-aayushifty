@@ -194,6 +194,15 @@ def mission_channel(mission_id: str):
         raise HTTPException(status_code=404, detail="Mission not found")
     return {"mission_id": mission_id, "posts": mission.get("channel", [])}
 
+@router.get("/missions/{mission_id}/board")
+def mission_board(mission_id: str):
+    """The mission's tickets as a kanban (backlog, in progress, review, done, blocked), each with its role,
+    assignee and QA verdict."""
+    board = agent_service.mission_board(mission_id)
+    if board is None:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return board
+
 @router.post("/missions/{mission_id}/channel")
 async def post_to_mission_channel(mission_id: str, payload: ChannelMessage):
     """Write once to everyone on the mission. Steps that have not started are given the message, @Name asks one

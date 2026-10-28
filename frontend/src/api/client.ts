@@ -69,6 +69,32 @@ export function absoluteLink(url: string): string {
   return `${window.location.origin}${url}`;
 }
 
+export interface BoardTicket {
+  id: string;
+  task_id: string;
+  title: string;
+  status: string;
+  assignee_id: string;
+  assignee: string;
+  role: string;
+  progress: number;
+  qa: { approved: boolean; notes: string; round: number; reviewer: string } | null;
+  qa_history: string[];
+  url: string | null;
+  error: string | null;
+  final: boolean;
+}
+
+export type BoardColumn = 'backlog' | 'in_progress' | 'review' | 'done' | 'blocked';
+
+export interface MissionBoard {
+  mission_id: string;
+  title: string;
+  status: string;
+  lead: { id: string; role: string };
+  columns: Record<BoardColumn, BoardTicket[]>;
+}
+
 export interface AgentReasoningStep {
   agent_id: string;
   agent_name: string;
@@ -329,6 +355,13 @@ export const api = {
     const res = await fetch(`${API_BASE}/agents/${agentId}/reasoning?limit=${limit}`);
     if (!res.ok) throw new Error('Failed to fetch reasoning');
     return (await res.json()).steps;
+  },
+
+  /** The mission's tickets as a kanban, each with its role, assignee and QA verdict. */
+  async getMissionBoard(missionId: string): Promise<MissionBoard> {
+    const res = await fetch(`${API_BASE}/missions/${missionId}/board`);
+    if (!res.ok) throw new Error('Failed to fetch board');
+    return res.json();
   },
 
   /** Write once to everyone on a mission (its shared channel). */

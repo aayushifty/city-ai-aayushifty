@@ -1409,6 +1409,9 @@ class CitizenExecutionService:
             self.history.start(final_task, builder.id, builder.name, final_title, kind="MISSION_SUBTASK", mission_id=mission_id)
             mission["final_subtask_id"] = f"{mission_id}-final"
 
+        for st in formatted_subtasks:
+            st["role"] = ticket_role(st["assigned_agent_id"])
+            st["qa"] = None
         mission["subtasks"] = formatted_subtasks
         mission["participating_agent_ids"] = list(dict.fromkeys(s["assigned_agent_id"] for s in formatted_subtasks))
         mission["status"] = "IN_PROGRESS"
@@ -1455,7 +1458,7 @@ class CitizenExecutionService:
                         else all(subtasks[d]["status"] == "COMPLETED" for d in st["dependencies"])
                     if st["status"] == "PENDING" and deps_done:
                         st["status"] = "QUEUED"
-                        running[asyncio.create_task(self._run_mission_subtask(mission, st, subtasks))] = st["id"]
+                        running[asyncio.create_task(self._run_ticket(mission, st, subtasks))] = st["id"]
                 if not running:
                     for st in subtasks.values():
                         if st["status"] == "PENDING":  # only reachable with a dependency cycle
@@ -1512,7 +1515,7 @@ class CitizenExecutionService:
         ))
 
     async def _run_mission_subtask(self, mission: Dict[str, Any], st: Dict[str, Any],
-                                   subtasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+                                   subtasks: Dict[str, Dict[str, Any]], qa_notes: str = "") -> Dict[str, Any]:
         citizen = self.citizens[st["assigned_agent_id"]]
         workspace = Path(mission["workspace_dir"])
         context_parts = []
@@ -1527,6 +1530,9 @@ class CitizenExecutionService:
                     part += f"--- {rel} ---\n{p.read_text(encoding='utf-8', errors='replace')[:2500]}\n"
             context_parts.append(part)
         st["context_from"] = list(st["dependencies"])
+        if qa_notes:
+            context_parts.insert(0, "## QA rejected your previous attempt. Fix every point before resubmitting:\n"
+                                 + qa_notes[:1500] + "\n")
         description = f"Part of mission '{mission['title']}': {mission['description']}"
         if st.get("final"):
             failed = [subtasks[d]["title"] for d in st["dependencies"] if subtasks[d]["status"] != "COMPLETED"]
@@ -1555,6 +1561,88 @@ class CitizenExecutionService:
             return await self._run_task_execution_loop(citizen, st["task_id"], task_req, workspace_dir=workspace,
                                                        context="\n".join(context_parts), mission_id=mission["id"],
                                                        allow_web=allow_web)
+
+    # --- Company workflow: tickets move backlog -> in progress -> review -> done, and QA signs off ---
+
+    QA_MAX_ROUNDS = 2
+
+    async def _run_ticket(self, mission: Dict[str, Any], st: Dict[str, Any],
+                          subtasks: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Runs a ticket, then holds it in review until QA signs off. A rejection sends it back to the
+        assignee with QA's notes; after QA_MAX_ROUNDS rejections the ticket fails with those notes."""
+        result = await self._run_mission_subtask(mission, st, subtasks)
+        for rnd in range(1, self.QA_MAX_ROUNDS + 1):
+            if not result.get("verified"):
+                return result
+            st["status"] = "REVIEW"
+            st["progress"] = 90
+            approved, notes, reviewer = await self._qa_review(mission, st, result)
+            st["qa"] = {"approved": approved, "notes": notes, "round": rnd, "reviewer": reviewer.name}
+            text = f"QA sign-off: {st['title']}. {notes}" if approved else \
+                f"QA rejected {st['title']} (round {rnd}), sent back with notes: {notes}"
+            self._post(mission, "citizen", text, kind="review", author_id=reviewer.id, author_name=reviewer.name,
+                       task_id=st["task_id"], role=ticket_role(reviewer.id))
+            if approved:
+                return result
+            st.setdefault("qa_history", []).append(notes)
+            if rnd == self.QA_MAX_ROUNDS:
+                return {**result, "verified": False, "error": f"QA rejected after {rnd} rounds: {notes}"}
+            result = await self._run_mission_subtask(mission, st, subtasks, qa_notes=notes)
+        return result
+
+    async def _qa_review(self, mission: Dict[str, Any], st: Dict[str, Any],
+                         result: Dict[str, Any]) -> Tuple[bool, str, CitizenProfile]:
+        """QA's verdict on a ticket: hard checks on the files first, then the QA citizen's own review.
+        A model that is down or answers off-format never blocks a ticket that passed the hard checks."""
+        reviewer = self.citizens.get("agent-qa") or self.citizens["agent-coordinator"]
+        workspace = Path(mission["workspace_dir"])
+        files = list(result.get("files") or [])
+        issues = qa_static_issues(workspace, files)
+        if issues:
+            notes = "; ".join(issues)[:1200]
+            await self._reason(reviewer, st["task_id"], "thought", f"Reviewing {st['title']}: {notes}")
+            return False, notes, reviewer
+        excerpts = []
+        for rel in files[:3]:
+            text = (workspace / rel).read_text(encoding="utf-8", errors="replace")
+            excerpts.append(f"--- {rel} ---\n{text[:1500]}")
+        prompt = (f"QA sign-off for ticket '{st['title']}' (mission: {mission['title']}).\n"
+                  f"Expected deliverable: {st['expected_deliverable']}\n"
+                  f"Assignee's summary: {str(result.get('summary') or '')[:500]}\n\n" + "\n".join(excerpts) +
+                  "\n\nReject only for concrete defects: missing required content, placeholder text, broken markup "
+                  'or code, or the wrong topic. Reply with JSON only: {"approved": true or false, "notes": "what to fix, or why it passes"}')
+        try:
+            raw = await self._model_call(reviewer, prompt, f"You are {reviewer.name}, the QA lead. Be strict but fair.",
+                                         temperature=0.1, json_mode=True, max_tokens=400)
+            verdict = _extract_json(raw)
+        except Exception as ex:
+            logger.warning(f"QA review model call failed: {ex}")
+            verdict = None
+        if not isinstance(verdict, dict):
+            verdict = {}
+        notes = str(verdict.get("notes") or "").strip()
+        if verdict.get("approved") is False and notes:
+            await self._reason(reviewer, st["task_id"], "thought", f"Rejecting {st['title']}: {notes[:300]}")
+            return False, notes[:1200], reviewer
+        notes = notes[:400] or "Files present and complete."
+        await self._reason(reviewer, st["task_id"], "thought", f"Approving {st['title']}: {notes}")
+        return True, notes, reviewer
+
+    def mission_board(self, mission_id: str) -> Optional[Dict[str, Any]]:
+        """The mission's tickets as a kanban: backlog, in_progress, review, done (and blocked for failures)."""
+        mission = self.get_mission(mission_id)
+        if mission is None:
+            return None
+        columns: Dict[str, List[Dict[str, Any]]] = {c: [] for c in BOARD_COLUMNS}
+        for st in mission.get("subtasks", []):
+            columns[ticket_column(st["status"])].append({
+                "id": st["id"], "task_id": st["task_id"], "title": st["title"], "status": st["status"],
+                "assignee_id": st["assigned_agent_id"], "assignee": st["assigned_agent_name"],
+                "role": st.get("role") or ticket_role(st["assigned_agent_id"]), "progress": st.get("progress", 0),
+                "qa": st.get("qa"), "qa_history": st.get("qa_history", []), "url": st.get("url"),
+                "error": st.get("error"), "final": bool(st.get("final"))})
+        return {"mission_id": mission_id, "title": mission["title"], "status": mission["status"],
+                "lead": {"id": "agent-coordinator", "role": "CEO/PM"}, "columns": columns}
 
     # --- Live reasoning: what each citizen is planning, thinking and doing, as short summaries ---
 
@@ -1970,6 +2058,46 @@ def _rel(p: Path, root: Path) -> str:
         return str(Path(p).resolve().relative_to(Path(root).resolve())).replace("\\", "/")
     except ValueError:
         return Path(p).name
+
+
+BOARD_COLUMNS = ("backlog", "in_progress", "review", "done", "blocked")
+_COLUMN_BY_STATUS = {"PENDING": "backlog", "QUEUED": "backlog", "WORKING": "in_progress", "REVIEW": "review",
+                     "COMPLETED": "done", "FAILED": "blocked", "BLOCKED": "blocked", "CANCELLED": "blocked"}
+_ROLE_BY_AGENT = {"agent-coordinator": "CEO/PM", "agent-analyst": "PM", "agent-designer": "Design",
+                  "agent-webdev": "Frontend", "agent-engineer": "Backend", "agent-architect": "Backend",
+                  "agent-data": "Backend", "agent-qa": "QA", "agent-devops": "DevOps", "agent-security": "Security",
+                  "agent-researcher": "Research", "agent-diagnostic": "QA", "agent-operator": "DevOps"}
+_PLACEHOLDERS = ("lorem ipsum", "[insert ", "todo: add content", "your content here")
+
+
+def ticket_role(agent_id: str) -> str:
+    return _ROLE_BY_AGENT.get(agent_id, "Specialist")
+
+
+def ticket_column(status: str) -> str:
+    return _COLUMN_BY_STATUS.get(status, "backlog")
+
+
+def qa_static_issues(workspace: Path, files: List[str]) -> List[str]:
+    """Defects QA rejects without asking a model: nothing delivered, missing or empty files, placeholder copy,
+    HTML with no markup at all."""
+    if not files:
+        return ["No deliverable files were produced."]
+    issues = []
+    for rel in files[:30]:
+        p = workspace / rel
+        if not p.is_file():
+            issues.append(f"{rel} is missing")
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        low = text.lower()
+        if not text.strip():
+            issues.append(f"{rel} is empty")
+        elif any(ph in low for ph in _PLACEHOLDERS):
+            issues.append(f"{rel} still contains placeholder text")
+        elif rel.lower().endswith((".html", ".htm")) and not any(t in low for t in ("<html", "<body", "<div", "<main")):
+            issues.append(f"{rel} has no HTML document body")
+    return issues
 
 
 def _mission_status(subtasks: List[Dict[str, Any]]) -> str:

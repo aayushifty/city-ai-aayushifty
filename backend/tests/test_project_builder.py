@@ -542,3 +542,10 @@ def test_profile_keys_may_be_nested_and_prompts_carry_no_foreign_example_objects
     import inspect
     src = inspect.getsource(project_builder.ProjectBuilder.requirements)
     assert "rocket" not in src and "launch tower" not in src
+
+
+def test_missing_imports_flags_uninstalled_packages_only(tmp_path):
+    from app.execution.tools import _missing_imports
+    (tmp_path / "models.py").write_text("")
+    src = "import os, json\nimport flask_never_installed_xyz\nfrom fastapi import FastAPI\nfrom models import Todo\nfrom . import x\n"
+    assert _missing_imports(src, tmp_path) == ["flask_never_installed_xyz"]

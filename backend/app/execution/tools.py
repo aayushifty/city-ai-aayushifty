@@ -10,9 +10,12 @@ The citizen's model drives a tool-use loop. Tools fall into two groups.
   SecurityEngine.check_host_command refuses disk/OS-destroying commands before they are even shown.
 """
 
+import ast
 import asyncio
+import importlib.util
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -88,7 +91,33 @@ async def _tool_write_workspace_file(ctx: ToolContext, args: Dict[str, Any]) -> 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     await ctx.note(f"Wrote {rel} ({len(content)} chars)")
-    return f"OK: wrote {len(content)} chars to workspace file '{rel}'."
+    result = f"OK: wrote {len(content)} chars to workspace file '{rel}'."
+    missing = _missing_imports(content, ctx.workspace) if rel.endswith(".py") else []
+    if missing:
+        result += (f"\nWARNING: this file imports {', '.join(missing)}, which is not installed and not a file in "
+                   "your workspace, so running or testing it will fail. Rewrite it using only the standard "
+                   "library and the installed packages.")
+    return result
+
+
+def _missing_imports(source: str, workspace: Path) -> List[str]:
+    """Top-level modules a Python file imports that are neither stdlib, installed, nor in the workspace."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    return sorted(
+        n for n in names
+        if n not in sys.stdlib_module_names
+        and not (workspace / f"{n}.py").exists() and not (workspace / n).is_dir()
+        and importlib.util.find_spec(n) is None
+    )
 
 
 async def _tool_read_file(ctx: ToolContext, args: Dict[str, Any]) -> str:
